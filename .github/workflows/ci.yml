@@ -6,7 +6,8 @@ on:
     branches: [main, master]
 
 jobs:
-  check:
+  # Linux: full test suite
+  linux:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -32,3 +33,40 @@ jobs:
         if: matrix.features == ''
       - name: Test
         run: cargo test
+
+  # macOS: build check (platform_macos.rs コンパイル確認)
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build
+      - name: Test
+        run: cargo test
+
+  # Windows: build check (platform_windows.rs コンパイル確認)
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build
+      - name: Test
+        run: cargo test
+
+  # Java SDK
+  java-sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: ['17', '21']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+      - name: Build Java SDK
+        run: cd sdk/java && mvn -B compile
