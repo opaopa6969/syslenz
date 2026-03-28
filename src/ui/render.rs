@@ -6,10 +6,28 @@ use ratatui::{
     Frame,
 };
 
+use crate::alert;
 use crate::i18n::{self, T};
 use crate::proc::FieldValue;
 use super::app::{App, View};
 use super::graph;
+use super::view_data::{
+    DashboardData, DetailData, DiagnosticRow, DiagnosticsData, ViewColor, ViewData,
+};
+
+/// Convert a ViewColor to a ratatui Color.
+fn view_color_to_color(vc: &ViewColor) -> Color {
+    match vc {
+        ViewColor::Default => Color::White,
+        ViewColor::Green => Color::Green,
+        ViewColor::Blue => Color::Blue,
+        ViewColor::Red => Color::Red,
+        ViewColor::Yellow => Color::Yellow,
+        ViewColor::Cyan => Color::Cyan,
+        ViewColor::Magenta => Color::Magenta,
+        ViewColor::DarkGray => Color::DarkGray,
+    }
+}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     use super::app::HelpLevel;
@@ -46,16 +64,19 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .constraints(outer_constraints)
         .split(f.area());
 
+    // Build the ViewData layer — pre-computed data for the current view.
+    let view_data = app.build_view_data();
+
     // Dashboard and Welcome are full-width (no sidebar)
     let is_fullwidth = matches!(app.view, View::Dashboard | View::Welcome | View::Diagnostics | View::CategoryGuide);
 
     if is_fullwidth {
-        match app.view {
-            View::Dashboard => draw_dashboard(f, app, chunks[0]),
-            View::Welcome => draw_welcome(f, app, chunks[0]),
-            View::Diagnostics => draw_diagnostics(f, app, chunks[0]),
-            View::CategoryGuide => draw_category_guide(f, app, chunks[0]),
-            _ => unreachable!(),
+        match view_data {
+            ViewData::Dashboard(ref data) => draw_dashboard(f, data, app, chunks[0]),
+            ViewData::Welcome(_) => draw_welcome(f, app, chunks[0]),
+            ViewData::Diagnostics(_) => draw_diagnostics(f, app, chunks[0]),
+            ViewData::CategoryGuide(_) => draw_category_guide(f, app, chunks[0]),
+            _ => {}
         }
     } else {
         let main_chunks = Layout::default()
@@ -68,8 +89,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
         draw_sidebar(f, app, main_chunks[0]);
 
-        match app.view {
-            View::Overview | View::Detail | View::Graph => {
+        match view_data {
+            ViewData::Detail(ref data) => {
                 // Check if selected field is numeric — auto-show graph
                 let has_numeric_field = app.current_entry_fields()
                     .and_then(|fields| fields.get(app.selected_field))
@@ -86,14 +107,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                             Constraint::Percentage(40),
                         ])
                         .split(main_chunks[1]);
-                    draw_detail(f, app, content_split[0]);
+                    draw_detail(f, data, app.locale, content_split[0]);
                     draw_auto_graph(f, app, content_split[1]);
                 } else {
-                    draw_detail(f, app, main_chunks[1]);
+                    draw_detail(f, data, app.locale, main_chunks[1]);
                 }
             }
-            View::Diff => draw_diff(f, app, main_chunks[1]),
-            View::TableView => draw_table_view(f, app, main_chunks[1]),
+            ViewData::Diff(_) => draw_diff(f, app, main_chunks[1]),
+            ViewData::TableView(_) => draw_table_view(f, app, main_chunks[1]),
             _ => {}
         }
     }
@@ -127,8 +148,16 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .take(visible_height)
         .map(|(i, key)| {
             let marker = if i == selected { ">" } else { " " };
+            // Check if this source has active alerts
+            let alert_severity = alert::source_max_severity(&app.active_alerts, key);
             let style = if i == selected {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else if alert_severity == Some("critical") {
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else if alert_severity == Some("warning") {
+                Style::default().fg(Color::Yellow)
+            } else if alert_severity == Some("info") {
+                Style::default().fg(Color::Cyan)
             } else if key.starts_with("net/") {
                 Style::default().fg(Color::Cyan)
             } else {
@@ -147,59 +176,55 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(list, area);
 }
 
-fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
-    let source = app.current_source_name();
-    let source_path = app
-        .current
-        .entries
-        .get(source)
-        .map(|e| e.source.as_str())
-        .unwrap_or("");
-    let title = format!(" {} — {} ", source, source_path);
+fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, area: Rect) {
+    let title = format!(" {} — {} ", data.source_name, data.source_path);
 
-    let Some(fields) = app.current_entry_fields() else {
+    if data.fields.is_empty() {
         let p = Paragraph::new("No data")
             .block(Block::default().borders(Borders::ALL).title(title));
         f.render_widget(p, area);
         return;
-    };
+    }
 
     let visible_height = area.height.saturating_sub(5) as usize; // borders + header + margin
 
     // Scroll field list so selected field is visible
-    let field_scroll = if app.selected_field >= app.field_scroll + visible_height {
-        app.selected_field - visible_height + 1
-    } else if app.selected_field < app.field_scroll {
-        app.selected_field
+    let field_scroll = if data.selected_field >= visible_height {
+        data.selected_field - visible_height + 1
     } else {
-        app.field_scroll
+        0
     };
 
-    let rows: Vec<Row> = fields
+    let rows: Vec<Row> = data
+        .fields
         .iter()
         .enumerate()
         .skip(field_scroll)
         .take(visible_height)
         .map(|(i, field)| {
-            let is_selected = i == app.selected_field;
+            let is_selected = i == data.selected_field;
             let style = if is_selected {
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
-            let value_color = match &field.value {
-                FieldValue::Bytes(_) => Color::Green,
-                FieldValue::Integer(_) => Color::Blue,
-                FieldValue::Float(_) => Color::Magenta,
-                FieldValue::Duration(_) => Color::Yellow,
-                FieldValue::Text(_) => Color::White,
-                FieldValue::Table(_) => Color::Cyan,
+            // Override value color if field has an active alert
+            let value_color = match field.alert_severity.as_str() {
+                "critical" => Color::Red,
+                "warning" => Color::Yellow,
+                "info" => Color::Cyan,
+                _ => view_color_to_color(&field.color),
+            };
+            let value_modifier = if field.alert_severity == "critical" {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
             };
 
             // Show drill-in indicator for table fields
-            let name_display = if matches!(field.value, FieldValue::Table(_)) {
-                if app.locale == crate::i18n::Locale::Ja {
+            let name_display = if field.is_table {
+                if locale == crate::i18n::Locale::Ja {
                     format!("{} [Enter で展開]", field.name)
                 } else {
                     format!("{} [Enter to expand]", field.name)
@@ -208,10 +233,18 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
                 field.name.clone()
             };
 
+            // Alert indicator prefix
+            let alert_prefix = match field.alert_severity.as_str() {
+                "critical" => "!! ",
+                "warning" => "! ",
+                "info" => "i ",
+                _ => "",
+            };
+
             Row::new(vec![
-                Cell::from(name_display).style(style),
-                Cell::from(field.value.display()).style(Style::default().fg(value_color)),
-                Cell::from(field.unit.clone().unwrap_or_default())
+                Cell::from(format!("{}{}", alert_prefix, name_display)).style(style),
+                Cell::from(field.value.clone()).style(Style::default().fg(value_color).add_modifier(value_modifier)),
+                Cell::from(field.unit.clone())
                     .style(Style::default().fg(Color::DarkGray)),
                 Cell::from(field.description.clone())
                     .style(Style::default().fg(Color::DarkGray)),
@@ -219,12 +252,9 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let field_count = fields.len();
     let pos_indicator = format!(
-        " {} — {} [{}/{}] ",
-        source, source_path,
-        app.selected_field + 1,
-        field_count
+        " {} — {} {} ",
+        data.source_name, data.source_path, data.position
     );
 
     let table = Table::new(
@@ -239,10 +269,10 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
     .block(Block::default().borders(Borders::ALL).title(pos_indicator))
     .header(
         Row::new(vec![
-            i18n::t(app.locale, T::FIELD),
-            i18n::t(app.locale, T::VALUE),
-            i18n::t(app.locale, T::UNIT),
-            i18n::t(app.locale, T::DESCRIPTION),
+            i18n::t(locale, T::FIELD),
+            i18n::t(locale, T::VALUE),
+            i18n::t(locale, T::UNIT),
+            i18n::t(locale, T::DESCRIPTION),
         ])
             .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
             .bottom_margin(1),
@@ -274,7 +304,12 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let title = format!(" Diff ({} changes) ", app.diffs.len());
+    let offset = app.diff_offset();
+    let title = if offset > 1 {
+        format!(" Diff (T-{}, {} changes) [/] navigate ", offset, app.diffs.len())
+    } else {
+        format!(" Diff ({} changes) [/] navigate ", app.diffs.len())
+    };
     let table = Table::new(
         rows,
         [
@@ -517,13 +552,10 @@ fn get_field_value(app: &App, source: &str, field_name: &str) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
+fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
     let l = app.locale;
-    let _title = if l == crate::i18n::Locale::Ja {
-        " ダッシュボード — システム概要 "
-    } else {
-        " Dashboard — System Overview "
-    };
+    // Detect locale from network headers (first header is "IF" for Japanese)
+    let is_ja = data.network.headers.first().map(|h| h == "IF").unwrap_or(false);
 
     // Split into sections
     let sections = Layout::default()
@@ -539,26 +571,21 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Section 0: Load Average + Uptime (single row)
-    let load1 = get_field_value(app, "loadavg", "load_1min");
-    let load5 = get_field_value(app, "loadavg", "load_5min");
-    let load15 = get_field_value(app, "loadavg", "load_15min");
-    let uptime_val = get_field_value(app, "uptime", "uptime");
-
-    let sec0_style = section_style(app.selected_dashboard_section == 0);
+    let sec0_style = section_style(data.selected_section == 0);
     let load_line = Line::from(vec![
         Span::styled(" Load: ", Style::default().fg(Color::Yellow)),
-        Span::styled(&load1, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(&data.load.load1, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         Span::raw(" / "),
-        Span::styled(&load5, Style::default().fg(Color::Yellow)),
+        Span::styled(&data.load.load5, Style::default().fg(Color::Yellow)),
         Span::raw(" / "),
-        Span::styled(&load15, Style::default().fg(Color::DarkGray)),
+        Span::styled(&data.load.load15, Style::default().fg(Color::DarkGray)),
         Span::raw("    "),
         Span::styled(" Up: ", Style::default().fg(Color::Yellow)),
-        Span::styled(&uptime_val, Style::default().fg(Color::Cyan)),
+        Span::styled(&data.load.uptime, Style::default().fg(Color::Cyan)),
     ]);
     let p = Paragraph::new(load_line)
         .block(Block::default().borders(Borders::ALL)
-            .title(if l == crate::i18n::Locale::Ja { " 負荷 / 稼働時間 " } else { " Load / Uptime " })
+            .title(if is_ja { " 負荷 / 稼働時間 " } else { " Load / Uptime " })
             .border_style(sec0_style));
     f.render_widget(p, sections[0]);
 
@@ -1392,6 +1419,44 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
     ]);
+
+    // Show alert counts in status bar
+    let (info_count, warn_count, crit_count) = alert::count_by_severity(&app.active_alerts);
+    let status = {
+        let mut spans = status.spans;
+        if warn_count > 0 {
+            spans.push(Span::styled(
+                format!(" [!{} WARN]", warn_count),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if crit_count > 0 {
+            spans.push(Span::styled(
+                format!(" [!!{} CRIT]", crit_count),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if info_count > 0 {
+            spans.push(Span::styled(
+                format!(" [i{} INFO]", info_count),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+        Line::from(spans)
+    };
+
+    // Show diff target in status bar when in Diff view
+    let status = if matches!(app.view, View::Diff) && app.diff_target_index.is_some() {
+        let mut spans = status.spans;
+        let offset = app.diff_offset();
+        spans.push(Span::styled(
+            format!(" T-{}", offset),
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        ));
+        Line::from(spans)
+    } else {
+        status
+    };
 
     // Show status message if present
     let status = if let Some(ref msg) = app.status_message {

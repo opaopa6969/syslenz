@@ -1,3 +1,4 @@
+use crate::alert::AlertRule;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -8,6 +9,8 @@ pub struct Config {
     pub otel: OtelConfig,
     pub web: WebConfig,
     pub ssh: SshConfig,
+    #[serde(default)]
+    pub alert: Vec<AlertRule>,
 }
 
 #[derive(Debug, Deserialize)]

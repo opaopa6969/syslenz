@@ -201,6 +201,9 @@ async fn view_handler(
         category_visible_height: 0,
         help_content_lines: 0,
         help_visible_height: 0,
+        diff_target_index: None,
+        alert_rules: Vec::new(),
+        active_alerts: Vec::new(),
     };
 
     let view_data = app.build_view_data();
@@ -308,6 +311,28 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
 #statusbar{{height:28px;background:var(--bg-dark);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 16px;font-size:11px;color:var(--fg-dim);flex-shrink:0;gap:16px;justify-content:space-between}}
 #statusbar .left{{display:flex;gap:16px}}
 #statusbar .right{{display:flex;gap:12px}}
+
+/* Category Guide */
+.cat-layout{{display:flex;gap:16px;height:calc(100vh - 120px)}}
+.cat-sidebar{{width:200px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border);padding-right:12px}}
+.cat-item{{padding:8px 10px;cursor:pointer;font-size:13px;border-radius:6px;margin-bottom:2px;display:flex;align-items:center;gap:8px}}
+.cat-item:hover{{background:var(--bg-hl)}}
+.cat-item.active{{background:var(--bg-sel);color:var(--blue);font-weight:bold}}
+.cat-content{{flex:1;overflow-y:auto;padding:0 8px;font-size:13px;line-height:1.7}}
+.cat-content h4{{color:var(--blue);margin-top:16px;margin-bottom:6px;font-size:14px}}
+.cat-content p,.cat-content pre{{margin-bottom:10px}}
+.cat-content pre{{background:var(--bg-dark);padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;color:var(--cyan)}}
+
+/* Auto-graph inline */
+#auto-graph-panel{{margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg-dark);display:none}}
+#auto-graph-panel.show{{display:block}}
+#auto-graph-panel h4{{color:var(--blue);font-size:12px;margin-bottom:6px}}
+.auto-graph-stats{{display:flex;gap:16px;font-size:11px;color:var(--fg-dim);margin-top:6px}}
+.auto-graph-stats span{{color:var(--fg)}}
+.auto-graph-canvas-wrap{{height:160px}}
+
+/* Enter to expand hint */
+.table-hint{{color:var(--cyan);font-size:11px;margin-left:6px;opacity:0.7}}
 
 /* Toast */
 #toast{{position:fixed;top:20px;right:20px;background:var(--blue);color:var(--bg-dark);padding:8px 16px;border-radius:6px;font-size:13px;display:none;z-index:200;font-weight:bold}}
@@ -437,7 +462,7 @@ const S = {{
   prevSnapshot: null,
   history: [],
   locale: '{initial_locale}',
-  view: 'dashboard',   // dashboard|welcome|detail|diff|diagnostics
+  view: 'dashboard',   // dashboard|welcome|detail|diff|diagnostics|category
   selectedSource: 0,
   selectedField: 0,
   sourceKeys: [],
@@ -453,11 +478,17 @@ const S = {{
   evtSource: null,
   connected: false,
   dashCharts: {{}},
+  viewDataCache: null,
+  autoGraphChart: null,
+  selectedCategory: 0,
+  categoryScroll: 0,
 
   t(key) {{ return I[this.locale][key] || key; }},
 
   setView(v) {{
     if (this.graphField) this.closeGraph();
+    if (this.autoGraphChart) {{ this.autoGraphChart.destroy(); this.autoGraphChart = null; }}
+    if (v === 'classic') v = 'detail';
     this.view = v;
     if (v === 'detail' || v === 'diff') this.focus = 'sidebar';
     else this.focus = 'content';
@@ -568,6 +599,72 @@ function toast(msg) {{
   setTimeout(() => el.classList.remove('show'), 2200);
 }}
 
+// ---- ViewData API ----
+async function fetchViewData(view, locale) {{
+  try {{
+    const url = '/api/view?view=' + encodeURIComponent(view) + '&locale=' + encodeURIComponent(locale || S.locale);
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    S.viewDataCache = data;
+    return data;
+  }} catch (e) {{
+    return null;
+  }}
+}}
+
+// Auto-graph: show graph inline for numeric fields in detail view
+function updateAutoGraph() {{
+  const panel = document.getElementById('auto-graph-panel');
+  if (!panel || S.view !== 'detail') {{ if (panel) panel.classList.remove('show'); return; }}
+
+  const src = S.currentSourceName();
+  const entry = S.snapshot && S.snapshot.entries[src];
+  if (!entry || !entry.fields[S.selectedField]) {{ panel.classList.remove('show'); return; }}
+
+  const f = entry.fields[S.selectedField];
+  const numVal = extractNumeric(f.value);
+  if (numVal === null) {{ panel.classList.remove('show'); return; }}
+
+  // Collect history for this field
+  const allSnaps = [...S.history, S.snapshot].filter(Boolean);
+  const points = [];
+  allSnaps.forEach(snap => {{
+    const v = getFieldNumeric(snap, src, f.name);
+    if (v !== null) points.push({{ t: new Date(snap.timestamp).toLocaleTimeString(), v }});
+  }});
+  if (points.length < 2) {{ panel.classList.remove('show'); return; }}
+
+  const vals = points.map(p => p.v);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const current = vals[vals.length - 1];
+
+  panel.classList.add('show');
+  const title = panel.querySelector('h4');
+  if (title) title.textContent = src + '.' + f.name;
+  const statsEl = panel.querySelector('.auto-graph-stats');
+  if (statsEl) statsEl.innerHTML = 'Min: <span>' + min.toFixed(2) + '</span> | Max: <span>' + max.toFixed(2) + '</span> | Avg: <span>' + avg.toFixed(2) + '</span> | Current: <span>' + current.toFixed(2) + '</span>';
+
+  const canvas = document.getElementById('auto-graph-canvas');
+  if (!canvas) return;
+  if (S.autoGraphChart) S.autoGraphChart.destroy();
+  S.autoGraphChart = new Chart(canvas.getContext('2d'), {{
+    type: 'line',
+    data: {{
+      labels: points.map(d => d.t),
+      datasets: [{{ label: f.name, data: vals, borderColor: '#7aa2f7', backgroundColor: 'rgba(122,162,247,0.1)', fill: true, tension: 0.3, pointRadius: 1 }}]
+    }},
+    options: {{
+      responsive: true, maintainAspectRatio: false,
+      scales: {{ x: {{ ticks: {{ color: '#565f89', maxTicksLimit: 10, font: {{ size: 10 }} }} }}, y: {{ ticks: {{ color: '#565f89', font: {{ size: 10 }} }} }} }},
+      plugins: {{ legend: {{ labels: {{ color: '#c0caf5', font: {{ size: 10 }} }} }} }},
+      animation: {{ duration: 200 }}
+    }}
+  }});
+}}
+
 // ---- SSE ----
 function startSSE() {{
   const dot = document.getElementById('conn-dot');
@@ -662,7 +759,7 @@ function renderSidebar() {{
 
 function renderTopbar() {{
   const t = S.t.bind(S);
-  const viewNames = {{ dashboard: t('dashboard'), detail: t('classic'), diff: t('diff'), diagnostics: t('diagnostics'), welcome: t('welcome') }};
+  const viewNames = {{ dashboard: t('dashboard'), detail: t('classic'), diff: t('diff'), diagnostics: t('diagnostics'), welcome: t('welcome'), category: S.locale === 'ja' ? 'カテゴリガイド' : 'Category Guide' }};
   document.getElementById('view-label').textContent = viewNames[S.view] || S.view;
   document.getElementById('time-display').textContent = S.snapshot ? new Date(S.snapshot.timestamp).toLocaleTimeString() : '--:--:--';
   // highlight active view button
@@ -683,10 +780,11 @@ function renderContent() {{
   const el = document.getElementById('content');
   switch (S.view) {{
     case 'dashboard': el.innerHTML = renderDashboard(); initDashCharts(); break;
-    case 'detail': el.innerHTML = renderDetail(); break;
+    case 'detail': el.innerHTML = renderDetail(); setTimeout(updateAutoGraph, 0); break;
     case 'diff': el.innerHTML = renderDiff(); break;
     case 'diagnostics': el.innerHTML = renderDiagnostics(); break;
     case 'welcome': el.innerHTML = renderWelcome(); break;
+    case 'category': renderCategoryGuide(el); break;
     default: el.innerHTML = renderDashboard(); initDashCharts(); break;
   }}
 }}
@@ -864,11 +962,12 @@ function renderDetail() {{
     const isTable = f.value.Table !== undefined;
     html += '<tr class="' + sel + '" data-fidx="' + i + '">' +
       '<td>' + escapeHtml(f.name) + '</td>' +
-      '<td class="' + cls + ' ' + dc + '">' + display + (isTable ? ' <span style="color:var(--cyan)">[+]</span>' : '') + '</td>' +
+      '<td class="' + cls + ' ' + dc + '">' + display + (isTable ? ' <span class="table-hint">[Enter to expand]</span>' : '') + '</td>' +
       '<td style="color:var(--fg-dim)">' + escapeHtml(f.unit || '') + '</td>' +
       '<td style="color:var(--fg-dim);max-width:300px;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(f.description) + '</td></tr>';
   }});
   html += '</tbody></table>';
+  html += '<div id="auto-graph-panel"><h4></h4><div class="auto-graph-canvas-wrap"><canvas id="auto-graph-canvas"></canvas></div><div class="auto-graph-stats"></div></div>';
 
   // Attach click after render
   setTimeout(() => {{
@@ -954,10 +1053,33 @@ function computeDiffs(oldSnap, newSnap) {{
   return diffs;
 }}
 
-// ---- Diagnostics ----
+// ---- Diagnostics (uses ViewData API for consistent data with TUI) ----
 function renderDiagnostics() {{
   if (!S.snapshot) return '';
   const t = S.t.bind(S);
+  // Kick off ViewData fetch for diagnostics (async, will update when ready)
+  fetchViewData('diagnostics', S.locale).then(data => {{
+    if (!data || data.type !== 'Diagnostics' || S.view !== 'diagnostics') return;
+    const el = document.getElementById('content');
+    if (!el) return;
+    const findings = data.findings || [];
+    if (findings.length === 0) {{
+      el.innerHTML = '<p style="color:var(--green);font-size:14px">&#10003; ' + t('noIssues') + '</p>';
+      return;
+    }}
+    let html = '<h3 style="color:var(--yellow);margin-bottom:10px;font-size:14px">' + escapeHtml(data.title) + '</h3>';
+    html += '<table class="diag-table"><thead><tr><th>' + t('sev') + '</th><th>' + t('source') + '</th><th>' + t('issue') + '</th><th>' + t('desc') + '</th><th>' + t('suggestion') + '</th></tr></thead><tbody>';
+    findings.forEach(f => {{
+      const sevColor = f.severity_color;
+      const sevCls = sevColor === 'Red' ? 'sev-crit' : sevColor === 'Yellow' ? 'sev-warn' : 'sev-info';
+      html += '<tr><td class="' + sevCls + '">' + escapeHtml(f.severity) + '</td><td style="color:var(--fg-dim)">' + escapeHtml(f.source) + '</td>' +
+        '<td class="' + sevCls + '">' + escapeHtml(f.title) + '</td><td>' + escapeHtml(f.detail) + '</td>' +
+        '<td style="color:var(--green)">' + escapeHtml(f.suggestion) + '</td></tr>';
+    }});
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }});
+  // Show local fallback immediately while ViewData loads
   const findings = runDiagnostics(S.snapshot);
   if (findings.length === 0) return '<p style="color:var(--green);font-size:14px">&#10003; ' + t('noIssues') + '</p>';
 
@@ -1013,6 +1135,61 @@ function renderWelcome() {{
   }});
   html += '</div></div>';
   return html;
+}}
+
+// ---- Category Guide (fetches from ViewData API) ----
+async function renderCategoryGuide(el) {{
+  el.innerHTML = '<p style="color:var(--fg-dim)">Loading category guide...</p>';
+  const data = await fetchViewData('category', S.locale);
+  if (!data || data.type !== 'CategoryGuide') {{
+    el.innerHTML = '<p style="color:var(--fg-dim)">Failed to load category guide.</p>';
+    return;
+  }}
+  const cats = data.categories || [];
+  const content = data.content || {{}};
+  const selected = S.selectedCategory;
+
+  let sidebar = '';
+  cats.forEach((cat, i) => {{
+    const cls = i === selected ? 'active' : '';
+    sidebar += '<div class="cat-item ' + cls + '" data-cidx="' + i + '">' + cat.icon + ' ' + escapeHtml(cat.name) + '</div>';
+  }});
+
+  function formatContent(text) {{
+    if (!text) return '';
+    return escapeHtml(text).replace(/\n/g, '<br>');
+  }}
+
+  const overviewLabel = S.locale === 'ja' ? '概要' : 'Overview';
+  const storyLabel = S.locale === 'ja' ? 'ストーリー' : 'Story';
+  const diagLabel = S.locale === 'ja' ? '診断フロー' : 'Diagnostic Flow';
+  const issuesLabel = S.locale === 'ja' ? 'よくある問題' : 'Common Issues';
+
+  let contentHtml = '';
+  if (content.overview) contentHtml += '<h4>' + overviewLabel + '</h4><p>' + formatContent(content.overview) + '</p>';
+  if (content.story) contentHtml += '<h4>' + storyLabel + '</h4><p>' + formatContent(content.story) + '</p>';
+  if (content.diagnostic_flow) contentHtml += '<h4>' + diagLabel + '</h4><pre>' + escapeHtml(content.diagnostic_flow) + '</pre>';
+  if (content.common_issues) contentHtml += '<h4>' + issuesLabel + '</h4><p>' + formatContent(content.common_issues) + '</p>';
+
+  el.innerHTML = '<div class="cat-layout"><div class="cat-sidebar">' + sidebar + '</div><div class="cat-content" id="cat-content-scroll">' + contentHtml + '</div></div>';
+
+  // Restore scroll position
+  const scrollEl = document.getElementById('cat-content-scroll');
+  if (scrollEl) scrollEl.scrollTop = S.categoryScroll;
+
+  // Click handlers for category items
+  el.querySelectorAll('.cat-item').forEach(item => {{
+    item.onclick = () => {{
+      S.selectedCategory = parseInt(item.dataset.cidx);
+      S.categoryScroll = 0;
+      renderCategoryGuide(el);
+    }};
+  }});
+
+  // Track scroll position
+  if (scrollEl) {{
+    scrollEl.onscroll = () => {{ S.categoryScroll = scrollEl.scrollTop; }};
+  }}
 }}
 
 // ---- Help panel ----
@@ -1168,29 +1345,39 @@ document.addEventListener('keydown', (e) => {{
   const inSidebar = S.focus === 'sidebar' && (S.view === 'detail' || S.view === 'diff');
   if (key === 'j' || key === 'ArrowDown') {{
     e.preventDefault();
-    if (inSidebar) {{
+    if (S.view === 'category') {{
+      S.selectedCategory = Math.min(S.selectedCategory + 1, 99);
+      S.categoryScroll = 0;
+      render();
+    }} else if (inSidebar) {{
       S.selectedSource = Math.min(S.selectedSource + 1, S.filteredKeys.length - 1);
       S.selectedField = 0;
       if (S.graphField) S.closeGraph();
+      render();
     }} else if (S.view === 'detail') {{
       const src = S.currentSourceName();
       const entry = S.snapshot && S.snapshot.entries[src];
       if (entry) S.selectedField = Math.min(S.selectedField + 1, entry.fields.length - 1);
+      render();
     }}
-    render();
     return;
   }}
 
   if (key === 'k' || key === 'ArrowUp') {{
     e.preventDefault();
-    if (inSidebar) {{
+    if (S.view === 'category') {{
+      S.selectedCategory = Math.max(S.selectedCategory - 1, 0);
+      S.categoryScroll = 0;
+      render();
+    }} else if (inSidebar) {{
       S.selectedSource = Math.max(S.selectedSource - 1, 0);
       S.selectedField = 0;
       if (S.graphField) S.closeGraph();
+      render();
     }} else if (S.view === 'detail') {{
       S.selectedField = Math.max(S.selectedField - 1, 0);
+      render();
     }}
-    render();
     return;
   }}
 
@@ -1208,6 +1395,44 @@ document.addEventListener('keydown', (e) => {{
       const src = S.currentSourceName();
       const entry = S.snapshot && S.snapshot.entries[src];
       if (entry) S.selectedField = entry.fields.length - 1;
+    }}
+    render();
+    return;
+  }}
+
+  if (key === 'PageDown') {{
+    e.preventDefault();
+    if (S.view === 'category') {{
+      const scrollEl = document.getElementById('cat-content-scroll');
+      if (scrollEl) {{ scrollEl.scrollTop += 300; S.categoryScroll = scrollEl.scrollTop; }}
+    }} else if (inSidebar) {{
+      S.selectedSource = Math.min(S.selectedSource + 10, S.filteredKeys.length - 1);
+      S.selectedField = 0;
+    }} else if (S.view === 'detail') {{
+      const src = S.currentSourceName();
+      const entry = S.snapshot && S.snapshot.entries[src];
+      if (entry) S.selectedField = Math.min(S.selectedField + 10, entry.fields.length - 1);
+    }} else {{
+      const contentEl = document.getElementById('content');
+      if (contentEl) contentEl.scrollTop += 300;
+    }}
+    render();
+    return;
+  }}
+
+  if (key === 'PageUp') {{
+    e.preventDefault();
+    if (S.view === 'category') {{
+      const scrollEl = document.getElementById('cat-content-scroll');
+      if (scrollEl) {{ scrollEl.scrollTop -= 300; S.categoryScroll = scrollEl.scrollTop; }}
+    }} else if (inSidebar) {{
+      S.selectedSource = Math.max(S.selectedSource - 10, 0);
+      S.selectedField = 0;
+    }} else if (S.view === 'detail') {{
+      S.selectedField = Math.max(S.selectedField - 10, 0);
+    }} else {{
+      const contentEl = document.getElementById('content');
+      if (contentEl) contentEl.scrollTop -= 300;
     }}
     render();
     return;

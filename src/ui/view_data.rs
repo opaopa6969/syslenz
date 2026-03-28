@@ -6,6 +6,7 @@
 
 use serde::Serialize;
 
+use crate::alert;
 use crate::i18n::{self, Locale, T};
 use crate::proc::FieldValue;
 
@@ -35,7 +36,36 @@ pub struct DashboardData {
     pub memory: MemorySection,
     pub cpu: CpuSection,
     pub network: NetworkSection,
+    pub system: SystemSection,
     pub selected_section: usize,
+    // Bar graph data
+    pub mem_used_pct: u64,
+    pub mem_bar: String,
+    pub mem_used_bytes: u64,
+    pub mem_total_bytes: u64,
+    pub swap_used_pct: u64,
+    pub swap_bar: String,
+    pub swap_used_bytes: u64,
+    pub swap_total_bytes: u64,
+    pub cached: String,
+    pub buffers: String,
+    pub cpu_used_pct: u64,
+    pub cpu_bar: String,
+    pub cpu_user_pct: u64,
+    pub cpu_sys_pct: u64,
+    pub cpu_io_pct: u64,
+    pub ctx_switches: String,
+    pub procs_running: String,
+    // Sparkline history
+    pub load_history: Vec<u64>,
+    pub mem_history: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SystemSection {
+    pub disk_pct: String,
+    pub temp: String,
+    pub fd_pct: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +135,9 @@ pub struct FieldRow {
     pub description: String,
     pub color: ViewColor,
     pub is_table: bool,
+    /// Alert severity if this field is triggering an alert: "info", "warning", "critical", or empty
+    #[serde(default)]
+    pub alert_severity: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,6 +269,26 @@ fn extract_numeric(value: &FieldValue) -> Option<f64> {
         FieldValue::Duration(d) => Some(*d),
         _ => None,
     }
+}
+
+/// Helper: get a raw bytes value from the current snapshot.
+fn get_bytes_value(app: &App, source: &str, field: &str) -> u64 {
+    app.current
+        .entries
+        .get(source)
+        .and_then(|e| e.fields.iter().find(|f| f.name == field))
+        .and_then(|f| match f.value {
+            FieldValue::Bytes(v) => Some(v),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+/// Helper: build an ASCII bar graph string.
+fn make_bar(pct: u64, width: usize) -> String {
+    let filled = (pct as usize * width / 100).min(width);
+    let empty = width - filled;
+    format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty))
 }
 
 impl App {
@@ -457,6 +510,111 @@ impl App {
             })
             .unwrap_or_default();
 
+        // Compute bar graph data for memory
+        let mem_total = get_bytes_value(self, "meminfo", "MemTotal");
+        let mem_available = get_bytes_value(self, "meminfo", "MemAvailable");
+        let mem_used = mem_total.saturating_sub(mem_available);
+        let mem_pct = if mem_total > 0 {
+            (mem_used as f64 / mem_total as f64 * 100.0) as u64
+        } else {
+            0
+        };
+        let swap_total = get_bytes_value(self, "meminfo", "SwapTotal");
+        let swap_free = get_bytes_value(self, "meminfo", "SwapFree");
+        let swap_used = swap_total.saturating_sub(swap_free);
+        let swap_pct = if swap_total > 0 {
+            (swap_used as f64 / swap_total as f64 * 100.0) as u64
+        } else {
+            0
+        };
+
+        // CPU percentages from cumulative counters
+        let cpu_user_raw: f64 = get_field_value(self, "stat", "cpu_user")
+            .parse()
+            .unwrap_or(0.0);
+        let cpu_sys_raw: f64 = get_field_value(self, "stat", "cpu_system")
+            .parse()
+            .unwrap_or(0.0);
+        let cpu_idle_raw: f64 = get_field_value(self, "stat", "cpu_idle")
+            .parse()
+            .unwrap_or(1.0);
+        let cpu_iowait_raw: f64 = get_field_value(self, "stat", "cpu_iowait")
+            .parse()
+            .unwrap_or(0.0);
+        let cpu_total = cpu_user_raw + cpu_sys_raw + cpu_idle_raw + cpu_iowait_raw;
+        let user_pct = if cpu_total > 0.0 {
+            (cpu_user_raw / cpu_total * 100.0) as u64
+        } else {
+            0
+        };
+        let sys_pct = if cpu_total > 0.0 {
+            (cpu_sys_raw / cpu_total * 100.0) as u64
+        } else {
+            0
+        };
+        let io_pct = if cpu_total > 0.0 {
+            (cpu_iowait_raw / cpu_total * 100.0) as u64
+        } else {
+            0
+        };
+        let cpu_used_pct = (user_pct + sys_pct).min(100);
+
+        // System summary
+        let system = SystemSection {
+            disk_pct: get_field_value(self, "df", "root_use_pct"),
+            temp: get_field_value(self, "thermal", "max_temp"),
+            fd_pct: get_field_value(self, "file-nr", "fd_usage_pct"),
+        };
+
+        // Sparkline history: load
+        let load_history: Vec<u64> = self
+            .snapshots
+            .iter()
+            .chain(std::iter::once(&self.current))
+            .filter_map(|snap| {
+                snap.entries
+                    .get("loadavg")
+                    .and_then(|e| e.fields.iter().find(|f| f.name == "load_1min"))
+                    .and_then(|f| match f.value {
+                        FieldValue::Float(v) => Some((v * 100.0) as u64),
+                        _ => None,
+                    })
+            })
+            .collect();
+
+        // Sparkline history: memory usage %
+        let mem_history: Vec<u64> = self
+            .snapshots
+            .iter()
+            .chain(std::iter::once(&self.current))
+            .filter_map(|snap| {
+                let total = snap
+                    .entries
+                    .get("meminfo")
+                    .and_then(|e| e.fields.iter().find(|f| f.name == "MemTotal"))
+                    .and_then(|f| match f.value {
+                        FieldValue::Bytes(v) => Some(v),
+                        _ => None,
+                    })
+                    .unwrap_or(1);
+                let avail = snap
+                    .entries
+                    .get("meminfo")
+                    .and_then(|e| e.fields.iter().find(|f| f.name == "MemAvailable"))
+                    .and_then(|f| match f.value {
+                        FieldValue::Bytes(v) => Some(v),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let pct = if total > 0 {
+                    ((total - avail) as f64 / total as f64 * 100.0) as u64
+                } else {
+                    0
+                };
+                Some(pct)
+            })
+            .collect();
+
         DashboardData {
             load,
             memory: MemorySection { items: mem_items },
@@ -465,7 +623,27 @@ impl App {
                 headers: net_headers,
                 rows: net_rows,
             },
+            system,
             selected_section: self.selected_dashboard_section,
+            mem_used_pct: mem_pct,
+            mem_bar: make_bar(mem_pct, 30),
+            mem_used_bytes: mem_used,
+            mem_total_bytes: mem_total,
+            swap_used_pct: swap_pct,
+            swap_bar: make_bar(swap_pct, 30),
+            swap_used_bytes: swap_used,
+            swap_total_bytes: swap_total,
+            cached: get_field_value(self, "meminfo", "Cached"),
+            buffers: get_field_value(self, "meminfo", "Buffers"),
+            cpu_used_pct,
+            cpu_bar: make_bar(cpu_used_pct, 30),
+            cpu_user_pct: user_pct,
+            cpu_sys_pct: sys_pct,
+            cpu_io_pct: io_pct,
+            ctx_switches: get_field_value(self, "stat", "context_switches"),
+            procs_running: get_field_value(self, "stat", "processes_running"),
+            load_history,
+            mem_history,
         }
     }
 
@@ -547,6 +725,13 @@ impl App {
                         } else {
                             f.name.clone()
                         };
+                        let alert_sev = alert::field_alert_severity(
+                            &self.active_alerts,
+                            &source_name,
+                            &f.name,
+                        )
+                        .unwrap_or("")
+                        .to_string();
                         FieldRow {
                             name: name_display,
                             value: f.value.display(),
@@ -554,6 +739,7 @@ impl App {
                             description: f.description.clone(),
                             color,
                             is_table,
+                            alert_severity: alert_sev,
                         }
                     })
                     .collect()

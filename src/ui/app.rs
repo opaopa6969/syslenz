@@ -1,3 +1,4 @@
+use crate::alert::{self, AlertEvent, AlertRule};
 use crate::i18n::Locale;
 use crate::proc::{diff_snapshots, DiffItem, FieldValue, Snapshot};
 use std::sync::mpsc;
@@ -87,6 +88,12 @@ pub struct App {
     pub help_content_lines: usize,
     /// Visible height of help panel (set by render)
     pub help_visible_height: usize,
+    /// Time-travel diff: None = compare with previous snapshot, Some(i) = compare with snapshots[i]
+    pub diff_target_index: Option<usize>,
+    /// Alert rules loaded from config
+    pub alert_rules: Vec<AlertRule>,
+    /// Currently active (firing) alerts
+    pub active_alerts: Vec<AlertEvent>,
 }
 
 impl App {
@@ -127,6 +134,9 @@ impl App {
             category_visible_height: 0,
             help_content_lines: 0,
             help_visible_height: 0,
+            diff_target_index: None,
+            alert_rules: Vec::new(),
+            active_alerts: Vec::new(),
         })
     }
 
@@ -170,6 +180,9 @@ impl App {
             category_visible_height: 0,
             help_content_lines: 0,
             help_visible_height: 0,
+            diff_target_index: None,
+            alert_rules: Vec::new(),
+            active_alerts: Vec::new(),
         })
     }
 
@@ -216,6 +229,9 @@ impl App {
             category_visible_height: 0,
             help_content_lines: 0,
             help_visible_height: 0,
+            diff_target_index: None,
+            alert_rules: Vec::new(),
+            active_alerts: Vec::new(),
         })
     }
 
@@ -237,11 +253,47 @@ impl App {
         let old = self.current.clone();
         self.current = new_snapshot;
         self.source_keys = self.current.entries.keys().cloned().collect();
-        self.diffs = diff_snapshots(&old, &self.current);
+
+        // Compute diff against the selected target snapshot (time-travel) or previous
+        let diff_base = if let Some(idx) = self.diff_target_index {
+            self.snapshots.get(idx)
+        } else {
+            // Default: compare with most recent previous snapshot (the one we just replaced)
+            None
+        };
+        self.diffs = if let Some(base) = diff_base {
+            diff_snapshots(base, &self.current)
+        } else {
+            diff_snapshots(&old, &self.current)
+        };
+
         self.snapshots.push(old);
         if self.snapshots.len() > 60 {
             self.snapshots.remove(0);
         }
+
+        // Adjust diff_target_index after buffer shift (if we removed the oldest)
+        if self.snapshots.len() >= 60 {
+            if let Some(ref mut idx) = self.diff_target_index {
+                if *idx == 0 {
+                    self.diff_target_index = None; // target was evicted
+                } else {
+                    *idx -= 1;
+                }
+            }
+        }
+
+        // Evaluate alerts
+        let prev_firing: Vec<usize> = self.active_alerts.iter()
+            .filter(|a| a.firing)
+            .map(|a| a.rule_index)
+            .collect();
+        self.active_alerts = alert::evaluate_alerts(
+            &self.current,
+            &self.alert_rules,
+            &prev_firing,
+        );
+
         self.last_refresh = Instant::now();
         Ok(())
     }
@@ -495,6 +547,75 @@ impl App {
                     self.view = View::Graph;
                 }
             }
+        }
+    }
+
+    /// Move diff comparison target to an older snapshot.
+    pub fn diff_older(&mut self) {
+        if self.snapshots.is_empty() {
+            return;
+        }
+        let last_idx = self.snapshots.len() - 1;
+        match self.diff_target_index {
+            None => {
+                // Currently comparing with the most recent previous snapshot.
+                // Move to the one before that (second to last).
+                if last_idx > 0 {
+                    self.diff_target_index = Some(last_idx - 1);
+                    self.recompute_diff();
+                }
+            }
+            Some(idx) => {
+                if idx > 0 {
+                    self.diff_target_index = Some(idx - 1);
+                    self.recompute_diff();
+                }
+            }
+        }
+    }
+
+    /// Move diff comparison target to a newer snapshot.
+    pub fn diff_newer(&mut self) {
+        if self.snapshots.is_empty() {
+            return;
+        }
+        let last_idx = self.snapshots.len() - 1;
+        match self.diff_target_index {
+            Some(idx) => {
+                if idx >= last_idx {
+                    // Back to default (compare with most recent previous)
+                    self.diff_target_index = None;
+                    self.recompute_diff();
+                } else {
+                    self.diff_target_index = Some(idx + 1);
+                    self.recompute_diff();
+                }
+            }
+            None => {
+                // Already at most recent, do nothing
+            }
+        }
+    }
+
+    /// How many snapshots back we are diffing. 1 = previous (default), N = T-N.
+    pub fn diff_offset(&self) -> usize {
+        match self.diff_target_index {
+            None => 1,
+            Some(idx) => self.snapshots.len().saturating_sub(idx),
+        }
+    }
+
+    /// Recompute diffs based on current diff_target_index.
+    fn recompute_diff(&mut self) {
+        if let Some(idx) = self.diff_target_index {
+            if let Some(base) = self.snapshots.get(idx) {
+                self.diffs = diff_snapshots(base, &self.current);
+                return;
+            }
+        }
+        // Default: compare with last snapshot
+        if let Some(last) = self.snapshots.last() {
+            self.diffs = diff_snapshots(last, &self.current);
         }
     }
 

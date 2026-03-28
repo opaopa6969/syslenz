@@ -1,3 +1,4 @@
+mod alert;
 mod config;
 mod diagnostics;
 mod education;
@@ -191,7 +192,8 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic);
+    let alert_rules = cfg.alert;
+    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, alert_rules);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -211,6 +213,7 @@ fn run(
     connect_addr: Option<String>,
     locale: i18n::Locale,
     start_classic: bool,
+    alert_rules: Vec<alert::AlertRule>,
 ) -> Result<()> {
     let mut app = if let Some(host) = ssh_host {
         let rx = remote::stream_remote(&host, 1000)?;
@@ -229,6 +232,7 @@ fn run(
         App::new()?
     };
     app.locale = locale;
+    app.alert_rules = alert_rules;
     if start_classic {
         app.view = ui::app::View::Overview;
         app.focus = ui::app::Focus::Sidebar;
@@ -288,6 +292,16 @@ fn run(
                             app.focus = ui::app::Focus::Sidebar;
                         }
                         app.start_search();
+                    }
+                    KeyCode::Char('[') => {
+                        if matches!(app.view, ui::app::View::Diff) {
+                            app.diff_older();
+                        }
+                    }
+                    KeyCode::Char(']') => {
+                        if matches!(app.view, ui::app::View::Diff) {
+                            app.diff_newer();
+                        }
                     }
                     KeyCode::Char('d') => {
                         app.view = ui::app::View::Diff;
