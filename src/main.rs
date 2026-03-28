@@ -281,7 +281,14 @@ fn run(
                     KeyCode::Backspace => app.go_back(),
                     KeyCode::PageUp => app.scroll_page_up(),
                     KeyCode::PageDown => app.scroll_page_down(),
-                    KeyCode::Char('/') => app.start_search(),
+                    KeyCode::Char('/') => {
+                        // Search requires Classic mode (sidebar)
+                        if matches!(app.view, ui::app::View::Dashboard | ui::app::View::Welcome | ui::app::View::Diagnostics | ui::app::View::CategoryGuide) {
+                            app.view = ui::app::View::Overview;
+                            app.focus = ui::app::Focus::Sidebar;
+                        }
+                        app.start_search();
+                    }
                     KeyCode::Char('d') => {
                         app.view = ui::app::View::Diff;
                         app.focus = ui::app::Focus::Content;
@@ -347,11 +354,17 @@ fn run(
                         }
                     }
                     KeyCode::Tab => {
-                        app.focus = if app.focus == ui::app::Focus::Sidebar {
-                            ui::app::Focus::Content
+                        // If in a fullwidth view, switch to Classic mode first
+                        if matches!(app.view, ui::app::View::Dashboard | ui::app::View::Welcome | ui::app::View::Diagnostics | ui::app::View::CategoryGuide) {
+                            app.view = ui::app::View::Overview;
+                            app.focus = ui::app::Focus::Sidebar;
                         } else {
-                            ui::app::Focus::Sidebar
-                        };
+                            app.focus = if app.focus == ui::app::Focus::Sidebar {
+                                ui::app::Focus::Content
+                            } else {
+                                ui::app::Focus::Sidebar
+                            };
+                        }
                     }
                     _ => {}
                 }
