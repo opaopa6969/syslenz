@@ -509,10 +509,10 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // loadavg + uptime
-            Constraint::Length(8),  // meminfo
-            Constraint::Length(8),  // CPU stat
+            Constraint::Length(5),  // meminfo (bar graphs)
+            Constraint::Length(5),  // CPU stat (bar graphs)
             Constraint::Length(9),  // net/dev
-            Constraint::Length(3),  // disk + temp + fd (summary row)
+            Constraint::Length(3),  // disk + temp + fd
             Constraint::Min(1),    // padding
         ])
         .split(area);
@@ -541,48 +541,97 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
             .border_style(sec0_style));
     f.render_widget(p, sections[0]);
 
-    // Section 1: Memory
+    // Section 1: Memory with usage bar
     let sec1_style = section_style(app.selected_dashboard_section == 1);
-    let mem_fields = ["MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SwapTotal", "SwapFree"];
-    let mem_rows: Vec<Row> = mem_fields.iter().filter_map(|name| {
-        app.current.entries.get("meminfo")
-            .and_then(|e| e.fields.iter().find(|f| f.name == *name))
-            .map(|f| {
-                Row::new(vec![
-                    Cell::from(f.name.clone()),
-                    Cell::from(f.value.display()).style(Style::default().fg(Color::Green)),
-                ])
-            })
-    }).collect();
-    let mem_table = Table::new(mem_rows, [Constraint::Length(16), Constraint::Min(14)])
+    let mem_total = get_bytes_value(app, "meminfo", "MemTotal");
+    let mem_available = get_bytes_value(app, "meminfo", "MemAvailable");
+    let mem_used = mem_total.saturating_sub(mem_available);
+    let mem_pct = if mem_total > 0 { (mem_used as f64 / mem_total as f64 * 100.0) as u64 } else { 0 };
+    let swap_total = get_bytes_value(app, "meminfo", "SwapTotal");
+    let swap_free = get_bytes_value(app, "meminfo", "SwapFree");
+    let swap_used = swap_total.saturating_sub(swap_free);
+    let swap_pct = if swap_total > 0 { (swap_used as f64 / swap_total as f64 * 100.0) as u64 } else { 0 };
+
+    let mem_bar = make_bar(mem_pct, 30);
+    let swap_bar = make_bar(swap_pct, 30);
+    let cached_val = get_field_value(app, "meminfo", "Cached");
+    let buffers_val = get_field_value(app, "meminfo", "Buffers");
+
+    let mem_lines = vec![
+        Line::from(vec![
+            Span::styled(" RAM  ", Style::default().fg(Color::Yellow)),
+            Span::styled(&mem_bar, bar_color(mem_pct)),
+            Span::styled(format!(" {}%", mem_pct), bar_color(mem_pct)),
+            Span::styled(format!("  {} / {}", format_bytes_short(mem_used), format_bytes_short(mem_total)), Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(vec![
+            Span::styled(" Swap ", Style::default().fg(Color::Yellow)),
+            Span::styled(&swap_bar, bar_color(swap_pct)),
+            Span::styled(format!(" {}%", swap_pct), bar_color(swap_pct)),
+            Span::styled(format!("  {} / {}", format_bytes_short(swap_used), format_bytes_short(swap_total)), Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(vec![
+            Span::styled(" Cache: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&cached_val),
+            Span::styled("  Buf: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&buffers_val),
+        ]),
+    ];
+    let mem_p = Paragraph::new(mem_lines)
         .block(Block::default().borders(Borders::ALL)
             .title(if l == crate::i18n::Locale::Ja { " メモリ " } else { " Memory " })
             .border_style(sec1_style));
-    f.render_widget(mem_table, sections[1]);
+    f.render_widget(mem_p, sections[1]);
 
-    // Section 2: CPU stat
+    // Section 2: CPU stat with usage bars
     let sec2_style = section_style(app.selected_dashboard_section == 2);
-    let cpu_fields = ["cpu_user", "cpu_system", "cpu_idle", "cpu_iowait", "context_switches", "processes_running"];
-    let cpu_rows: Vec<Row> = cpu_fields.iter().filter_map(|name| {
-        app.current.entries.get("stat")
-            .and_then(|e| e.fields.iter().find(|f| f.name == *name))
-            .map(|f| {
-                let color = match f.name.as_str() {
-                    "cpu_idle" => Color::Green,
-                    "cpu_iowait" => Color::Red,
-                    _ => Color::Blue,
-                };
-                Row::new(vec![
-                    Cell::from(f.name.clone()),
-                    Cell::from(f.value.display()).style(Style::default().fg(color)),
-                ])
-            })
-    }).collect();
-    let cpu_table = Table::new(cpu_rows, [Constraint::Length(20), Constraint::Min(14)])
+    let cpu_user = get_float_value(app, "stat", "cpu_usage_pct").unwrap_or(0.0) as u64;
+    let cpu_user_raw = get_field_value(app, "stat", "cpu_user");
+    let cpu_sys_raw = get_field_value(app, "stat", "cpu_system");
+    let cpu_idle_raw = get_field_value(app, "stat", "cpu_idle");
+    let cpu_iowait_raw = get_field_value(app, "stat", "cpu_iowait");
+    let ctx_switches = get_field_value(app, "stat", "context_switches");
+    let procs_running = get_field_value(app, "stat", "processes_running");
+
+    // Calculate rough percentages from cumulative counters for bar display
+    let cpu_u: f64 = cpu_user_raw.parse().unwrap_or(0.0);
+    let cpu_s: f64 = cpu_sys_raw.parse().unwrap_or(0.0);
+    let cpu_i: f64 = cpu_idle_raw.parse().unwrap_or(1.0);
+    let cpu_w: f64 = cpu_iowait_raw.parse().unwrap_or(0.0);
+    let cpu_total = cpu_u + cpu_s + cpu_i + cpu_w;
+    let user_pct = if cpu_total > 0.0 { (cpu_u / cpu_total * 100.0) as u64 } else { 0 };
+    let sys_pct = if cpu_total > 0.0 { (cpu_s / cpu_total * 100.0) as u64 } else { 0 };
+    let io_pct = if cpu_total > 0.0 { (cpu_w / cpu_total * 100.0) as u64 } else { 0 };
+    let used_pct = user_pct + sys_pct;
+
+    let cpu_bar = make_bar(used_pct.min(100), 30);
+
+    let cpu_lines = vec![
+        Line::from(vec![
+            Span::styled(" CPU  ", Style::default().fg(Color::Yellow)),
+            Span::styled(&cpu_bar, bar_color(used_pct)),
+            Span::styled(format!(" {}%", used_pct), bar_color(used_pct)),
+        ]),
+        Line::from(vec![
+            Span::styled("  usr:", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}%", user_pct), Style::default().fg(Color::Blue)),
+            Span::styled("  sys:", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}%", sys_pct), Style::default().fg(Color::Magenta)),
+            Span::styled("  iow:", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}%", io_pct), Style::default().fg(if io_pct > 10 { Color::Red } else { Color::DarkGray })),
+        ]),
+        Line::from(vec![
+            Span::styled("  ctx:", Style::default().fg(Color::DarkGray)),
+            Span::raw(&ctx_switches),
+            Span::styled("  run:", Style::default().fg(Color::DarkGray)),
+            Span::raw(&procs_running),
+        ]),
+    ];
+    let cpu_p = Paragraph::new(cpu_lines)
         .block(Block::default().borders(Borders::ALL)
             .title(if l == crate::i18n::Locale::Ja { " CPU " } else { " CPU " })
             .border_style(sec2_style));
-    f.render_widget(cpu_table, sections[2]);
+    f.render_widget(cpu_p, sections[2]);
 
     // Section 3: Network (net/dev table)
     let sec3_style = section_style(app.selected_dashboard_section == 3);
@@ -647,6 +696,45 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
             .title(if l == crate::i18n::Locale::Ja { " ディスク / 温度 / FD " } else { " Disk / Temp / FD " })
             .border_style(sec4_style));
     f.render_widget(p, sections[4]);
+}
+
+fn make_bar(pct: u64, width: usize) -> String {
+    let filled = (pct as usize * width / 100).min(width);
+    let empty = width - filled;
+    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+}
+
+fn bar_color(pct: u64) -> Style {
+    if pct > 90 { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
+    else if pct > 70 { Style::default().fg(Color::Yellow) }
+    else { Style::default().fg(Color::Green) }
+}
+
+fn get_bytes_value(app: &App, source: &str, field: &str) -> u64 {
+    app.current.entries.get(source)
+        .and_then(|e| e.fields.iter().find(|f| f.name == field))
+        .and_then(|f| match f.value {
+            FieldValue::Bytes(v) => Some(v),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+fn get_float_value(app: &App, source: &str, field: &str) -> Option<f64> {
+    app.current.entries.get(source)
+        .and_then(|e| e.fields.iter().find(|f| f.name == field))
+        .and_then(|f| match f.value {
+            FieldValue::Float(v) => Some(v),
+            _ => None,
+        })
+}
+
+fn format_bytes_short(bytes: u64) -> String {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= GIB { format!("{:.1}G", bytes as f64 / GIB as f64) }
+    else if bytes >= MIB { format!("{:.0}M", bytes as f64 / MIB as f64) }
+    else { format!("{}K", bytes / 1024) }
 }
 
 fn section_style(selected: bool) -> Style {
