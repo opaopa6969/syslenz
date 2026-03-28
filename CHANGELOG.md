@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] - 2026-03-29
+
+### Added
+- Time-travel diff: `[` and `]` keys to compare with any past snapshot (T-N indicator)
+- Alert system: configurable `[[alert]]` rules in config.toml with TUI display (status bar, sidebar, field markers)
+- ViewData unified UI layer: TUI Dashboard/Detail/Diagnostics now render from shared ViewData structs
+- Web UI ViewData integration: fetches `/api/view` for consistent display with TUI
+- Auto-graph in Web UI: numeric fields show Chart.js chart automatically on selection
+- TUI Dashboard bar graphs: RAM/Swap/CPU with ████░░░░ visualization
+- TUI Dashboard sparkline graphs: load + memory history (▁▂▃▄▅▆▇█)
+- Auto-sparkline in Detail view: numeric fields show graph below field table automatically
+- Visible search bar: `/` shows search input with cursor in status bar
+- AA line charts in TUI using block characters
+- PgUp/PgDn in Web UI for all views
+- `[Enter to expand]` indicator for table fields (TUI + Web)
+- i18n expansion: 390/600 fields covered in EN/JA 3-level descriptions
+- All parser fields now have non-empty English descriptions (600/600)
+- vmstat: 165 fields with full descriptions
+- meminfo, net_snmp, net_netstat, pressure: comprehensive descriptions added
+- 48 Playwright Web UI automated tests with video recording
+- alert.rs with condition parser and debounce support
+
+### Changed
+- Dashboard is now default view (Classic mode via `O` key)
+- Graph view shows as split panel below detail (not full screen replacement)
+- Search from Dashboard auto-switches to Classic mode
+- Tab from fullwidth views switches to Classic mode
+
+### Fixed
+- Load average display (load_1min field name mismatch)
+- Dashboard network section excessive whitespace
+- Web UI missing keybindings: C (Category Guide), W (Welcome), e (Export)
+- Help EXTRA panel height now dynamic based on content
+
 ## [1.0.0] - 2026-03-28
 
 ### Added

@@ -10,9 +10,8 @@ use crate::alert;
 use crate::i18n::{self, T};
 use crate::proc::FieldValue;
 use super::app::{App, View};
-use super::graph;
 use super::view_data::{
-    DashboardData, DetailData, DiagnosticRow, DiagnosticsData, ViewColor, ViewData,
+    DashboardData, DetailData, DiagnosticsData, ViewColor, ViewData,
 };
 
 /// Convert a ViewColor to a ratatui Color.
@@ -72,9 +71,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     if is_fullwidth {
         match view_data {
-            ViewData::Dashboard(ref data) => draw_dashboard(f, data, app, chunks[0]),
+            ViewData::Dashboard(ref data) => draw_dashboard(f, data, chunks[0]),
             ViewData::Welcome(_) => draw_welcome(f, app, chunks[0]),
-            ViewData::Diagnostics(_) => draw_diagnostics(f, app, chunks[0]),
+            ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app.locale, chunks[0]),
             ViewData::CategoryGuide(_) => draw_category_guide(f, app, chunks[0]),
             _ => {}
         }
@@ -545,15 +544,7 @@ fn draw_welcome(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(p, area);
 }
 
-fn get_field_value(app: &App, source: &str, field_name: &str) -> String {
-    app.current.entries.get(source)
-        .and_then(|e| e.fields.iter().find(|f| f.name == field_name))
-        .map(|f| f.value.display())
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
-    let l = app.locale;
+fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
     // Detect locale from network headers (first header is "IF" for Japanese)
     let is_ja = data.network.headers.first().map(|h| h == "IF").unwrap_or(false);
 
@@ -590,124 +581,76 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
     f.render_widget(p, sections[0]);
 
     // Section 1: Memory with usage bar
-    let sec1_style = section_style(app.selected_dashboard_section == 1);
-    let mem_total = get_bytes_value(app, "meminfo", "MemTotal");
-    let mem_available = get_bytes_value(app, "meminfo", "MemAvailable");
-    let mem_used = mem_total.saturating_sub(mem_available);
-    let mem_pct = if mem_total > 0 { (mem_used as f64 / mem_total as f64 * 100.0) as u64 } else { 0 };
-    let swap_total = get_bytes_value(app, "meminfo", "SwapTotal");
-    let swap_free = get_bytes_value(app, "meminfo", "SwapFree");
-    let swap_used = swap_total.saturating_sub(swap_free);
-    let swap_pct = if swap_total > 0 { (swap_used as f64 / swap_total as f64 * 100.0) as u64 } else { 0 };
-
-    let mem_bar = make_bar(mem_pct, 30);
-    let swap_bar = make_bar(swap_pct, 30);
-    let cached_val = get_field_value(app, "meminfo", "Cached");
-    let buffers_val = get_field_value(app, "meminfo", "Buffers");
-
+    let sec1_style = section_style(data.selected_section == 1);
     let mem_lines = vec![
         Line::from(vec![
             Span::styled(" RAM  ", Style::default().fg(Color::Yellow)),
-            Span::styled(&mem_bar, bar_color(mem_pct)),
-            Span::styled(format!(" {}%", mem_pct), bar_color(mem_pct)),
-            Span::styled(format!("  {} / {}", format_bytes_short(mem_used), format_bytes_short(mem_total)), Style::default().fg(Color::DarkGray)),
+            Span::styled(&data.mem_bar, bar_color(data.mem_used_pct)),
+            Span::styled(format!(" {}%", data.mem_used_pct), bar_color(data.mem_used_pct)),
+            Span::styled(format!("  {} / {}", format_bytes_short(data.mem_used_bytes), format_bytes_short(data.mem_total_bytes)), Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(vec![
             Span::styled(" Swap ", Style::default().fg(Color::Yellow)),
-            Span::styled(&swap_bar, bar_color(swap_pct)),
-            Span::styled(format!(" {}%", swap_pct), bar_color(swap_pct)),
-            Span::styled(format!("  {} / {}", format_bytes_short(swap_used), format_bytes_short(swap_total)), Style::default().fg(Color::DarkGray)),
+            Span::styled(&data.swap_bar, bar_color(data.swap_used_pct)),
+            Span::styled(format!(" {}%", data.swap_used_pct), bar_color(data.swap_used_pct)),
+            Span::styled(format!("  {} / {}", format_bytes_short(data.swap_used_bytes), format_bytes_short(data.swap_total_bytes)), Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(vec![
             Span::styled(" Cache: ", Style::default().fg(Color::DarkGray)),
-            Span::raw(&cached_val),
+            Span::raw(&data.cached),
             Span::styled("  Buf: ", Style::default().fg(Color::DarkGray)),
-            Span::raw(&buffers_val),
+            Span::raw(&data.buffers),
         ]),
     ];
     let mem_p = Paragraph::new(mem_lines)
         .block(Block::default().borders(Borders::ALL)
-            .title(if l == crate::i18n::Locale::Ja { " メモリ " } else { " Memory " })
+            .title(if is_ja { " メモリ " } else { " Memory " })
             .border_style(sec1_style));
     f.render_widget(mem_p, sections[1]);
 
     // Section 2: CPU stat with usage bars
-    let sec2_style = section_style(app.selected_dashboard_section == 2);
-    let cpu_user = get_float_value(app, "stat", "cpu_usage_pct").unwrap_or(0.0) as u64;
-    let cpu_user_raw = get_field_value(app, "stat", "cpu_user");
-    let cpu_sys_raw = get_field_value(app, "stat", "cpu_system");
-    let cpu_idle_raw = get_field_value(app, "stat", "cpu_idle");
-    let cpu_iowait_raw = get_field_value(app, "stat", "cpu_iowait");
-    let ctx_switches = get_field_value(app, "stat", "context_switches");
-    let procs_running = get_field_value(app, "stat", "processes_running");
-
-    // Calculate rough percentages from cumulative counters for bar display
-    let cpu_u: f64 = cpu_user_raw.parse().unwrap_or(0.0);
-    let cpu_s: f64 = cpu_sys_raw.parse().unwrap_or(0.0);
-    let cpu_i: f64 = cpu_idle_raw.parse().unwrap_or(1.0);
-    let cpu_w: f64 = cpu_iowait_raw.parse().unwrap_or(0.0);
-    let cpu_total = cpu_u + cpu_s + cpu_i + cpu_w;
-    let user_pct = if cpu_total > 0.0 { (cpu_u / cpu_total * 100.0) as u64 } else { 0 };
-    let sys_pct = if cpu_total > 0.0 { (cpu_s / cpu_total * 100.0) as u64 } else { 0 };
-    let io_pct = if cpu_total > 0.0 { (cpu_w / cpu_total * 100.0) as u64 } else { 0 };
-    let used_pct = user_pct + sys_pct;
-
-    let cpu_bar = make_bar(used_pct.min(100), 30);
-
+    let sec2_style = section_style(data.selected_section == 2);
     let cpu_lines = vec![
         Line::from(vec![
             Span::styled(" CPU  ", Style::default().fg(Color::Yellow)),
-            Span::styled(&cpu_bar, bar_color(used_pct)),
-            Span::styled(format!(" {}%", used_pct), bar_color(used_pct)),
+            Span::styled(&data.cpu_bar, bar_color(data.cpu_used_pct)),
+            Span::styled(format!(" {}%", data.cpu_used_pct), bar_color(data.cpu_used_pct)),
         ]),
         Line::from(vec![
             Span::styled("  usr:", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}%", user_pct), Style::default().fg(Color::Blue)),
+            Span::styled(format!("{}%", data.cpu_user_pct), Style::default().fg(Color::Blue)),
             Span::styled("  sys:", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}%", sys_pct), Style::default().fg(Color::Magenta)),
+            Span::styled(format!("{}%", data.cpu_sys_pct), Style::default().fg(Color::Magenta)),
             Span::styled("  iow:", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}%", io_pct), Style::default().fg(if io_pct > 10 { Color::Red } else { Color::DarkGray })),
+            Span::styled(format!("{}%", data.cpu_io_pct), Style::default().fg(if data.cpu_io_pct > 10 { Color::Red } else { Color::DarkGray })),
         ]),
         Line::from(vec![
             Span::styled("  ctx:", Style::default().fg(Color::DarkGray)),
-            Span::raw(&ctx_switches),
+            Span::raw(&data.ctx_switches),
             Span::styled("  run:", Style::default().fg(Color::DarkGray)),
-            Span::raw(&procs_running),
+            Span::raw(&data.procs_running),
         ]),
     ];
     let cpu_p = Paragraph::new(cpu_lines)
         .block(Block::default().borders(Borders::ALL)
-            .title(if l == crate::i18n::Locale::Ja { " CPU " } else { " CPU " })
+            .title(" CPU ")
             .border_style(sec2_style));
     f.render_widget(cpu_p, sections[2]);
 
     // Section 3: Network (net/dev table)
-    let sec3_style = section_style(app.selected_dashboard_section == 3);
-    let net_rows: Vec<Row> = app.current.entries.get("net/dev")
-        .and_then(|e| e.fields.iter().find(|f| matches!(f.value, FieldValue::Table(_))))
-        .map(|f| {
-            if let FieldValue::Table(ref data) = f.value {
-                data.iter().take(6).map(|row| {
-                    let cells: Vec<Cell> = row.iter().map(|c| Cell::from(c.as_str())).collect();
-                    Row::new(cells)
-                }).collect()
-            } else {
-                vec![]
-            }
-        })
-        .unwrap_or_default();
+    let sec3_style = section_style(data.selected_section == 3);
+    let net_rows: Vec<Row> = data.network.rows.iter().map(|row| {
+        let cells: Vec<Cell> = row.iter().map(|c| Cell::from(c.as_str())).collect();
+        Row::new(cells)
+    }).collect();
 
-    let net_headers = if l == crate::i18n::Locale::Ja {
-        vec!["IF", "RX バイト", "RX パケット", "TX バイト", "TX パケット"]
-    } else {
-        vec!["Interface", "RX Bytes", "RX Pkts", "TX Bytes", "TX Pkts"]
-    };
+    let net_headers: Vec<&str> = data.network.headers.iter().map(|s| s.as_str()).collect();
     let net_table = Table::new(net_rows, vec![
         Constraint::Length(12), Constraint::Length(14), Constraint::Length(12),
         Constraint::Length(14), Constraint::Min(12),
     ])
     .block(Block::default().borders(Borders::ALL)
-        .title(if l == crate::i18n::Locale::Ja { " ネットワーク " } else { " Network " })
+        .title(if is_ja { " ネットワーク " } else { " Network " })
         .border_style(sec3_style))
     .header(Row::new(net_headers)
         .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
@@ -715,10 +658,10 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
     f.render_widget(net_table, sections[3]);
 
     // Section 4: Disk + Temperature + FD (summary line)
-    let sec4_style = section_style(app.selected_dashboard_section == 4);
-    let disk_pct = get_field_value(app, "df", "root_use_pct");
-    let temp = get_field_value(app, "thermal", "max_temp");
-    let fd_pct = get_field_value(app, "file-nr", "fd_usage_pct");
+    let sec4_style = section_style(data.selected_section == 4);
+    let disk_pct = &data.system.disk_pct;
+    let temp = &data.system.temp;
+    let fd_pct = &data.system.fd_pct;
 
     let sys_line = Line::from(vec![
         Span::styled(" Disk: ", Style::default().fg(Color::Yellow)),
@@ -729,7 +672,7 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
         Span::raw("    "),
         Span::styled(" Temp: ", Style::default().fg(Color::Yellow)),
         Span::styled(
-            if temp == "-" { "N/A".to_string() } else { format!("{}C", temp) },
+            if *temp == "-" { "N/A".to_string() } else { format!("{}C", temp) },
             Style::default().fg(if temp.parse::<f64>().unwrap_or(0.0) > 75.0 { Color::Red } else { Color::Cyan }),
         ),
         Span::raw("    "),
@@ -741,7 +684,7 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
     ]);
     let p = Paragraph::new(sys_line)
         .block(Block::default().borders(Borders::ALL)
-            .title(if l == crate::i18n::Locale::Ja { " ディスク / 温度 / FD " } else { " Disk / Temp / FD " })
+            .title(if is_ja { " ディスク / 温度 / FD " } else { " Disk / Temp / FD " })
             .border_style(sec4_style));
     f.render_widget(p, sections[4]);
 
@@ -757,56 +700,28 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, app: &App, area: Rect) {
             .split(graph_area);
 
         // Load history sparkline
-        let load_data: Vec<u64> = app.snapshots.iter()
-            .chain(std::iter::once(&app.current))
-            .filter_map(|snap| {
-                snap.entries.get("loadavg")
-                    .and_then(|e| e.fields.iter().find(|f| f.name == "load_1min"))
-                    .and_then(|f| match f.value {
-                        FieldValue::Float(v) => Some((v * 100.0) as u64),
-                        _ => None,
-                    })
-            })
-            .collect();
-
-        let load_title = if l == crate::i18n::Locale::Ja {
-            format!(" 負荷 ({}件) ", load_data.len())
+        let load_title = if is_ja {
+            format!(" 負荷 ({}件) ", data.load_history.len())
         } else {
-            format!(" Load ({} pts) ", load_data.len())
+            format!(" Load ({} pts) ", data.load_history.len())
         };
         let load_sparkline = ratatui::widgets::Sparkline::default()
             .block(Block::default().borders(Borders::ALL).title(load_title)
                 .border_style(Style::default().fg(Color::DarkGray)))
-            .data(&load_data)
+            .data(&data.load_history)
             .style(Style::default().fg(Color::Yellow));
         f.render_widget(load_sparkline, graph_chunks[0]);
 
         // Memory usage % history sparkline
-        let mem_data: Vec<u64> = app.snapshots.iter()
-            .chain(std::iter::once(&app.current))
-            .filter_map(|snap| {
-                let total = snap.entries.get("meminfo")
-                    .and_then(|e| e.fields.iter().find(|f| f.name == "MemTotal"))
-                    .and_then(|f| match f.value { FieldValue::Bytes(v) => Some(v), _ => None })
-                    .unwrap_or(1);
-                let avail = snap.entries.get("meminfo")
-                    .and_then(|e| e.fields.iter().find(|f| f.name == "MemAvailable"))
-                    .and_then(|f| match f.value { FieldValue::Bytes(v) => Some(v), _ => None })
-                    .unwrap_or(0);
-                let used_pct = if total > 0 { ((total - avail) as f64 / total as f64 * 100.0) as u64 } else { 0 };
-                Some(used_pct)
-            })
-            .collect();
-
-        let mem_title = if l == crate::i18n::Locale::Ja {
-            format!(" メモリ使用率 ({}件) ", mem_data.len())
+        let mem_title = if is_ja {
+            format!(" メモリ使用率 ({}件) ", data.mem_history.len())
         } else {
-            format!(" Memory % ({} pts) ", mem_data.len())
+            format!(" Memory % ({} pts) ", data.mem_history.len())
         };
         let mem_sparkline = ratatui::widgets::Sparkline::default()
             .block(Block::default().borders(Borders::ALL).title(mem_title)
                 .border_style(Style::default().fg(Color::DarkGray)))
-            .data(&mem_data)
+            .data(&data.mem_history)
             .style(Style::default().fg(Color::Green));
         f.render_widget(mem_sparkline, graph_chunks[1]);
     }
@@ -885,35 +800,10 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(sparkline, area);
 }
 
-fn make_bar(pct: u64, width: usize) -> String {
-    let filled = (pct as usize * width / 100).min(width);
-    let empty = width - filled;
-    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
-}
-
 fn bar_color(pct: u64) -> Style {
     if pct > 90 { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
     else if pct > 70 { Style::default().fg(Color::Yellow) }
     else { Style::default().fg(Color::Green) }
-}
-
-fn get_bytes_value(app: &App, source: &str, field: &str) -> u64 {
-    app.current.entries.get(source)
-        .and_then(|e| e.fields.iter().find(|f| f.name == field))
-        .and_then(|f| match f.value {
-            FieldValue::Bytes(v) => Some(v),
-            _ => None,
-        })
-        .unwrap_or(0)
-}
-
-fn get_float_value(app: &App, source: &str, field: &str) -> Option<f64> {
-    app.current.entries.get(source)
-        .and_then(|e| e.fields.iter().find(|f| f.name == field))
-        .and_then(|f| match f.value {
-            FieldValue::Float(v) => Some(v),
-            _ => None,
-        })
 }
 
 fn format_bytes_short(bytes: u64) -> String {
@@ -932,21 +822,16 @@ fn section_style(selected: bool) -> Style {
     }
 }
 
-fn draw_diagnostics(f: &mut Frame, app: &App, area: Rect) {
-    let l = app.locale;
-    let findings = crate::diagnostics::analyze(&app.current, l);
+fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, locale: crate::i18n::Locale, area: Rect) {
+    let is_ja = locale == crate::i18n::Locale::Ja;
 
-    let title = if l == crate::i18n::Locale::Ja {
-        format!(" 診断 — {}件の検出 (c でコピー) ", findings.len())
-    } else {
-        format!(" Diagnostics — {} findings (c to copy) ", findings.len())
-    };
+    let title = format!(" {} (c to copy) ", data.title);
 
-    if findings.is_empty() {
-        let msg = if l == crate::i18n::Locale::Ja {
-            " ✓ 問題は検出されませんでした"
+    if data.findings.is_empty() {
+        let msg = if is_ja {
+            " \u{2713} 問題は検出されませんでした"
         } else {
-            " ✓ No issues detected"
+            " \u{2713} No issues detected"
         };
         let p = Paragraph::new(msg)
             .block(Block::default().borders(Borders::ALL).title(title))
@@ -955,14 +840,16 @@ fn draw_diagnostics(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let rows: Vec<Row> = findings.iter().map(|finding| {
-        let sev_style = match finding.severity {
-            crate::diagnostics::Severity::Critical => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            crate::diagnostics::Severity::Warning => Style::default().fg(Color::Yellow),
-            crate::diagnostics::Severity::Info => Style::default().fg(Color::Cyan),
+    let rows: Vec<Row> = data.findings.iter().map(|finding| {
+        let sev_color = view_color_to_color(&finding.severity_color);
+        let sev_style = Style::default().fg(sev_color);
+        let sev_style = if matches!(finding.severity_color, ViewColor::Red) {
+            sev_style.add_modifier(Modifier::BOLD)
+        } else {
+            sev_style
         };
         Row::new(vec![
-            Cell::from(finding.severity.label(l)).style(sev_style),
+            Cell::from(finding.severity.clone()).style(sev_style),
             Cell::from(finding.source.clone()).style(Style::default().fg(Color::DarkGray)),
             Cell::from(finding.title.clone()).style(sev_style),
             Cell::from(finding.detail.clone()),
@@ -970,7 +857,7 @@ fn draw_diagnostics(f: &mut Frame, app: &App, area: Rect) {
         ]).height(2)
     }).collect();
 
-    let header_texts = if l == crate::i18n::Locale::Ja {
+    let header_texts = if is_ja {
         vec!["重要度", "ソース", "問題", "詳細", "対処法"]
     } else {
         vec!["Sev", "Source", "Issue", "Detail", "Suggestion"]
