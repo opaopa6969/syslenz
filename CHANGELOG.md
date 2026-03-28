@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] - 2026-03-29 "See More, Learn More"
+
+### Added
+- GPU metrics (nvidia-smi): temperature, utilization, memory, power, fan speed
+- systemd service status: running/failed counts, system state, failed service list
+- Prometheus export: `--prometheus` flag, HTTP /metrics endpoint, Prometheus text format
+- serve.rs METRICS command for Prometheus scraping via TCP
+- Diagnostics expanded to 25+ patterns: memory leak, swap activity, OOM kills, network errors, recent reboot, load trend, high-memory process, orphaned TCP, IP forwarding, kernel taint
+- Provider scaffold template with helper functions
+- MySQL provider (syslenz-provider-mysql)
+- PostgreSQL provider (syslenz-provider-postgres)
+- Redis provider (syslenz-provider-redis)
+- nginx provider (syslenz-provider-nginx)
+- DGE 015: competitive gap analysis (vs htop/netdata/Datadog/Prometheus)
+- DGE 016: product lineup strategy (SDK/Provider roadmap)
+- macOS: +10 parsers (24 total) — network connections, launchd, diskutil, system_profiler, dns, software_update, power, kexts
+- Windows: +11 parsers (24 total) — TCP/UDP connections, perf counters, handles, hotfix, scheduled tasks, volumes, dns cache, firewall
+- DGE 014: cross-platform metric enum design
+- 5 Prometheus format unit tests
+
 ## [1.2.0] - 2026-03-29
 
 ### Added
