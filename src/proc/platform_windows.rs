@@ -23,6 +23,17 @@ pub fn capture() -> anyhow::Result<Snapshot> {
     if let Ok(e) = parse_services() { entries.insert("services".into(), e); }
     if let Ok(e) = parse_fd() { entries.insert("file-nr".into(), e); }
     if let Ok(e) = parse_eventlog() { entries.insert("eventlog".into(), e); }
+    if let Ok(e) = parse_tcp_connections() { entries.insert("tcp_connections".into(), e); }
+    if let Ok(e) = parse_udp_endpoints() { entries.insert("udp_endpoints".into(), e); }
+    if let Ok(e) = parse_perf_cpu() { entries.insert("perf_cpu".into(), e); }
+    if let Ok(e) = parse_perf_memory() { entries.insert("perf_memory".into(), e); }
+    if let Ok(e) = parse_perf_disk() { entries.insert("perf_disk".into(), e); }
+    if let Ok(e) = parse_handles() { entries.insert("handles".into(), e); }
+    if let Ok(e) = parse_hotfix() { entries.insert("hotfix".into(), e); }
+    if let Ok(e) = parse_scheduled_tasks() { entries.insert("scheduled_tasks".into(), e); }
+    if let Ok(e) = parse_volumes() { entries.insert("volumes".into(), e); }
+    if let Ok(e) = parse_dns_cache() { entries.insert("dns_cache".into(), e); }
+    if let Ok(e) = parse_firewall() { entries.insert("firewall".into(), e); }
 
     Ok(Snapshot {
         timestamp: SystemTime::now(),
@@ -458,6 +469,361 @@ fn parse_diskstats() -> anyhow::Result<ProcEntry> {
         source: "Get-PhysicalDisk".into(),
         fields: vec![
             Field { name: "disks".into(), value: FieldValue::Table(rows), unit: None, description: "Physical disk information".into() },
+        ],
+    })
+}
+
+fn parse_tcp_connections() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-NetTCPConnection | Select LocalAddress,LocalPort,RemoteAddress,RemotePort,State | \
+         ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)|$($_.RemoteAddress)|$($_.RemotePort)|$($_.State)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No TCP connection data available");
+    }
+
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut established: i64 = 0;
+    let mut time_wait: i64 = 0;
+    let mut close_wait: i64 = 0;
+    let mut listen: i64 = 0;
+
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let state = parts[4].trim();
+        match state {
+            "Established" => established += 1,
+            "TimeWait" => time_wait += 1,
+            "CloseWait" => close_wait += 1,
+            "Listen" => listen += 1,
+            _ => {}
+        }
+        table_rows.push(parts.iter().map(|s| s.trim().to_string()).collect());
+    }
+
+    Ok(ProcEntry {
+        source: "Get-NetTCPConnection".into(),
+        fields: vec![
+            Field { name: "connections".into(), value: FieldValue::Table(table_rows), unit: None, description: "TCP connections: LocalAddress, LocalPort, RemoteAddress, RemotePort, State".into() },
+            Field { name: "established".into(), value: FieldValue::Integer(established), unit: None, description: "Number of established TCP connections".into() },
+            Field { name: "time_wait".into(), value: FieldValue::Integer(time_wait), unit: None, description: "Number of TCP connections in TimeWait state".into() },
+            Field { name: "close_wait".into(), value: FieldValue::Integer(close_wait), unit: None, description: "Number of TCP connections in CloseWait state".into() },
+            Field { name: "listen".into(), value: FieldValue::Integer(listen), unit: None, description: "Number of TCP connections in Listen state".into() },
+        ],
+    })
+}
+
+fn parse_udp_endpoints() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-NetUDPEndpoint | Select LocalAddress,LocalPort | \
+         ForEach-Object { \"$($_.LocalAddress)|$($_.LocalPort)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No UDP endpoint data available");
+    }
+
+    let rows: Vec<Vec<String>> = output.lines().filter_map(|line| {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() >= 2 {
+            Some(parts.iter().map(|s| s.trim().to_string()).collect())
+        } else {
+            None
+        }
+    }).collect();
+
+    Ok(ProcEntry {
+        source: "Get-NetUDPEndpoint".into(),
+        fields: vec![
+            Field { name: "endpoints".into(), value: FieldValue::Table(rows), unit: None, description: "UDP endpoints: LocalAddress, LocalPort".into() },
+        ],
+    })
+}
+
+fn parse_perf_cpu() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "$c = Get-Counter '\\Processor(_Total)\\% Processor Time','\\Processor(_Total)\\% User Time',\
+         '\\Processor(_Total)\\% Privileged Time','\\Processor(_Total)\\% Idle Time'; \
+         $s = $c.CounterSamples; \
+         \"$($s[0].CookedValue)|$($s[1].CookedValue)|$($s[2].CookedValue)|$($s[3].CookedValue)\""
+    )?;
+
+    let parts: Vec<&str> = output.split('|').collect();
+    if parts.len() < 4 {
+        anyhow::bail!("Unexpected CPU performance counter output");
+    }
+
+    let total: f64 = parts[0].trim().parse().unwrap_or(0.0);
+    let user: f64 = parts[1].trim().parse().unwrap_or(0.0);
+    let system: f64 = parts[2].trim().parse().unwrap_or(0.0);
+    let idle: f64 = parts[3].trim().parse().unwrap_or(0.0);
+
+    Ok(ProcEntry {
+        source: "Get-Counter Processor".into(),
+        fields: vec![
+            Field { name: "cpu_total_pct".into(), value: FieldValue::Float(total), unit: Some("%".into()), description: "Total CPU utilization percentage".into() },
+            Field { name: "cpu_user_pct".into(), value: FieldValue::Float(user), unit: Some("%".into()), description: "CPU time spent in user mode".into() },
+            Field { name: "cpu_system_pct".into(), value: FieldValue::Float(system), unit: Some("%".into()), description: "CPU time spent in privileged (kernel) mode".into() },
+            Field { name: "cpu_idle_pct".into(), value: FieldValue::Float(idle), unit: Some("%".into()), description: "CPU idle time percentage".into() },
+        ],
+    })
+}
+
+fn parse_perf_memory() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "$c = Get-Counter '\\Memory\\Available MBytes','\\Memory\\Pages/sec',\
+         '\\Memory\\Page Faults/sec','\\Memory\\Cache Bytes'; \
+         $s = $c.CounterSamples; \
+         \"$($s[0].CookedValue)|$($s[1].CookedValue)|$($s[2].CookedValue)|$($s[3].CookedValue)\""
+    )?;
+
+    let parts: Vec<&str> = output.split('|').collect();
+    if parts.len() < 4 {
+        anyhow::bail!("Unexpected memory performance counter output");
+    }
+
+    let available_mb: f64 = parts[0].trim().parse().unwrap_or(0.0);
+    let pages_per_sec: f64 = parts[1].trim().parse().unwrap_or(0.0);
+    let page_faults: f64 = parts[2].trim().parse().unwrap_or(0.0);
+    let cache_bytes: f64 = parts[3].trim().parse().unwrap_or(0.0);
+
+    Ok(ProcEntry {
+        source: "Get-Counter Memory".into(),
+        fields: vec![
+            Field { name: "available_mb".into(), value: FieldValue::Float(available_mb), unit: Some("MB".into()), description: "Available physical memory in megabytes".into() },
+            Field { name: "pages_per_sec".into(), value: FieldValue::Float(pages_per_sec), unit: Some("pages/sec".into()), description: "Rate of pages read from or written to disk for virtual memory".into() },
+            Field { name: "page_faults_per_sec".into(), value: FieldValue::Float(page_faults), unit: Some("faults/sec".into()), description: "Rate of page faults including both hard and soft faults".into() },
+            Field { name: "cache_bytes".into(), value: FieldValue::Float(cache_bytes), unit: Some("bytes".into()), description: "Size of the file system cache in bytes".into() },
+        ],
+    })
+}
+
+fn parse_perf_disk() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "$c = Get-Counter '\\PhysicalDisk(_Total)\\Avg. Disk Queue Length',\
+         '\\PhysicalDisk(_Total)\\% Disk Time',\
+         '\\PhysicalDisk(_Total)\\Disk Read Bytes/sec',\
+         '\\PhysicalDisk(_Total)\\Disk Write Bytes/sec'; \
+         $s = $c.CounterSamples; \
+         \"$($s[0].CookedValue)|$($s[1].CookedValue)|$($s[2].CookedValue)|$($s[3].CookedValue)\""
+    )?;
+
+    let parts: Vec<&str> = output.split('|').collect();
+    if parts.len() < 4 {
+        anyhow::bail!("Unexpected disk performance counter output");
+    }
+
+    let queue_length: f64 = parts[0].trim().parse().unwrap_or(0.0);
+    let disk_time_pct: f64 = parts[1].trim().parse().unwrap_or(0.0);
+    let read_bytes: f64 = parts[2].trim().parse().unwrap_or(0.0);
+    let write_bytes: f64 = parts[3].trim().parse().unwrap_or(0.0);
+
+    Ok(ProcEntry {
+        source: "Get-Counter PhysicalDisk".into(),
+        fields: vec![
+            Field { name: "avg_queue_length".into(), value: FieldValue::Float(queue_length), unit: None, description: "Average number of queued disk I/O requests".into() },
+            Field { name: "disk_time_pct".into(), value: FieldValue::Float(disk_time_pct), unit: Some("%".into()), description: "Percentage of time the disk is busy servicing requests".into() },
+            Field { name: "read_bytes_per_sec".into(), value: FieldValue::Float(read_bytes), unit: Some("bytes/sec".into()), description: "Disk read throughput in bytes per second".into() },
+            Field { name: "write_bytes_per_sec".into(), value: FieldValue::Float(write_bytes), unit: Some("bytes/sec".into()), description: "Disk write throughput in bytes per second".into() },
+        ],
+    })
+}
+
+fn parse_handles() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-Process | Sort-Object HandleCount -Descending | Select-Object -First 20 | \
+         ForEach-Object { \"$($_.Name)|$($_.Id)|$($_.HandleCount)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No handle data available");
+    }
+
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut total_handles: i64 = 0;
+
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let handle_count: i64 = parts[2].trim().parse().unwrap_or(0);
+        total_handles += handle_count;
+        table_rows.push(parts.iter().map(|s| s.trim().to_string()).collect());
+    }
+
+    // Query the system handle limit from the registry
+    let limit_str = powershell(
+        "(Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager' \
+         -Name 'HandleLimit' -ErrorAction SilentlyContinue).HandleLimit"
+    ).unwrap_or_default();
+    let system_handle_limit: i64 = limit_str.trim().parse().unwrap_or(16_777_216); // Default Windows limit
+
+    Ok(ProcEntry {
+        source: "Get-Process Handles".into(),
+        fields: vec![
+            Field { name: "top_handle_consumers".into(), value: FieldValue::Table(table_rows), unit: None, description: "Top 20 processes by handle count: Name, PID, HandleCount".into() },
+            Field { name: "total_handles".into(), value: FieldValue::Integer(total_handles), unit: None, description: "Sum of handles held by top 20 processes".into() },
+            Field { name: "system_handle_limit".into(), value: FieldValue::Integer(system_handle_limit), unit: None, description: "System-wide maximum handle count".into() },
+        ],
+    })
+}
+
+fn parse_hotfix() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-HotFix | Select HotFixID,InstalledOn,Description | Sort InstalledOn -Descending | \
+         ForEach-Object { \"$($_.HotFixID)|$($_.InstalledOn)|$($_.Description)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No hotfix information available");
+    }
+
+    let rows: Vec<Vec<String>> = output.lines().filter_map(|line| {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() >= 3 {
+            Some(parts.iter().map(|s| s.trim().to_string()).collect())
+        } else {
+            None
+        }
+    }).collect();
+
+    Ok(ProcEntry {
+        source: "Get-HotFix".into(),
+        fields: vec![
+            Field { name: "hotfixes".into(), value: FieldValue::Table(rows), unit: None, description: "Installed Windows updates: HotFixID, InstalledOn, Description".into() },
+        ],
+    })
+}
+
+fn parse_scheduled_tasks() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-ScheduledTask | Where-Object {$_.State -ne 'Disabled'} | \
+         ForEach-Object { \"$($_.TaskName)|$($_.State)|$($_.LastRunTime)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No scheduled task data available");
+    }
+
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut running_count: i64 = 0;
+    let mut ready_count: i64 = 0;
+
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let state = parts[1].trim();
+        match state {
+            "Running" => running_count += 1,
+            "Ready" => ready_count += 1,
+            _ => {}
+        }
+        table_rows.push(parts.iter().map(|s| s.trim().to_string()).collect());
+    }
+
+    Ok(ProcEntry {
+        source: "Get-ScheduledTask".into(),
+        fields: vec![
+            Field { name: "tasks".into(), value: FieldValue::Table(table_rows), unit: None, description: "Active scheduled tasks: TaskName, State, LastRunTime".into() },
+            Field { name: "running_count".into(), value: FieldValue::Integer(running_count), unit: None, description: "Number of currently running scheduled tasks".into() },
+            Field { name: "ready_count".into(), value: FieldValue::Integer(ready_count), unit: None, description: "Number of scheduled tasks in Ready state".into() },
+        ],
+    })
+}
+
+fn parse_volumes() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-Volume | Where-Object { $_.DriveLetter } | \
+         ForEach-Object { \"$($_.DriveLetter)|$($_.FileSystemLabel)|$($_.FileSystem)|$($_.Size)|$($_.SizeRemaining)|$($_.HealthStatus)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No volume data available");
+    }
+
+    let rows: Vec<Vec<String>> = output.lines().filter_map(|line| {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() >= 6 {
+            Some(parts.iter().map(|s| s.trim().to_string()).collect())
+        } else {
+            None
+        }
+    }).collect();
+
+    Ok(ProcEntry {
+        source: "Get-Volume".into(),
+        fields: vec![
+            Field { name: "volumes".into(), value: FieldValue::Table(rows), unit: None, description: "Volume details: DriveLetter, Label, FileSystem, Size, SizeRemaining, HealthStatus".into() },
+        ],
+    })
+}
+
+fn parse_dns_cache() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-DnsClientCache | Select Name,Type,Data | Select-Object -First 50 | \
+         ForEach-Object { \"$($_.Name)|$($_.Type)|$($_.Data)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("DNS client cache is empty or not accessible");
+    }
+
+    let rows: Vec<Vec<String>> = output.lines().filter_map(|line| {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() >= 3 {
+            Some(parts.iter().map(|s| s.trim().to_string()).collect())
+        } else {
+            None
+        }
+    }).collect();
+
+    Ok(ProcEntry {
+        source: "Get-DnsClientCache".into(),
+        fields: vec![
+            Field { name: "dns_entries".into(), value: FieldValue::Table(rows), unit: None, description: "Cached DNS entries: Name, Type, Data".into() },
+        ],
+    })
+}
+
+fn parse_firewall() -> anyhow::Result<ProcEntry> {
+    let output = powershell(
+        "Get-NetFirewallRule -Enabled True | Select DisplayName,Direction,Action | \
+         Select-Object -First 30 | \
+         ForEach-Object { \"$($_.DisplayName)|$($_.Direction)|$($_.Action)\" }"
+    )?;
+
+    if output.is_empty() {
+        anyhow::bail!("No firewall rule data available (may require administrator privileges)");
+    }
+
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        table_rows.push(parts.iter().map(|s| s.trim().to_string()).collect());
+    }
+
+    // Get total count of enabled rules separately for the summary field
+    let count_str = powershell(
+        "(Get-NetFirewallRule -Enabled True | Measure-Object).Count"
+    ).unwrap_or_default();
+    let rule_count: i64 = count_str.trim().parse().unwrap_or(0);
+
+    Ok(ProcEntry {
+        source: "Get-NetFirewallRule".into(),
+        fields: vec![
+            Field { name: "rules".into(), value: FieldValue::Table(table_rows), unit: None, description: "Enabled firewall rules (first 30): DisplayName, Direction, Action".into() },
+            Field { name: "rule_count".into(), value: FieldValue::Integer(rule_count), unit: None, description: "Total number of enabled firewall rules".into() },
         ],
     })
 }

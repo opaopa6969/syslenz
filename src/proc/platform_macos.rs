@@ -24,6 +24,16 @@ pub fn capture() -> anyhow::Result<Snapshot> {
     if let Ok(e) = parse_battery() { entries.insert("battery".into(), e); }
     if let Ok(e) = parse_fd() { entries.insert("file-nr".into(), e); }
     if let Ok(e) = parse_top_summary() { entries.insert("top_summary".into(), e); }
+    if let Ok(e) = parse_network_connections() { entries.insert("net/connections".into(), e); }
+    if let Ok(e) = parse_launchd_services() { entries.insert("launchd".into(), e); }
+    if let Ok(e) = parse_diskutil() { entries.insert("diskutil".into(), e); }
+    if let Ok(e) = parse_network_config() { entries.insert("net/config".into(), e); }
+    if let Ok(e) = parse_system_profile() { entries.insert("system_profile".into(), e); }
+    if let Ok(e) = parse_open_files() { entries.insert("open_files".into(), e); }
+    if let Ok(e) = parse_dns_config() { entries.insert("dns".into(), e); }
+    if let Ok(e) = parse_software_update() { entries.insert("software_update".into(), e); }
+    if let Ok(e) = parse_power_management() { entries.insert("power_management".into(), e); }
+    if let Ok(e) = parse_kernel_extensions() { entries.insert("kernel_extensions".into(), e); }
 
     Ok(Snapshot {
         timestamp: SystemTime::now(),
@@ -603,6 +613,547 @@ fn parse_diskstats() -> anyhow::Result<ProcEntry> {
         source: "iostat -d".into(),
         fields: vec![
             Field { name: "disks".into(), value: FieldValue::Table(rows), unit: None, description: "Disk I/O statistics".into() },
+        ],
+    })
+}
+
+fn parse_network_connections() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("netstat").args(["-an"]).output()?;
+    if !output.status.success() {
+        anyhow::bail!("netstat -an failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut established: i64 = 0;
+    let mut time_wait: i64 = 0;
+    let mut close_wait: i64 = 0;
+    let mut listen: i64 = 0;
+
+    for line in text.lines().skip(2) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let proto = parts[0];
+        // Only include tcp/udp lines
+        if !proto.starts_with("tcp") && !proto.starts_with("udp") {
+            continue;
+        }
+
+        let local_addr = parts.get(3).unwrap_or(&"").to_string();
+        let remote_addr = parts.get(4).unwrap_or(&"*.*").to_string();
+        let state = if proto.starts_with("udp") {
+            String::new()
+        } else {
+            parts.get(5).unwrap_or(&"").to_string()
+        };
+
+        match state.as_str() {
+            "ESTABLISHED" => established += 1,
+            "TIME_WAIT" => time_wait += 1,
+            "CLOSE_WAIT" => close_wait += 1,
+            "LISTEN" => listen += 1,
+            _ => {}
+        }
+
+        rows.push(vec![
+            proto.to_string(),
+            local_addr,
+            remote_addr,
+            state,
+        ]);
+    }
+
+    Ok(ProcEntry {
+        source: "netstat -an".into(),
+        fields: vec![
+            Field { name: "connections".into(), value: FieldValue::Table(rows), unit: None, description: "Network connections: Protocol, LocalAddr, RemoteAddr, State".into() },
+            Field { name: "established".into(), value: FieldValue::Integer(established), unit: None, description: "Number of established connections".into() },
+            Field { name: "time_wait".into(), value: FieldValue::Integer(time_wait), unit: None, description: "Number of connections in TIME_WAIT state".into() },
+            Field { name: "close_wait".into(), value: FieldValue::Integer(close_wait), unit: None, description: "Number of connections in CLOSE_WAIT state".into() },
+            Field { name: "listen".into(), value: FieldValue::Integer(listen), unit: None, description: "Number of listening sockets".into() },
+        ],
+    })
+}
+
+fn parse_launchd_services() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("launchctl").arg("list").output()?;
+    if !output.status.success() {
+        anyhow::bail!("launchctl list failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut running_count: i64 = 0;
+    let mut error_count: i64 = 0;
+
+    for line in text.lines().skip(1) {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let pid = parts[0].trim().to_string();
+        let status = parts[1].trim().to_string();
+        let label = parts[2].trim().to_string();
+
+        if pid != "-" && !pid.is_empty() {
+            running_count += 1;
+        }
+        if let Ok(code) = status.parse::<i64>() {
+            if code != 0 {
+                error_count += 1;
+            }
+        }
+
+        rows.push(vec![pid, status, label]);
+    }
+
+    Ok(ProcEntry {
+        source: "launchctl list".into(),
+        fields: vec![
+            Field { name: "services".into(), value: FieldValue::Table(rows), unit: None, description: "Launchd services: PID, Status, Label".into() },
+            Field { name: "running_count".into(), value: FieldValue::Integer(running_count), unit: None, description: "Number of services with a running PID".into() },
+            Field { name: "error_count".into(), value: FieldValue::Integer(error_count), unit: None, description: "Number of services with non-zero exit status".into() },
+        ],
+    })
+}
+
+fn parse_diskutil() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("diskutil").arg("list").output()?;
+    if !output.status.success() {
+        anyhow::bail!("diskutil list failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut current_device = String::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // Header lines like "/dev/disk0 (internal, physical):"
+        if trimmed.starts_with("/dev/") {
+            current_device = trimmed.trim_end_matches(':').to_string();
+            continue;
+        }
+        // Partition lines like "   0:      GUID_partition_scheme    *500.1 GB   disk0"
+        // or "   1:                        EFI EFI  209.7 MB   disk0s1"
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.splitn(2, ':').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let rest = parts[1].trim();
+        // Try to extract type, name, size from the rest
+        // Format varies; grab what we can from the whitespace-separated tokens
+        let tokens: Vec<&str> = rest.split_whitespace().collect();
+        if tokens.len() >= 3 {
+            let disk_type = tokens[0].to_string();
+            // Size is typically near the end, look for a pattern like "500.1" followed by "GB"/"MB"/"TB"/"KB"
+            let mut size_str = String::new();
+            let mut name_parts: Vec<&str> = Vec::new();
+            let mut i = 1;
+            while i < tokens.len() {
+                if i + 1 < tokens.len() {
+                    let maybe_unit = tokens[i + 1].trim_start_matches('*');
+                    if matches!(maybe_unit, "KB" | "MB" | "GB" | "TB" | "B") {
+                        size_str = format!("{} {}", tokens[i].trim_start_matches('*'), maybe_unit);
+                        i += 2;
+                        continue;
+                    }
+                }
+                // Check if current token starts with * (size marker)
+                if tokens[i].starts_with('*') && i + 1 < tokens.len() {
+                    let maybe_unit = tokens[i + 1];
+                    if matches!(maybe_unit, "KB" | "MB" | "GB" | "TB" | "B") {
+                        size_str = format!("{} {}", tokens[i].trim_start_matches('*'), maybe_unit);
+                        i += 2;
+                        continue;
+                    }
+                }
+                name_parts.push(tokens[i]);
+                i += 1;
+            }
+            let name = name_parts.join(" ");
+            rows.push(vec![
+                current_device.clone(),
+                disk_type,
+                size_str,
+                name,
+            ]);
+        }
+    }
+
+    Ok(ProcEntry {
+        source: "diskutil list".into(),
+        fields: vec![
+            Field { name: "volumes".into(), value: FieldValue::Table(rows), unit: None, description: "Disk volumes: Device, Type, Size, Name".into() },
+        ],
+    })
+}
+
+fn parse_network_config() -> anyhow::Result<ProcEntry> {
+    let hw_output = Command::new("networksetup")
+        .arg("-listallhardwareports")
+        .output()?;
+    if !hw_output.status.success() {
+        anyhow::bail!("networksetup -listallhardwareports failed");
+    }
+    let hw_text = String::from_utf8_lossy(&hw_output.stdout);
+
+    // Also get ifconfig for addresses and status
+    let if_output = Command::new("ifconfig").output()?;
+    let if_text = String::from_utf8_lossy(&if_output.stdout);
+
+    // Parse ifconfig into a map of device -> (address, status)
+    let mut if_map: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+    let mut current_iface = String::new();
+    let mut current_addr = String::new();
+    let mut current_status = String::new();
+    for line in if_text.lines() {
+        if !line.starts_with('\t') && !line.starts_with(' ') {
+            // Save previous interface
+            if !current_iface.is_empty() {
+                if_map.insert(current_iface.clone(), (current_addr.clone(), current_status.clone()));
+            }
+            current_iface = line.split(':').next().unwrap_or("").to_string();
+            current_addr = String::new();
+            current_status = String::new();
+        }
+        let trimmed = line.trim();
+        if trimmed.starts_with("inet ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 && current_addr.is_empty() {
+                current_addr = parts[1].to_string();
+            }
+        }
+        if trimmed.starts_with("status:") {
+            current_status = trimmed.trim_start_matches("status:").trim().to_string();
+        }
+    }
+    if !current_iface.is_empty() {
+        if_map.insert(current_iface, (current_addr, current_status));
+    }
+
+    // Parse networksetup output into rows
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut port = String::new();
+    let mut device = String::new();
+    for line in hw_text.lines() {
+        let trimmed = line.trim();
+        if let Some(p) = trimmed.strip_prefix("Hardware Port: ") {
+            port = p.to_string();
+        } else if let Some(d) = trimmed.strip_prefix("Device: ") {
+            device = d.to_string();
+        } else if trimmed.is_empty() || trimmed.starts_with("VLAN") || trimmed.starts_with("Ethernet") {
+            if !port.is_empty() && !device.is_empty() {
+                let (addr, status) = if_map.get(&device)
+                    .cloned()
+                    .unwrap_or_default();
+                rows.push(vec![
+                    port.clone(),
+                    device.clone(),
+                    addr,
+                    status,
+                ]);
+            }
+            port.clear();
+            device.clear();
+        }
+    }
+    // Handle last entry if file does not end with blank line
+    if !port.is_empty() && !device.is_empty() {
+        let (addr, status) = if_map.get(&device)
+            .cloned()
+            .unwrap_or_default();
+        rows.push(vec![port, device, addr, status]);
+    }
+
+    Ok(ProcEntry {
+        source: "networksetup -listallhardwareports + ifconfig".into(),
+        fields: vec![
+            Field { name: "ports".into(), value: FieldValue::Table(rows), unit: None, description: "Network hardware ports: Port, Device, Address, Status".into() },
+        ],
+    })
+}
+
+fn parse_system_profile() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("system_profiler")
+        .args(["SPHardwareDataType", "-detailLevel", "mini"])
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!("system_profiler failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut model_name = String::new();
+    let mut model_id = String::new();
+    let mut chip = String::new();
+    let mut memory = String::new();
+    let mut serial_number = String::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some((key, val)) = trimmed.split_once(':') {
+            let key = key.trim();
+            let val = val.trim().to_string();
+            match key {
+                "Model Name" => model_name = val,
+                "Model Identifier" => model_id = val,
+                "Chip" | "Processor Name" => chip = val,
+                "Memory" | "Total Number of Cores" => {
+                    if key == "Memory" { memory = val; }
+                }
+                "Serial Number (system)" | "Serial Number" => serial_number = val,
+                _ => {}
+            }
+        }
+    }
+
+    if model_name.is_empty() && chip.is_empty() {
+        anyhow::bail!("Could not parse system profile data");
+    }
+
+    Ok(ProcEntry {
+        source: "system_profiler SPHardwareDataType".into(),
+        fields: vec![
+            Field { name: "model_name".into(), value: FieldValue::Text(model_name), unit: None, description: "Mac model name".into() },
+            Field { name: "model_id".into(), value: FieldValue::Text(model_id), unit: None, description: "Mac model identifier".into() },
+            Field { name: "chip".into(), value: FieldValue::Text(chip), unit: None, description: "Processor or Apple Silicon chip".into() },
+            Field { name: "memory".into(), value: FieldValue::Text(memory), unit: None, description: "Total installed memory".into() },
+            Field { name: "serial_number".into(), value: FieldValue::Text(serial_number), unit: None, description: "System serial number".into() },
+        ],
+    })
+}
+
+fn parse_open_files() -> anyhow::Result<ProcEntry> {
+    let fd_max: i64 = sysctl_string("kern.maxfiles")?.parse()?;
+    let fd_current: i64 = sysctl_string("kern.num_files")?.parse()?;
+    let fd_max_per_proc: i64 = sysctl_string("kern.maxfilesperproc")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let usage_pct = if fd_max > 0 {
+        (fd_current as f64 / fd_max as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    let mut fields = vec![
+        Field { name: "fd_max".into(), value: FieldValue::Integer(fd_max), unit: None, description: "System-wide maximum file descriptors".into() },
+        Field { name: "fd_current".into(), value: FieldValue::Integer(fd_current), unit: None, description: "Currently open file descriptors system-wide".into() },
+        Field { name: "fd_max_per_proc".into(), value: FieldValue::Integer(fd_max_per_proc), unit: None, description: "Maximum file descriptors per process".into() },
+        Field { name: "fd_usage_pct".into(), value: FieldValue::Float(usage_pct), unit: Some("%".into()), description: "File descriptor usage percentage".into() },
+    ];
+
+    // Try to get per-process top consumers via lsof
+    if let Ok(output) = Command::new("lsof").args(["-n", "-P"]).output() {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut proc_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+            let mut total_open: i64 = 0;
+            for line in text.lines().skip(1) {
+                total_open += 1;
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if let Some(cmd) = parts.first() {
+                    *proc_counts.entry(cmd.to_string()).or_insert(0) += 1;
+                }
+            }
+
+            fields.push(Field {
+                name: "total_open_files".into(),
+                value: FieldValue::Integer(total_open),
+                unit: None,
+                description: "Total open files reported by lsof".into(),
+            });
+
+            // Top 10 consumers
+            let mut top: Vec<(String, i64)> = proc_counts.into_iter().collect();
+            top.sort_by(|a, b| b.1.cmp(&a.1));
+            let top_rows: Vec<Vec<String>> = top.into_iter().take(10).map(|(cmd, count)| {
+                vec![cmd, count.to_string()]
+            }).collect();
+
+            fields.push(Field {
+                name: "top_consumers".into(),
+                value: FieldValue::Table(top_rows),
+                unit: None,
+                description: "Top 10 processes by open file count: Command, Count".into(),
+            });
+        }
+    }
+
+    Ok(ProcEntry {
+        source: "sysctl kern.maxfiles + lsof".into(),
+        fields,
+    })
+}
+
+fn parse_dns_config() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("scutil").arg("--dns").output()?;
+    if !output.status.success() {
+        anyhow::bail!("scutil --dns failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut nameservers: Vec<Vec<String>> = Vec::new();
+    let mut search_domains: Vec<String> = Vec::new();
+    let mut resolver_count: i64 = 0;
+    let mut seen_ns: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("resolver #") {
+            resolver_count += 1;
+        }
+        if trimmed.starts_with("nameserver[") {
+            if let Some(addr) = trimmed.split(':').last() {
+                let addr = addr.trim().to_string();
+                if !addr.is_empty() && seen_ns.insert(addr.clone()) {
+                    nameservers.push(vec![addr]);
+                }
+            }
+        }
+        if trimmed.starts_with("search domain[") {
+            if let Some(domain) = trimmed.split(':').last() {
+                let domain = domain.trim().to_string();
+                if !domain.is_empty() && !search_domains.contains(&domain) {
+                    search_domains.push(domain);
+                }
+            }
+        }
+    }
+
+    Ok(ProcEntry {
+        source: "scutil --dns".into(),
+        fields: vec![
+            Field { name: "nameservers".into(), value: FieldValue::Table(nameservers), unit: None, description: "Configured DNS nameservers".into() },
+            Field { name: "search_domains".into(), value: FieldValue::Text(search_domains.join(", ")), unit: None, description: "DNS search domains".into() },
+            Field { name: "resolver_count".into(), value: FieldValue::Integer(resolver_count), unit: None, description: "Number of DNS resolver configurations".into() },
+        ],
+    })
+}
+
+fn parse_software_update() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("softwareupdate").arg("-l").output()?;
+    let text = String::from_utf8_lossy(&output.stderr).to_string()
+        + &String::from_utf8_lossy(&output.stdout);
+
+    let mut update_names: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // Lines starting with "* Label:" or "* " indicate an available update
+        if let Some(label) = trimmed.strip_prefix("* Label: ") {
+            update_names.push(label.trim().to_string());
+        } else if let Some(label) = trimmed.strip_prefix("* ") {
+            if !label.is_empty() {
+                update_names.push(label.trim().to_string());
+            }
+        }
+    }
+
+    let count = update_names.len() as i64;
+    let list_text = if update_names.is_empty() {
+        "No updates available".to_string()
+    } else {
+        update_names.join("; ")
+    };
+
+    Ok(ProcEntry {
+        source: "softwareupdate -l".into(),
+        fields: vec![
+            Field { name: "updates_available".into(), value: FieldValue::Integer(count), unit: None, description: "Number of available software updates".into() },
+            Field { name: "update_list".into(), value: FieldValue::Text(list_text), unit: None, description: "List of available software updates".into() },
+        ],
+    })
+}
+
+fn parse_power_management() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("pmset").args(["-g"]).output()?;
+    if !output.status.success() {
+        anyhow::bail!("pmset -g failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut sleep_setting = String::new();
+    let mut display_sleep = String::new();
+    let mut disk_sleep = String::new();
+    let mut power_source = String::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // "Currently drawing from 'AC Power'" or "'Battery Power'"
+        if trimmed.starts_with("Currently drawing from") {
+            power_source = trimmed
+                .split('\'')
+                .nth(1)
+                .unwrap_or("unknown")
+                .to_string();
+            continue;
+        }
+        // Key-value lines like " sleep               10 (sleep prevented by ...)" or " sleep  1"
+        if let Some((key, val)) = trimmed.split_once(char::is_whitespace) {
+            let key = key.trim();
+            let val = val.trim();
+            // Extract numeric or first token from val
+            let first_token = val.split_whitespace().next().unwrap_or(val);
+            match key {
+                "sleep" => sleep_setting = first_token.to_string(),
+                "displaysleep" => display_sleep = first_token.to_string(),
+                "disksleep" => disk_sleep = first_token.to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    Ok(ProcEntry {
+        source: "pmset -g".into(),
+        fields: vec![
+            Field { name: "power_source".into(), value: FieldValue::Text(power_source), unit: None, description: "Current power source (AC Power or Battery Power)".into() },
+            Field { name: "sleep_setting".into(), value: FieldValue::Text(sleep_setting), unit: Some("minutes".into()), description: "System sleep timeout in minutes (0 = never)".into() },
+            Field { name: "display_sleep".into(), value: FieldValue::Text(display_sleep), unit: Some("minutes".into()), description: "Display sleep timeout in minutes".into() },
+            Field { name: "disk_sleep".into(), value: FieldValue::Text(disk_sleep), unit: Some("minutes".into()), description: "Disk sleep timeout in minutes".into() },
+        ],
+    })
+}
+
+fn parse_kernel_extensions() -> anyhow::Result<ProcEntry> {
+    let output = Command::new("kextstat").output()?;
+    if !output.status.success() {
+        anyhow::bail!("kextstat failed");
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    for line in text.lines().skip(1) {
+        // Skip Apple kexts
+        if line.contains("com.apple") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        // kextstat columns: Index Refs Address Size Wired Name (Version) ...
+        if parts.len() >= 6 {
+            let name = parts[5].to_string();
+            let version = parts.get(6)
+                .unwrap_or(&"")
+                .trim_matches(|c| c == '(' || c == ')')
+                .to_string();
+            let size = parts[3].to_string();
+            rows.push(vec![name, version, size]);
+        }
+    }
+
+    let kext_count = rows.len() as i64;
+
+    Ok(ProcEntry {
+        source: "kextstat".into(),
+        fields: vec![
+            Field { name: "third_party_kexts".into(), value: FieldValue::Table(rows), unit: None, description: "Third-party kernel extensions: Name, Version, Size".into() },
+            Field { name: "kext_count".into(), value: FieldValue::Integer(kext_count), unit: None, description: "Number of loaded third-party kernel extensions".into() },
         ],
     })
 }
