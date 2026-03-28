@@ -1137,6 +1137,884 @@ fn field_desc_en(source: &str, field: &str) -> Option<(&'static str, &'static st
             "Percentage of file descriptors in active use relative to the system maximum. (allocated - unused) / max * 100.",
             "File descriptor usage percentage: (allocated - unused) / max * 100.\n\n💡 Diagnostic:\n  • > 80% → WARNING: FD exhaustion risk. Processes may fail to open files or sockets.\n  • Find leakers: lsof -p <PID> | wc -l for suspect processes.\n  • Raise limit: sysctl -w fs.file-max=<higher_value>."
         ),
+        ("file-nr", "fd_unused") => (
+            "Unused (cached) file descriptors",
+            "Number of allocated but unused file handles kept in the kernel free list for quick reuse.",
+            "Allocated but unused file handles in the kernel free list.\n\nThe kernel pre-allocates file handles and keeps unused ones in a free list to avoid allocation overhead.\n\n💡 Diagnostic: A large fd_unused relative to fd_allocated means the kernel has over-provisioned. This is harmless — the handles are recycled."
+        ),
+        ("file-nr", "fd_max") => (
+            "Maximum file descriptors (system limit)",
+            "Kernel-enforced maximum number of file handles. Reaching this limit causes EMFILE errors for all processes.",
+            "System-wide file descriptor maximum (fs.file-max).\n\nThis is the hard ceiling. When fd_allocated approaches fd_max, new open()/socket() calls fail with EMFILE.\n\n💡 Diagnostic:\n  • Default is usually 100000-1000000 depending on RAM\n  • Raise: sysctl -w fs.file-max=<value> or persist in /etc/sysctl.conf\n  • Per-process limit (ulimit -n) is separate and usually lower"
+        ),
+
+        // df — additional fields
+        ("df", "total_disk") => (
+            "Total disk space (root filesystem)",
+            "Total capacity of the root (/) filesystem in bytes. Includes space reserved for root user.",
+            "Total disk space on the root filesystem.\n\n💡 Diagnostic: If total_disk seems smaller than the physical partition, check for reserved blocks (typically 5% on ext4). Tune with `tune2fs -m <pct> /dev/sdX`."
+        ),
+        ("df", "used_disk") => (
+            "Used disk space (root filesystem)",
+            "Bytes consumed on the root filesystem. Includes files, directories, and filesystem metadata.",
+            "Used disk space on the root filesystem.\n\n💡 Diagnostic: If used_disk is near total_disk, the system may become unresponsive. Logs fail to write, databases crash, and package managers break. Immediate cleanup needed."
+        ),
+        ("df", "available_disk") => (
+            "Available disk space (root filesystem)",
+            "Bytes available for non-root users on the root filesystem. Less than total - used because of reserved blocks.",
+            "Available disk space on the root filesystem for non-root users.\n\nThis is less than (total - used) because ext4 reserves ~5% for root by default.\n\n💡 Diagnostic:\n  • < 1 GB → CRITICAL on a production system\n  • Rapidly decreasing → Runaway log file or temp file accumulation\n  • To find large files: `du -sh /* | sort -h | tail -10`"
+        ),
+
+        // ── net/snmp — additional important counters ──────────────────
+
+        ("net/snmp", "Ip_Forwarding") => (
+            "IP forwarding status",
+            "Whether this host is forwarding packets (1=yes, acting as router; 2=no, host-only mode).",
+            "IP forwarding status.\n\n1 = forwarding enabled (router mode), 2 = forwarding disabled (host mode).\n\n💡 Diagnostic:\n  • Should be 2 on most servers/workstations\n  • Should be 1 on routers, VPN gateways, container hosts with routing\n  • Toggle: sysctl net.ipv4.ip_forward=1"
+        ),
+        ("net/snmp", "Ip_InHdrErrors") => (
+            "IP packets with header errors",
+            "Packets discarded due to malformed IP headers (bad checksum, invalid version, truncated).",
+            "IP header error drops.\n\n💡 Diagnostic:\n  • Should be 0 or near 0\n  • Non-zero → Corrupted packets on the network, faulty NIC, or attack traffic\n  • Compare with Tcp_InErrs and Udp_InErrors for broader corruption picture"
+        ),
+        ("net/snmp", "Ip_InAddrErrors") => (
+            "IP packets with address errors",
+            "Packets discarded because the destination IP was invalid for this host (wrong subnet, broadcast misroute).",
+            "IP address error drops — packets sent to wrong destination.\n\n💡 Diagnostic: Non-zero suggests routing issues or misconfigured clients sending traffic to the wrong host."
+        ),
+        ("net/snmp", "Ip_ForwDatagrams") => (
+            "IP packets forwarded",
+            "Packets this host forwarded to another destination. Non-zero means the host is acting as a router.",
+            "IP datagrams forwarded to another hop.\n\n💡 Diagnostic:\n  • Should be 0 if ip_forward is disabled\n  • Non-zero with forwarding off → Something is misconfigured\n  • On a router/gateway, this is the core traffic counter"
+        ),
+        ("net/snmp", "Ip_InDelivers") => (
+            "IP packets delivered to protocols",
+            "Packets successfully demuxed and delivered to upper-layer protocols (TCP, UDP, ICMP).",
+            "IP packets delivered to upper protocols.\n\n💡 Diagnostic: Ip_InReceives - Ip_InDelivers = packets dropped/forwarded at IP layer. Large gap means lots of dropped or forwarded traffic."
+        ),
+        ("net/snmp", "Ip_OutDiscards") => (
+            "Outbound IP packets discarded",
+            "Packets ready to send but discarded (typically due to insufficient buffer space or routing failure).",
+            "Outbound IP discards.\n\n💡 Diagnostic: Non-zero → TX path congestion. Check NIC TX ring buffer size and network interface errors."
+        ),
+        ("net/snmp", "Ip_OutNoRoutes") => (
+            "IP packets with no route",
+            "Packets discarded because no route to the destination existed in the routing table.",
+            "IP packets dropped due to missing route.\n\n💡 Diagnostic:\n  • Non-zero → Application trying to reach unreachable networks\n  • Check routing table: `ip route show`\n  • Common cause: missing default gateway or VPN tunnel down"
+        ),
+        ("net/snmp", "Ip_ReasmFails") => (
+            "IP reassembly failures",
+            "IP fragment reassembly attempts that failed (timeout, missing fragments, or resource exhaustion).",
+            "IP fragment reassembly failures.\n\n💡 Diagnostic:\n  • Non-zero → Fragments are being lost in transit (firewall blocking, MTU issues)\n  • Fix: Ensure PMTUD works (don't block ICMP type 3 'fragmentation needed')\n  • Or increase MTU on the problematic path"
+        ),
+        ("net/snmp", "Tcp_CurrEstab") => (
+            "Currently established TCP connections",
+            "Snapshot of TCP connections in ESTABLISHED or CLOSE_WAIT state right now. Key capacity indicator.",
+            "Current ESTABLISHED + CLOSE_WAIT TCP connections.\n\nThis is a point-in-time gauge (not cumulative like most counters).\n\n💡 Diagnostic:\n  • Baseline this value to understand normal connection load\n  • Steady growth without plateau → Connection leak\n  • Sudden drop → Mass disconnection event or service restart"
+        ),
+        ("net/snmp", "Tcp_InSegs") => (
+            "TCP segments received",
+            "Total TCP segments received. Combined with OutSegs, gives the overall TCP throughput picture.",
+            "Total TCP segments received.\n\n💡 Diagnostic: Rate of change shows inbound TCP throughput. Compare InSegs rate vs OutSegs rate to see traffic direction bias."
+        ),
+        ("net/snmp", "Tcp_OutSegs") => (
+            "TCP segments sent",
+            "Total TCP segments sent (includes retransmissions). The primary outbound TCP volume counter.",
+            "Total TCP segments sent.\n\n💡 Diagnostic: RetransSegs / OutSegs gives retransmission percentage. < 0.1% is excellent, > 1% is problematic."
+        ),
+        ("net/snmp", "Tcp_AttemptFails") => (
+            "TCP connection attempts failed",
+            "Connections that failed during the handshake (SYN sent but no SYN-ACK, or SYN-ACK sent but no final ACK).",
+            "Failed TCP connection attempts.\n\n💡 Diagnostic:\n  • High rate → Target hosts unreachable, firewalled, or overloaded\n  • AttemptFails / ActiveOpens = outbound failure rate\n  • Correlate with TcpExt_TCPTimeouts for timeout-related failures"
+        ),
+        ("net/snmp", "Tcp_EstabResets") => (
+            "Established connections reset",
+            "ESTABLISHED connections that were reset (RST). Indicates abnormal connection termination.",
+            "TCP connections reset from ESTABLISHED state.\n\n💡 Diagnostic:\n  • High rate → Remote hosts crashing, firewall killing connections, or application bugs\n  • Compare with OutRsts to see if this host or remote hosts are sending resets"
+        ),
+        ("net/snmp", "Tcp_OutRsts") => (
+            "TCP RST segments sent",
+            "RST (reset) segments sent by this host. Indicates connection refusals or abnormal closures.",
+            "TCP RST segments sent.\n\n💡 Diagnostic:\n  • High rate → Many connections to closed ports, or application rejecting connections\n  • Common cause: port scan hitting the host, or service restarting"
+        ),
+        ("net/snmp", "Tcp_InCsumErrors") => (
+            "TCP checksum errors",
+            "TCP segments with invalid checksums. Indicates data corruption on the network path.",
+            "TCP segments with checksum errors.\n\n💡 Diagnostic:\n  • Must be 0 on a healthy network\n  • Non-zero → NIC offload bug, bad cable, memory corruption\n  • If also seeing Udp_InCsumErrors → Link-level corruption"
+        ),
+        ("net/snmp", "Udp_InDatagrams") => (
+            "UDP datagrams received",
+            "Total UDP datagrams successfully received and delivered to applications.",
+            "UDP datagrams received and delivered.\n\n💡 Diagnostic: Rate of change shows UDP input throughput. Common UDP consumers: DNS (53), NTP (123), SNMP (161)."
+        ),
+        ("net/snmp", "Udp_OutDatagrams") => (
+            "UDP datagrams sent",
+            "Total UDP datagrams sent by this host.",
+            "UDP datagrams sent.\n\n💡 Diagnostic: High OutDatagrams with low InDatagrams → Host is a UDP sender (syslog forwarder, DNS server responding). Reverse → UDP consumer."
+        ),
+        ("net/snmp", "Udp_NoPorts") => (
+            "UDP packets to closed ports",
+            "UDP datagrams received for ports with no listening process. Each triggers an ICMP port-unreachable response.",
+            "UDP datagrams to ports with no listener.\n\n💡 Diagnostic:\n  • Non-zero is normal (occasional probes, stale DNS replies)\n  • High rate → Port scanning or misconfigured client sending to wrong port\n  • Each generates an ICMP port-unreachable, consuming outbound bandwidth"
+        ),
+        ("net/snmp", "Udp_RcvbufErrors") => (
+            "UDP receive buffer overflows",
+            "UDP datagrams dropped because the socket receive buffer was full. Application is too slow to read.",
+            "UDP receive buffer overflow drops.\n\n💡 Diagnostic:\n  • Non-zero → Application cannot keep up with incoming UDP rate\n  • Fix: Increase buffer size with SO_RCVBUF or sysctl net.core.rmem_max\n  • Or optimize the receiving application to read faster"
+        ),
+        ("net/snmp", "Udp_SndbufErrors") => (
+            "UDP send buffer overflows",
+            "UDP datagrams dropped because the send buffer was full. Sending too fast for the network.",
+            "UDP send buffer overflow drops.\n\n💡 Diagnostic:\n  • Application sending faster than the NIC can transmit\n  • Fix: Increase net.core.wmem_max or throttle the sending rate"
+        ),
+        ("net/snmp", "Udp_InCsumErrors") => (
+            "UDP checksum errors",
+            "UDP datagrams with invalid checksums. Data corruption in transit.",
+            "UDP checksum errors.\n\n💡 Diagnostic: Same implications as TCP checksum errors — NIC/cable/driver issue. Cross-check with Tcp_InCsumErrors."
+        ),
+        ("net/snmp", "Icmp_InMsgs") => (
+            "ICMP messages received",
+            "Total ICMP messages received (ping replies, unreachables, redirects, etc.).",
+            "Total inbound ICMP messages.\n\n💡 Diagnostic: High rate may indicate ping flood, PMTUD activity, or network error signaling."
+        ),
+        ("net/snmp", "Icmp_InErrors") => (
+            "ICMP input errors",
+            "ICMP messages received with errors (bad checksum, too short, etc.).",
+            "ICMP messages with errors.\n\n💡 Diagnostic: Should be near 0. Non-zero indicates corrupted ICMP packets on the network."
+        ),
+        ("net/snmp", "Icmp_InDestUnreachs") => (
+            "ICMP Destination Unreachable received",
+            "ICMP Destination Unreachable messages received, often indicating remote port/host is unreachable.",
+            "ICMP Destination Unreachable messages received.\n\n💡 Diagnostic:\n  • High rate → Many outbound connections failing (firewall drops, host down)\n  • Type 3 code 4 (fragmentation needed) → PMTUD issue, check MTU\n  • Type 3 code 3 (port unreachable) → Remote application not listening"
+        ),
+        ("net/snmp", "Icmp_OutMsgs") => (
+            "ICMP messages sent",
+            "Total ICMP messages sent by this host (ping requests, unreachable responses, etc.).",
+            "Total outbound ICMP messages.\n\n💡 Diagnostic: High OutMsgs with many Destination Unreachable → This host is rejecting traffic (closed ports generating ICMP unreachable)."
+        ),
+
+        // ── net/netstat — additional important counters ───────────────
+
+        ("net/netstat", "TcpExt_SyncookiesSent") => (
+            "SYN cookies sent (SYN flood protection)",
+            "Count of SYN cookies sent. Non-zero means the SYN queue overflowed and the kernel activated SYN flood protection.",
+            "TCP SYN cookies sent.\n\nSYN cookies are a defense against SYN flood attacks. When the SYN queue is full, the kernel encodes connection state in the SYN-ACK sequence number.\n\n💡 Diagnostic:\n  • Non-zero → SYN flood detected or listen backlog too small\n  • If legitimate traffic: increase net.ipv4.tcp_max_syn_backlog\n  • If attack: SYN cookies are working correctly as a defense"
+        ),
+        ("net/netstat", "TcpExt_SyncookiesRecv") => (
+            "SYN cookies received (validated)",
+            "Count of SYN cookies successfully validated. These are legitimate connections that went through SYN cookie mode.",
+            "Valid SYN cookies received back from clients.\n\n💡 Diagnostic: If SyncookiesSent >> SyncookiesRecv, most SYN-flood traffic was from spoofed IPs (they never complete the handshake)."
+        ),
+        ("net/netstat", "TcpExt_SyncookiesFailed") => (
+            "Invalid SYN cookies received",
+            "SYN cookies that failed validation. Could be legitimate clients with mangled packets or attack traffic.",
+            "Invalid SYN cookie validation failures.\n\n💡 Diagnostic: High rate alongside SyncookiesSent → Active SYN flood attack with some attempted spoofed completions."
+        ),
+        ("net/netstat", "TcpExt_TW") => (
+            "TIME_WAIT sockets recycled by timeout",
+            "TIME_WAIT sockets that expired naturally after the 2*MSL timeout.",
+            "TIME_WAIT sockets expired normally.\n\n💡 Diagnostic: This is the normal cleanup path. Compare with TCPTimeWaitOverflow to see if recycling is keeping up."
+        ),
+        ("net/netstat", "TcpExt_PAWSEstab") => (
+            "Packets rejected by PAWS on established connections",
+            "Segments rejected on established connections by Protection Against Wrapped Sequences. Indicates old duplicate segments or clock issues.",
+            "PAWS (Protection Against Wrapped Sequences) rejections on established connections.\n\n💡 Diagnostic:\n  • Occasional is normal (old duplicate segments after route changes)\n  • Sustained high rate → Timestamp clock issue on one side, or middlebox stripping TCP timestamps"
+        ),
+        ("net/netstat", "TcpExt_DelayedACKs") => (
+            "Delayed ACKs sent",
+            "ACKs that were delayed to piggyback on data segments. Normal TCP optimization to reduce packet count.",
+            "Delayed ACKs sent (piggybacking optimization).\n\n💡 Diagnostic: High count is normal — it means TCP is efficiently batching ACKs. Compare with TCPPureAcks for non-delayed ACK volume."
+        ),
+        ("net/netstat", "TcpExt_TCPHPHits") => (
+            "TCP header prediction hits (fast path)",
+            "Packets processed via the fast path (header prediction). Higher is better — means most traffic follows the common case.",
+            "TCP header prediction fast-path hits.\n\n💡 Diagnostic: High HPHits relative to InSegs means the network stack is efficient. Low ratio → Unusual packet patterns forcing slow-path processing."
+        ),
+        ("net/netstat", "TcpExt_TCPPureAcks") => (
+            "Pure ACKs received (no data)",
+            "ACK segments containing no data payload. Common in interactive protocols and after data bursts.",
+            "Pure ACKs received (acknowledgment only, no data).\n\n💡 Diagnostic: High pure ACK ratio → Unidirectional data flow (one side sending, other just ACKing). Normal for downloads/uploads."
+        ),
+        ("net/netstat", "TcpExt_TCPSackRecovery") => (
+            "SACK-based loss recoveries",
+            "Times TCP used SACK information to recover from packet loss without a full retransmission timeout.",
+            "TCP SACK-based loss recovery events.\n\n💡 Diagnostic:\n  • SACK recovery is much faster than RTO-based recovery\n  • High count → Packet loss is occurring, but SACK is handling it well\n  • Compare with TCPTimeouts — timeouts mean SACK couldn't help"
+        ),
+        ("net/netstat", "TcpExt_TCPFastRetrans") => (
+            "TCP fast retransmits",
+            "Segments retransmitted via fast retransmit (3 duplicate ACKs) rather than waiting for timeout.",
+            "TCP fast retransmits (triggered by 3 dup-ACKs).\n\n💡 Diagnostic:\n  • Fast retransmit is preferable to timeout — recovery is much quicker\n  • High rate → Frequent packet loss on the network\n  • FastRetrans + SackRecovery working well → Network has loss but TCP is coping"
+        ),
+        ("net/netstat", "TcpExt_TCPLossProbes") => (
+            "TCP Tail Loss Probes sent",
+            "TLP (Tail Loss Probe) segments sent to detect loss at the end of a transaction without waiting for full RTO.",
+            "TCP Tail Loss Probes (TLP) sent.\n\nTLP is a mechanism to detect tail loss faster than RTO. When the last segment of a burst is lost, TLP retransmits it proactively.\n\n💡 Diagnostic: High TLP count → Many transactions have their final packets lost. Common on lossy networks."
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnData") => (
+            "Connections aborted (data in close)",
+            "TCP connections aborted because data was received after the connection was closed.",
+            "TCP connections aborted due to unexpected data after close.\n\n💡 Diagnostic: Usually indicates a peer sending data after the connection was shut down. Application-level protocol mismatch."
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnClose") => (
+            "Connections aborted (close with pending data)",
+            "Connections terminated with RST because the application closed the socket with unread data in the buffer.",
+            "TCP connections aborted by close() with data pending.\n\n💡 Diagnostic:\n  • Application closed socket without reading all data\n  • Common with HTTP servers aborting slow clients\n  • Results in RST sent to peer"
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnTimeout") => (
+            "Connections aborted on timeout",
+            "TCP connections aborted because retransmission attempts exhausted the timeout limit.",
+            "TCP connections aborted due to timeout.\n\n💡 Diagnostic: The final outcome of persistent packet loss — all retransmission attempts failed. Correlates with TCPTimeouts."
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnMemory") => (
+            "Connections aborted (memory pressure)",
+            "Connections terminated because the system ran out of memory for TCP buffers.",
+            "TCP connections killed due to memory pressure.\n\n💡 Diagnostic:\n  • CRITICAL if non-zero: system is dropping connections to survive\n  • Check TCP_mem in sockstat and /proc/sys/net/ipv4/tcp_mem limits\n  • May need more RAM or fewer concurrent connections"
+        ),
+        ("net/netstat", "TcpExt_TCPMemoryPressures") => (
+            "TCP memory pressure events",
+            "Times the TCP stack entered memory pressure mode, reducing buffer sizes and potentially dropping connections.",
+            "TCP memory pressure mode activations.\n\n💡 Diagnostic:\n  • Non-zero → TCP buffer memory hit the 'pressure' threshold\n  • Kernel reduces per-socket buffer sizes to cope\n  • Fix: Increase tcp_mem limits or add physical RAM"
+        ),
+        ("net/netstat", "TcpExt_TCPSynRetrans") => (
+            "SYN/SYN-ACK retransmits",
+            "SYN or SYN-ACK segments retransmitted. Indicates connection establishment failures.",
+            "SYN and SYN-ACK retransmissions.\n\n💡 Diagnostic:\n  • High rate → Clients can't reach server (firewall, server overloaded, network loss)\n  • Correlates with ListenDrops if server-side backlog is full\n  • Compare with ActiveOpens/PassiveOpens to get retry ratio"
+        ),
+        ("net/netstat", "TcpExt_TCPOrigDataSent") => (
+            "Original data segments sent",
+            "Data segments sent for the first time (excluding retransmissions). Subtract from OutSegs to get retransmit count.",
+            "Original (non-retransmit) data segments sent.\n\n💡 Diagnostic: (OutSegs - TCPOrigDataSent - pure ACKs) approximates retransmission volume. Useful for computing retransmission ratio."
+        ),
+        ("net/netstat", "TcpExt_TCPKeepAlive") => (
+            "TCP keepalive probes sent",
+            "Keepalive probes sent on idle connections to verify the peer is still alive.",
+            "TCP keepalive probes sent.\n\n💡 Diagnostic:\n  • Normal for long-lived idle connections (database connections, SSH sessions)\n  • Very high rate → Many idle connections with keepalive enabled\n  • Tune: net.ipv4.tcp_keepalive_time (default 7200 sec)"
+        ),
+        ("net/netstat", "TcpExt_TCPAutoCorking") => (
+            "TCP auto-corking events",
+            "Times the kernel delayed small writes to combine them into larger segments (Nagle-like optimization).",
+            "TCP auto-corking activations.\n\n💡 Diagnostic: Auto-corking reduces small packet overhead by buffering writes when there's already unacknowledged data. High count is normal for write-heavy workloads."
+        ),
+        ("net/netstat", "TcpExt_TCPRcvCoalesce") => (
+            "TCP receive queue coalescing",
+            "Segments coalesced (merged) in the receive queue for efficiency.",
+            "TCP segments coalesced in receive queue.\n\n💡 Diagnostic: Coalescing reduces overhead by merging adjacent segments. High values indicate efficient GRO/LRO processing on the NIC."
+        ),
+        ("net/netstat", "TcpExt_TCPOFOQueue") => (
+            "Out-of-order packets queued",
+            "Packets received out of order and queued for reordering. Indicates network path reordering.",
+            "Out-of-order TCP packets queued.\n\n💡 Diagnostic:\n  • Some OOO is normal (multipath, load-balanced traffic)\n  • High rate → Significant reordering on the network path\n  • Can trigger spurious fast retransmits if not handled by SACK"
+        ),
+        ("net/netstat", "TcpExt_TCPChallengeACK") => (
+            "Challenge ACKs sent (RFC 5961)",
+            "ACKs sent in response to suspicious segments to validate the connection. Security mechanism against blind injection.",
+            "TCP Challenge ACKs sent (RFC 5961).\n\n💡 Diagnostic:\n  • Low rate is normal (occasional stale segments)\n  • High rate → Possible blind TCP injection attack attempt\n  • Rate limited by net.ipv4.tcp_challenge_ack_limit"
+        ),
+        ("net/netstat", "TcpExt_TCPFastOpenActive") => (
+            "TCP Fast Open connections initiated",
+            "Outbound connections using TCP Fast Open (TFO) to send data in the SYN packet.",
+            "TCP Fast Open active connections initiated.\n\n💡 Diagnostic: TFO reduces latency by one RTT on repeat connections. Non-zero means applications are using TFO. Zero means either TFO is disabled or no application requests it."
+        ),
+        ("net/netstat", "TcpExt_TCPFastOpenPassive") => (
+            "TCP Fast Open connections accepted",
+            "Inbound connections accepted with TCP Fast Open data in the SYN packet.",
+            "TCP Fast Open passive connections accepted.\n\n💡 Diagnostic: Non-zero → Server is accepting TFO connections. Compare with FastOpenPassiveFail for failure rate."
+        ),
+        ("net/netstat", "TcpExt_TCPDelivered") => (
+            "TCP segments delivered to application",
+            "Total segments successfully delivered to application layer, including original and retransmitted data.",
+            "TCP segments delivered to the application.\n\n💡 Diagnostic: This is the 'goodput' counter. Compare with OutSegs for the total packet count to see overhead ratio."
+        ),
+        ("net/netstat", "TcpExt_TCPWinProbe") => (
+            "TCP window probes sent",
+            "Window probes sent when the receive window is zero. The sender is waiting for the receiver to free buffer space.",
+            "TCP zero-window probes sent.\n\n💡 Diagnostic:\n  • Non-zero → Receiver is too slow to consume data (zero-window condition)\n  • Persistent → Application backpressure, receiver can't keep up\n  • Check TCPToZeroWindowAdv for how often the receiver advertises zero window"
+        ),
+        ("net/netstat", "TcpExt_TCPTimeWaitOverflow") => (
+            "TIME_WAIT bucket overflows",
+            "Times a new TIME_WAIT socket could not be created because the bucket limit was reached.",
+            "TIME_WAIT socket overflow events.\n\n💡 Diagnostic:\n  • Non-zero → Too many short-lived connections exhausting TIME_WAIT slots\n  • Enable net.ipv4.tcp_tw_reuse to allow reuse\n  • Consider connection pooling in the application"
+        ),
+        ("net/netstat", "TcpExt_TCPBacklogDrop") => (
+            "Segments dropped from socket backlog",
+            "Segments dropped because the per-socket backlog queue was full.",
+            "TCP socket backlog drops.\n\n💡 Diagnostic:\n  • Non-zero → Receiving application not processing fast enough\n  • Socket backlog is the queue between NIC and application read()\n  • Fix: Increase SO_RCVBUF or optimize application read loop"
+        ),
+        ("net/netstat", "TcpExt_TCPSpuriousRTOs") => (
+            "Spurious retransmission timeouts",
+            "RTOs detected as spurious (the original packet arrived but the RTO fired too early).",
+            "Spurious RTO detections.\n\n💡 Diagnostic:\n  • High rate → RTO is too aggressive for the network latency\n  • Causes unnecessary retransmissions and congestion window reduction\n  • Consider tuning or using a different congestion control algorithm"
+        ),
+        ("net/netstat", "IpExt_InOctets") => (
+            "Total bytes received (IP layer)",
+            "Total bytes received at the IP layer, including headers. The definitive inbound bandwidth counter.",
+            "Total IP-layer inbound bytes.\n\n💡 Diagnostic: Rate of change gives inbound bandwidth. Compare with net/dev total_rx — difference is non-IP traffic (ARP, etc.)."
+        ),
+        ("net/netstat", "IpExt_OutOctets") => (
+            "Total bytes sent (IP layer)",
+            "Total bytes sent at the IP layer, including headers. The definitive outbound bandwidth counter.",
+            "Total IP-layer outbound bytes.\n\n💡 Diagnostic: Rate of change gives outbound bandwidth. The most accurate bandwidth counter for IP traffic."
+        ),
+        ("net/netstat", "IpExt_InMcastPkts") => (
+            "Multicast packets received",
+            "IP multicast packets received. Common for service discovery (mDNS, SSDP) and cluster communication.",
+            "Inbound multicast packets.\n\n💡 Diagnostic: High rate on a server → Cluster/multicast-based service active. On a desktop → mDNS/Bonjour or media streaming."
+        ),
+        ("net/netstat", "IpExt_InCsumErrors") => (
+            "IP checksum errors",
+            "Inbound packets with IP-level checksum errors. Indicates data corruption at the network layer.",
+            "IP-layer checksum errors.\n\n💡 Diagnostic:\n  • Must be 0 on a healthy network\n  • Non-zero → Link-level corruption, bad NIC offload, or memory errors\n  • Correlate with TCP/UDP checksum errors for full picture"
+        ),
+
+        // ── net/sockstat — remaining fields ──────────────────────────
+
+        ("net/sockstat", "UDPLITE_inuse") => (
+            "UDP-Lite sockets in use",
+            "Number of UDP-Lite sockets currently in use. UDP-Lite allows partial checksums for error-tolerant media streams.",
+            "Active UDP-Lite sockets.\n\n💡 Diagnostic: Usually 0 on most systems. UDP-Lite is used for media streaming where partial data is better than no data."
+        ),
+        ("net/sockstat", "RAW_inuse") => (
+            "Raw sockets in use",
+            "Number of raw IP sockets. Used by tools like ping, traceroute, and custom network protocols.",
+            "Active raw IP sockets.\n\n💡 Diagnostic:\n  • Typical: 0-2 on normal systems\n  • ping and traceroute use raw sockets temporarily\n  • Persistent raw sockets → Custom network protocol or monitoring tool\n  • Security concern: raw sockets require root or CAP_NET_RAW"
+        ),
+        ("net/sockstat", "FRAG_memory") => (
+            "IP fragment reassembly memory (bytes)",
+            "Bytes of kernel memory used for holding IP fragments awaiting reassembly.",
+            "Memory consumed by IP fragment reassembly queue.\n\n💡 Diagnostic:\n  • Usually 0 on modern networks (PMTUD avoids fragmentation)\n  • Large values → Fragmentation attack or broken PMTUD\n  • Limit: net.ipv4.ipfrag_high_thresh"
+        ),
+
+        // ── ip/route ─────────────────────────────────────────────────
+
+        ("ip/route", "default_gateway") => (
+            "Default gateway IP address",
+            "The IP address of the default gateway. All traffic to unknown networks is forwarded here.",
+            "Default gateway IP address.\n\n💡 Diagnostic:\n  • '(none)' → No default route configured. Host cannot reach the internet.\n  • Should be reachable: `ping <gateway>`. If not, check cable/link.\n  • Multiple default routes → Failover or policy routing in use"
+        ),
+        ("ip/route", "route_count") => (
+            "Number of IP routes",
+            "Total routing entries from 'ip route show'. Includes default, connected, and static routes.",
+            "Total IP routing entries.\n\n💡 Diagnostic:\n  • Minimum 1 (the default route) for internet-connected hosts\n  • Very high count → Dynamic routing protocol (BGP/OSPF) active\n  • Compare with /proc/net/route for kernel-level view"
+        ),
+        ("ip/route", "routes") => (
+            "IP routing table",
+            "Complete routing table: Destination, Gateway, Device, Protocol, Scope, Metric. Lower metric = preferred route.",
+            "IP routing table from 'ip route show'.\n\nColumns: Destination, Gateway, Device, Protocol, Scope, Metric.\n\n💡 Diagnostic:\n  • 'default via X.X.X.X' → Default route. Must exist for internet access.\n  • Protocol 'kernel' → Auto-created for directly connected networks\n  • Protocol 'dhcp' → Learned from DHCP server\n  • Scope 'link' → Directly attached network, no gateway needed\n  • Lower metric = higher priority when multiple routes exist"
+        ),
+
+        // ── ip/neighbor ──────────────────────────────────────────────
+
+        ("ip/neighbor", "neighbor_count") => (
+            "Total ARP/NDP neighbor entries",
+            "Count of all neighbor cache entries (IPv4 ARP and IPv6 NDP). Shows how many hosts this system has communicated with.",
+            "ARP/NDP neighbor cache entry count.\n\n💡 Diagnostic:\n  • High count → Many hosts on local network or multicast group\n  • Growing steadily → Network scan or broadcast storm\n  • Check for FAILED entries separately (failed_count)"
+        ),
+        ("ip/neighbor", "failed_count") => (
+            "Neighbors in FAILED state",
+            "Neighbors that could not be resolved (ARP/NDP request sent but no reply). Indicates unreachable hosts.",
+            "Neighbor entries in FAILED state (unreachable).\n\n💡 Diagnostic:\n  • Non-zero → Hosts on the local network are unreachable\n  • Common causes: host powered off, wrong VLAN, IP conflict\n  • Transient failures are normal; persistent ones indicate a real problem"
+        ),
+        ("ip/neighbor", "neighbors") => (
+            "Neighbor table entries",
+            "ARP/NDP neighbor cache: IP address, network device, MAC address, and reachability state.",
+            "ARP/NDP neighbor cache contents.\n\nColumns: IP, Device, LLAddr (MAC), State.\n\n💡 Diagnostic:\n  • State REACHABLE → Recently confirmed alive\n  • State STALE → Not verified recently, will re-probe on next use\n  • State FAILED → ARP/NDP resolution failed, host unreachable\n  • State PERMANENT → Statically configured entry\n  • Empty LLAddr with FAILED → Host never responded to ARP"
+        ),
+
+        // ── ss (socket summary) ──────────────────────────────────────
+
+        ("ss", "tcp_established") => (
+            "Established TCP connections",
+            "Number of TCP connections in ESTABLISHED state. The primary indicator of active network sessions.",
+            "ESTABLISHED TCP connection count.\n\n💡 Diagnostic:\n  • Baseline this for your workload (web server: hundreds-thousands, database: tens)\n  • Sudden increase → Traffic spike or SYN flood completing\n  • Sudden decrease → Service crash or network partition\n  • Steady growth without plateau → Connection leak in application"
+        ),
+        ("ss", "tcp_timewait") => (
+            "TCP connections in TIME_WAIT",
+            "Connections in TIME_WAIT state, cooling down for 2*MSL (typically 60s) after close.",
+            "TCP TIME_WAIT socket count.\n\n💡 Diagnostic:\n  • < 5000 → Normal for most workloads\n  • > 30000 → Ephemeral port exhaustion risk\n  • High value → Many short-lived connections; consider connection pooling\n  • Enable net.ipv4.tcp_tw_reuse for busy servers"
+        ),
+        ("ss", "tcp_orphaned") => (
+            "Orphaned TCP connections",
+            "TCP connections with no owning process. Still consume kernel memory until timeout.",
+            "Orphaned TCP connections.\n\n💡 Diagnostic:\n  • Should be low (< 100)\n  • Growing → Application exits without proper socket cleanup\n  • Limit: /proc/sys/net/ipv4/tcp_max_orphans\n  • Exceeding limit → Kernel forcefully RSTs connections"
+        ),
+        ("ss", "tcp_closed") => (
+            "Closed TCP connections",
+            "TCP connections in CLOSED state, waiting to be cleaned up by the kernel.",
+            "TCP connections in CLOSED state.\n\n💡 Diagnostic: These are transitional — the kernel will clean them up shortly. High persistent count may indicate a kernel or driver issue."
+        ),
+        ("ss", "udp_count") => (
+            "Total UDP sockets",
+            "Number of all UDP sockets on the system, as reported by 'ss -s'.",
+            "Total UDP socket count from ss -s.\n\n💡 Diagnostic:\n  • Typical: 5-30 on a normal server\n  • Includes DNS resolvers, NTP clients, syslog, SNMP\n  • Growing → Possible FD leak in a UDP application"
+        ),
+
+        // ── dns (/etc/resolv.conf) ───────────────────────────────────
+
+        ("dns", "nameservers") => (
+            "Configured DNS nameservers",
+            "DNS server addresses from /etc/resolv.conf. The system queries these servers for name resolution.",
+            "DNS nameserver table from /etc/resolv.conf.\n\nColumns: IP address, Type (IPv4/IPv6).\n\n💡 Diagnostic:\n  • Empty → DNS resolution will fail. Check /etc/resolv.conf.\n  • 127.0.0.53 → systemd-resolved is managing DNS\n  • Multiple entries → Failover; first server is tried first\n  • 8.8.8.8 / 1.1.1.1 → Public DNS (Google/Cloudflare)"
+        ),
+        ("dns", "search_domains") => (
+            "DNS search domains",
+            "Domains appended to unqualified hostnames for resolution. 'search example.com' means 'host' resolves as 'host.example.com'.",
+            "DNS search domain list.\n\n💡 Diagnostic:\n  • Affects short hostname resolution (e.g., 'db' becomes 'db.example.com')\n  • Too many search domains → DNS resolution slower (tries each suffix)\n  • Corporate environments often have multiple search domains"
+        ),
+        ("dns", "options") => (
+            "DNS resolver options",
+            "Resolver options from /etc/resolv.conf controlling timeout, retries, and behavior.",
+            "DNS resolver options.\n\n💡 Diagnostic:\n  • 'ndots:N' → Queries with fewer than N dots try search domains first\n  • 'timeout:N' → Seconds before retrying another nameserver\n  • 'attempts:N' → Number of retries per nameserver\n  • 'edns0' → EDNS0 support (larger DNS packets)\n  • In containers, high ndots can cause slow DNS resolution"
+        ),
+        ("dns", "dns_resolution_ms") => (
+            "DNS resolution time (localhost test)",
+            "Time in milliseconds to resolve 'localhost' via the system resolver. Measures resolver overhead.",
+            "DNS resolution latency for 'localhost'.\n\n💡 Diagnostic:\n  • < 1 ms → Normal (resolved from /etc/hosts or nsswitch cache)\n  • > 10 ms → Resolver may be slow (network round-trip to DNS server)\n  • > 100 ms → DNS server is unresponsive or overloaded\n  • This is a baseline test; real-world resolution may be slower for external names"
+        ),
+
+        // ── conntrack (connection tracking) ──────────────────────────
+
+        ("conntrack", "conntrack_count") => (
+            "Current tracked connections",
+            "Number of entries in the netfilter connection tracking table. Each TCP/UDP flow uses one entry.",
+            "Current connection tracking table entries.\n\n💡 Diagnostic:\n  • Each established connection (TCP, UDP, ICMP) uses one entry\n  • Approaches conntrack_max → New connections will be dropped!\n  • On busy NAT/firewall boxes, this is a critical capacity metric"
+        ),
+        ("conntrack", "conntrack_max") => (
+            "Maximum tracked connections",
+            "Maximum number of entries the connection tracking table can hold. Exceeding this drops new connections.",
+            "Connection tracking table maximum (nf_conntrack_max).\n\n💡 Diagnostic:\n  • Default scales with RAM (typically 65536 on 1GB system)\n  • Increase: sysctl -w net.nf_conntrack_max=<value>\n  • Each entry uses ~300 bytes of kernel memory\n  • For a busy firewall/NAT: conntrack_max should be > peak concurrent connections"
+        ),
+        ("conntrack", "usage_pct") => (
+            "Connection tracking table usage %",
+            "Percentage of connection tracking table in use. Above 80% indicates risk of new connection drops.",
+            "Connection tracking table utilization.\n\n💡 Diagnostic:\n  • < 50% → Healthy headroom\n  • 50-80% → Monitor trend. May need to increase max.\n  • > 80% → WARNING: Approaching limit. New connections may be dropped.\n  • > 95% → CRITICAL: Actively dropping connections. Increase conntrack_max immediately.\n  • Also check if conntrack is even needed — disable if not using NAT/iptables stateful rules"
+        ),
+
+        // ── meminfo: remaining fields ────────────────────────────────
+        ("meminfo", "Active") => (
+            "Recently used memory (less likely reclaimed)",
+            "Memory on the active LRU list (recently accessed). Includes both anonymous and file-backed pages. Less likely to be reclaimed by the kernel.",
+            "Active memory — recently accessed pages on the active LRU list.\n\nActive = Active(anon) + Active(file). Pages here were accessed recently and won't be reclaimed unless memory pressure is severe.\n\n💡 Diagnostic: Compare Active vs Inactive to see how much memory is 'hot'."
+        ),
+        ("meminfo", "Inactive") => (
+            "Not recently used memory (reclaim candidate)",
+            "Memory on the inactive LRU list (not recently accessed). First candidate for reclaim under memory pressure.",
+            "Inactive memory — pages not recently accessed.\n\nInactive = Inactive(anon) + Inactive(file). These pages are reclaimed first when the kernel needs memory.\n\n💡 Diagnostic: Large Inactive is a good buffer against memory pressure."
+        ),
+        ("meminfo", "Active(anon)") => (
+            "Recently used anonymous memory",
+            "Anonymous memory (heap, stack, private mappings) that was recently accessed. Can only be freed by swapping.",
+            "Recently accessed anonymous pages (heap, stack, mmap MAP_ANONYMOUS).\n\n💡 Diagnostic: Growing Active(anon) indicates processes are actively using more heap memory."
+        ),
+        ("meminfo", "Inactive(anon)") => (
+            "Idle anonymous memory (swap-out candidate)",
+            "Anonymous memory not recently accessed. First candidates for swap-out under memory pressure.",
+            "Idle anonymous pages eligible for swap-out.\n\n💡 Diagnostic:\n  • Large Inactive(anon) with no swap activity → Memory that could be reclaimed via swap if needed\n  • Decreasing Inactive(anon) with increasing swap used → Confirms active swapping"
+        ),
+        ("meminfo", "Active(file)") => (
+            "Recently used file cache",
+            "File-backed pages (page cache) recently accessed. Caches file contents for fast re-reads.",
+            "Recently used page cache (file contents in memory).\n\n💡 Diagnostic: Large Active(file) means the file cache is working well. Shrinking Active(file) under load means memory pressure is evicting useful cache."
+        ),
+        ("meminfo", "Inactive(file)") => (
+            "Idle file cache (easy to reclaim)",
+            "File-backed pages not recently accessed. Can be reclaimed without I/O (unless dirty).",
+            "Idle page cache — file content not recently accessed.\n\n💡 Diagnostic: Large Inactive(file) = good buffer against memory pressure. Near-zero = running tight on reclaimable memory."
+        ),
+        ("meminfo", "Unevictable") => (
+            "Memory locked in RAM (cannot be reclaimed)",
+            "Memory the kernel cannot reclaim: mlock'd pages, ramfs pages, and SHM_LOCK segments.",
+            "Non-reclaimable memory — pages locked in RAM.\n\nIncludes mlock(), ramfs, SHM_LOCK.\n\n💡 Diagnostic:\n  • High Unevictable → Check which processes use mlock\n  • Reduces effective memory for caching"
+        ),
+        ("meminfo", "Mlocked") => (
+            "Memory locked with mlock()",
+            "Memory explicitly locked into RAM by processes using mlock(). Prevents swap-out.",
+            "Memory locked via mlock() or mlockall().\n\nCommon users: databases, real-time audio, cryptographic key storage.\n\n💡 Diagnostic: Check per-process limits with `ulimit -l`"
+        ),
+        ("meminfo", "SwapCached") => (
+            "Swap pages also in RAM",
+            "Pages that were swapped out but are still cached in RAM. If accessed again, no disk I/O is needed.",
+            "Swap cache — pages present in both swap and RAM.\n\n💡 Diagnostic: Non-zero after memory pressure event is normal recovery behavior."
+        ),
+        ("meminfo", "Zswap") => (
+            "Memory used by zswap compressed pool",
+            "RAM consumed by zswap compressed page pool. Zswap compresses pages before writing to swap.",
+            "Memory consumed by zswap's compressed page pool.\n\n💡 Diagnostic: Compare Zswap vs Zswapped for compression ratio (Zswapped / Zswap)."
+        ),
+        ("meminfo", "Zswapped") => (
+            "Original size of pages in zswap",
+            "Uncompressed size of pages stored in zswap. Compare with Zswap to see compression ratio.",
+            "Original uncompressed size of pages in zswap.\n\n💡 Diagnostic: Compression ratio = Zswapped / Zswap. Higher is better. Typical: 2:1 to 4:1."
+        ),
+        ("meminfo", "Dirty") => (
+            "Memory waiting to be written to disk",
+            "Pages modified in memory but not yet written to disk. Flushed periodically by the kernel.",
+            "Dirty pages — modified data not yet flushed to storage.\n\n💡 Diagnostic:\n  • High Dirty → Heavy write workload or slow storage\n  • Dirty above dirty_ratio → write() blocks (write throttling)"
+        ),
+        ("meminfo", "Writeback") => (
+            "Memory actively being written to disk",
+            "Pages currently being written back to storage. High values indicate storage is busy.",
+            "Pages currently being flushed to storage.\n\n💡 Diagnostic: Normally near zero. Sustained high → Storage device is saturated."
+        ),
+        ("meminfo", "AnonPages") => (
+            "Non-file-backed pages in processes",
+            "Anonymous memory mapped into process page tables. Includes heap, stack, private mappings.",
+            "Anonymous pages mapped into process page tables.\n\n💡 Diagnostic: AnonPages growing over time → Possible memory leak. Find culprit: `ps aux --sort=-rss | head`"
+        ),
+        ("meminfo", "Mapped") => (
+            "Files mapped into memory (mmap)",
+            "Memory occupied by files mapped via mmap(). Includes shared libraries and memory-mapped files.",
+            "Memory-mapped file pages.\n\nIncludes shared libraries (.so), mmap'd files, executable text segments.\n\n💡 Diagnostic: High Mapped → Many processes sharing libraries or large mmap'd database files."
+        ),
+        ("meminfo", "Shmem") => (
+            "Shared memory (tmpfs, shmem, devtmpfs)",
+            "Memory used by shared memory segments, tmpfs, and devtmpfs. Counts as Cached but NOT reclaimable.",
+            "Shared memory pages — tmpfs, POSIX shm, SysV shm.\n\nIncluded in Cached but cannot be reclaimed.\n\n💡 Diagnostic: Check `df -h /dev/shm`. Unlike regular cache, Shmem reduces MemAvailable."
+        ),
+        ("meminfo", "KReclaimable") => (
+            "Kernel memory that can be reclaimed",
+            "Total reclaimable kernel memory including SReclaimable slab caches.",
+            "Reclaimable kernel memory (superset of SReclaimable).\n\n💡 Diagnostic: Large KReclaimable is healthy — the kernel will release it when RAM is needed."
+        ),
+        ("meminfo", "Slab") => (
+            "Kernel slab allocator memory total",
+            "Total slab memory: SReclaimable + SUnreclaim. Holds fixed-size kernel objects.",
+            "Total slab allocator memory.\n\n💡 Diagnostic: Large Slab is normal on fileservers. Growing with high SUnreclaim → Possible kernel memory leak."
+        ),
+        ("meminfo", "SReclaimable") => (
+            "Reclaimable slab caches",
+            "Slab memory that can be freed under pressure. Primarily dentry and inode caches.",
+            "Reclaimable slab caches — dentry and inode caches.\n\n💡 Diagnostic: To manually reclaim: `echo 2 > /proc/sys/vm/drop_caches`"
+        ),
+        ("meminfo", "SUnreclaim") => (
+            "Unreclaimable slab memory",
+            "Slab memory that cannot be freed. Active kernel data structures that must stay in RAM.",
+            "Non-reclaimable slab memory — active kernel objects.\n\n💡 Diagnostic: Steadily growing SUnreclaim → Possible kernel memory leak. Check slabinfo."
+        ),
+        ("meminfo", "KernelStack") => (
+            "Memory used by kernel thread stacks",
+            "Total memory for kernel-mode stacks of all threads. Each thread needs 8-16KB.",
+            "Kernel stack memory for all threads.\n\n💡 Diagnostic: KernelStack / 16KB ≈ thread count. Very high → Thread leak."
+        ),
+        ("meminfo", "PageTables") => (
+            "Memory used by page table entries",
+            "Memory for page table entries mapping virtual to physical addresses.",
+            "Page table memory.\n\n💡 Diagnostic: High PageTables → Many processes or large virtual memory mappings."
+        ),
+        ("meminfo", "SecPageTables") => (
+            "Secondary page tables (KVM, IOMMU)",
+            "Memory for nested page tables used by KVM and IOMMU.",
+            "Secondary page table memory (KVM EPT/NPT, IOMMU).\n\n💡 Diagnostic: High → Many VMs running or IOMMU active."
+        ),
+        ("meminfo", "NFS_Unstable") => (
+            "NFS pages sent but not committed (legacy)",
+            "Always 0 on modern kernels (>= 2.6.38). Deprecated field.",
+            "NFS unstable pages — always 0 on modern kernels.\n\n💡 This field is deprecated. Ignore it."
+        ),
+        ("meminfo", "Bounce") => (
+            "Bounce buffer memory for block I/O",
+            "Memory for bounce buffers when devices can't DMA to all physical memory.",
+            "Bounce buffer memory. Typically 0 on modern 64-bit systems with IOMMU.\n\n💡 Diagnostic: Non-zero on 64-bit → Check for legacy devices."
+        ),
+        ("meminfo", "WritebackTmp") => (
+            "Temporary writeback memory (FUSE)",
+            "Memory for temporary writeback buffers by FUSE filesystems.",
+            "FUSE temporary writeback memory.\n\n💡 Diagnostic: Non-zero only during active FUSE writes (sshfs, s3fs, rclone)."
+        ),
+        ("meminfo", "CommitLimit") => (
+            "Total memory available for allocation",
+            "Maximum allocatable memory based on overcommit ratio. (RAM * ratio/100) + Swap.",
+            "Memory commit limit based on overcommit settings.\n\n💡 Diagnostic: Only meaningful when overcommit_memory = 2 (strict). Committed_AS > CommitLimit → ENOMEM."
+        ),
+        ("meminfo", "Committed_AS") => (
+            "Total memory currently committed",
+            "Total memory allocated by all processes. May exceed physical RAM due to overcommit.",
+            "Total committed virtual memory.\n\n💡 Diagnostic: Committed_AS > RAM + Swap → System is overcommitted. OOM risk if all pages are touched."
+        ),
+        ("meminfo", "VmallocTotal") => (
+            "Total vmalloc address space",
+            "Virtual address range for vmalloc. Extremely large on 64-bit (128TB+).",
+            "Total vmalloc address space. Essentially meaningless on 64-bit systems.\n\n💡 Check VmallocUsed for actual consumption."
+        ),
+        ("meminfo", "VmallocUsed") => (
+            "Memory allocated via vmalloc",
+            "Actual vmalloc memory in use. Used by kernel modules, iptables, etc.",
+            "Vmalloc memory in use.\n\n💡 Diagnostic: Typically < 100MB. Growing → Possible kernel module memory leak."
+        ),
+        ("meminfo", "VmallocChunk") => (
+            "Largest free vmalloc block",
+            "Largest contiguous free vmalloc block. Irrelevant on 64-bit systems.",
+            "Largest contiguous free vmalloc block.\n\n💡 Only relevant on 32-bit kernels where vmalloc space is ~128MB."
+        ),
+        ("meminfo", "Percpu") => (
+            "Per-CPU data structure memory",
+            "Memory for per-CPU variables. Scales linearly with CPU count.",
+            "Per-CPU data structure memory.\n\n💡 Diagnostic: Percpu ≈ constant * nr_cpus. Unexpected growth → Module allocating excessive per-CPU data."
+        ),
+        ("meminfo", "HardwareCorrupted") => (
+            "Memory with hardware errors (ECC)",
+            "Memory retired due to hardware errors. No longer usable.",
+            "Memory retired due to ECC failures.\n\n💡 Diagnostic: Non-zero → CRITICAL hardware failure. Check edac-util or BIOS logs."
+        ),
+        ("meminfo", "AnonHugePages") => (
+            "Anonymous memory backed by huge pages",
+            "Anonymous memory using THP (2MB). Reduces TLB misses.",
+            "Anonymous transparent huge pages (THP).\n\n💡 Diagnostic: Zero → THP disabled or too fragmented. Some databases disable THP due to latency spikes."
+        ),
+        ("meminfo", "ShmemHugePages") => (
+            "Shared memory backed by huge pages",
+            "Shared memory (tmpfs, shmem) using huge pages.",
+            "Shared memory huge pages.\n\n💡 Requires tmpfs mounted with 'huge=always' or 'huge=within_size'."
+        ),
+        ("meminfo", "ShmemPmdMapped") => (
+            "Shared memory mapped with PMD-level huge pages",
+            "Shared memory pages mapped at PMD level (2MB granularity).",
+            "Shared memory mapped at PMD level.\n\n💡 Subset of ShmemHugePages actually mapped at 2MB granularity."
+        ),
+        ("meminfo", "FileHugePages") => (
+            "File-backed huge pages",
+            "File-backed memory using transparent huge pages.",
+            "File-backed transparent huge pages.\n\n💡 Relatively new feature for THP on file-backed pages."
+        ),
+        ("meminfo", "FilePmdMapped") => (
+            "File-backed PMD-mapped huge pages",
+            "File-backed pages mapped at PMD level (2MB).",
+            "File-backed pages mapped at PMD level.\n\n💡 Actual 2MB page table entries for file content."
+        ),
+        ("meminfo", "CmaTotal") => (
+            "Total CMA reserved memory",
+            "Memory reserved by CMA for devices needing contiguous DMA buffers.",
+            "CMA reserved area.\n\n💡 Diagnostic: 0 → CMA not configured (common on servers)."
+        ),
+        ("meminfo", "CmaFree") => (
+            "Free CMA pages",
+            "Unused CMA memory. Available for movable allocations when not used by DMA.",
+            "Free CMA memory.\n\n💡 CmaFree = CmaTotal → Reserved but unused by devices."
+        ),
+        ("meminfo", "HugePages_Total") => (
+            "Total pre-allocated huge pages",
+            "Huge pages pre-allocated via /proc/sys/vm/nr_hugepages. Typically 2MB each.",
+            "Pre-allocated huge page pool.\n\n💡 Diagnostic: Common users: databases, DPDK, VMs. This memory is NOT available for other uses."
+        ),
+        ("meminfo", "HugePages_Free") => (
+            "Unallocated huge pages",
+            "Huge pages not yet allocated to any process.",
+            "Free huge pages.\n\n💡 Diagnostic: Free = Total → No process using huge pages; reserved memory is wasted."
+        ),
+        ("meminfo", "HugePages_Rsvd") => (
+            "Huge pages reserved but not allocated",
+            "Huge pages committed but not yet faulted in.",
+            "Reserved huge pages.\n\n💡 Free - Rsvd = truly available for new reservations."
+        ),
+        ("meminfo", "HugePages_Surp") => (
+            "Surplus huge pages",
+            "Huge pages beyond nr_hugepages, created on demand when overcommit allowed.",
+            "Surplus huge pages above nr_hugepages.\n\n💡 Freed when no longer needed."
+        ),
+        ("meminfo", "Hugepagesize") => (
+            "Default huge page size",
+            "Size of each huge page, typically 2MB on x86_64.",
+            "Default huge page size.\n\n💡 Set at boot via hugepagesz= parameter. Multiple sizes can coexist."
+        ),
+        ("meminfo", "Hugetlb") => (
+            "Total memory used by huge pages",
+            "Total memory consumed by all huge page sizes. Reserved and unavailable for normal use.",
+            "Total huge page memory.\n\n💡 Diagnostic: This memory is locked. If large but unused → Reduce nr_hugepages."
+        ),
+        ("meminfo", "DirectMap4k") => (
+            "Memory mapped with 4KB pages in direct map",
+            "Physical memory using 4KB mappings in the kernel's direct map. Higher = more fragmented.",
+            "Kernel direct map using 4KB entries.\n\n💡 Diagnostic: High relative to 2M/1G → Direct map fragmentation."
+        ),
+        ("meminfo", "DirectMap2M") => (
+            "Memory mapped with 2MB pages in direct map",
+            "Physical memory using 2MB mappings. More efficient than 4KB.",
+            "Kernel direct map using 2MB entries.\n\n💡 Most memory should be mapped at 2MB or 1GB granularity."
+        ),
+        ("meminfo", "DirectMap1G") => (
+            "Memory mapped with 1GB pages in direct map",
+            "Physical memory using 1GB mappings. Most efficient for TLB.",
+            "Kernel direct map using 1GB entries.\n\n💡 Requires CPU 'pdpe1gb' flag. 0 on systems without 1GB page support."
+        ),
+
+        // ── pressure: remaining PSI fields ───────────────────────────
+        ("pressure", "cpu_some_avg60") => (
+            "CPU pressure: some stalled (60s avg)",
+            "Percentage of time at least one task stalled on CPU over 60 seconds.",
+            "CPU PSI — 60-second average.\n\n💡 Diagnostic: Compare avg10 vs avg60: avg10 >> avg60 = recent spike. avg10 ≈ avg60 = sustained."
+        ),
+        ("pressure", "cpu_some_avg300") => (
+            "CPU pressure: some stalled (5min avg)",
+            "Percentage of time at least one task stalled on CPU over 5 minutes.",
+            "CPU PSI — 5-minute average. Baseline indicator.\n\n💡 Diagnostic: > 5% sustained → System consistently CPU-constrained."
+        ),
+        ("pressure", "cpu_some_total") => (
+            "CPU pressure: total stall time (us)",
+            "Cumulative microseconds at least one task stalled on CPU since boot.",
+            "Total CPU stall microseconds.\n\n💡 Use delta between snapshots for current rate."
+        ),
+        ("pressure", "memory_some_avg60") => (
+            "Memory pressure: some stalled (60s avg)",
+            "Percentage of time at least one task stalled on memory over 60 seconds.",
+            "Memory PSI — 60-second average.\n\n💡 Diagnostic: Any sustained non-zero value means ongoing memory pressure."
+        ),
+        ("pressure", "memory_some_avg300") => (
+            "Memory pressure: some stalled (5min avg)",
+            "Percentage of time at least one task stalled on memory over 5 minutes.",
+            "Memory PSI — 5-minute average.\n\n💡 Diagnostic: > 10% sustained → Add RAM. > 40% → Critical thrashing."
+        ),
+        ("pressure", "memory_some_total") => (
+            "Memory pressure: total stall time (us)",
+            "Cumulative microseconds at least one task stalled on memory since boot.",
+            "Total memory stall microseconds (some).\n\n💡 Use delta for current rate."
+        ),
+        ("pressure", "memory_full_avg10") => (
+            "Memory pressure: ALL stalled (10s avg)",
+            "Percentage of time ALL non-idle tasks stalled on memory (10s avg).",
+            "Memory PSI 'full' — 10-second average. ALL tasks stalled = zero progress.\n\n💡 Diagnostic: > 0% → Very serious. > 10% → System barely functional."
+        ),
+        ("pressure", "memory_full_avg60") => (
+            "Memory pressure: ALL stalled (60s avg)",
+            "Percentage of time ALL tasks stalled on memory (60s avg).",
+            "Memory PSI 'full' — 60-second average.\n\n💡 Sustained non-zero → Critical state. Immediate action needed."
+        ),
+        ("pressure", "memory_full_avg300") => (
+            "Memory pressure: ALL stalled (5min avg)",
+            "Percentage of time ALL tasks stalled on memory (5min avg).",
+            "Memory PSI 'full' — 5-minute average.\n\n💡 Prolonged non-zero → System in crisis."
+        ),
+        ("pressure", "memory_full_total") => (
+            "Memory pressure: total full stall time (us)",
+            "Cumulative microseconds ALL tasks stalled on memory since boot.",
+            "Total memory full-stall microseconds.\n\n💡 full total <= some total. High ratio = stalls affect all tasks."
+        ),
+        ("pressure", "io_some_avg60") => (
+            "I/O pressure: some stalled (60s avg)",
+            "Percentage of time at least one task stalled on I/O over 60 seconds.",
+            "I/O PSI — 60-second average.\n\n💡 Diagnostic: Sustained > 5% → Consistent I/O bottleneck."
+        ),
+        ("pressure", "io_some_avg300") => (
+            "I/O pressure: some stalled (5min avg)",
+            "Percentage of time at least one task stalled on I/O over 5 minutes.",
+            "I/O PSI — 5-minute average.\n\n💡 Diagnostic: > 20% sustained → Consider SSD or I/O scheduler tuning."
+        ),
+        ("pressure", "io_some_total") => (
+            "I/O pressure: total stall time (us)",
+            "Cumulative microseconds at least one task stalled on I/O since boot.",
+            "Total I/O stall microseconds (some).\n\n💡 Use delta for current rate."
+        ),
+        ("pressure", "io_full_avg10") => (
+            "I/O pressure: ALL stalled (10s avg)",
+            "Percentage of time ALL tasks stalled on I/O (10s avg).",
+            "I/O PSI 'full' — 10-second average. ALL tasks waiting on I/O.\n\n💡 Diagnostic: > 10% → Severely I/O-bound."
+        ),
+        ("pressure", "io_full_avg60") => (
+            "I/O pressure: ALL stalled (60s avg)",
+            "Percentage of time ALL tasks stalled on I/O (60s avg).",
+            "I/O PSI 'full' — 60-second average.\n\n💡 Sustained → Storage cannot keep up. Upgrade to NVMe SSD."
+        ),
+        ("pressure", "io_full_avg300") => (
+            "I/O pressure: ALL stalled (5min avg)",
+            "Percentage of time ALL tasks stalled on I/O (5min avg).",
+            "I/O PSI 'full' — 5-minute average.\n\n💡 Prolonged → Fundamental I/O capacity problem."
+        ),
+        ("pressure", "io_full_total") => (
+            "I/O pressure: total full stall time (us)",
+            "Cumulative microseconds ALL tasks stalled on I/O since boot.",
+            "Total I/O full-stall microseconds.\n\n💡 High full/some ratio = stalls affect all tasks (single device bottleneck)."
+        ),
+
+        // ── vmstat: remaining important fields ───────────────────────
+        ("vmstat", "nr_zone_inactive_anon") => ("Inactive anon pages per zone", "Per-zone inactive anonymous page count.", "Per-zone inactive anonymous pages.\n\n💡 Used by kswapd for per-zone reclaim decisions."),
+        ("vmstat", "nr_zone_active_anon") => ("Active anon pages per zone", "Per-zone active anonymous page count.", "Per-zone active anonymous pages.\n\n💡 Used by kswapd for per-zone reclaim decisions."),
+        ("vmstat", "nr_zone_inactive_file") => ("Inactive file pages per zone", "Per-zone inactive file page count.", "Per-zone inactive file pages.\n\n💡 First pages reclaimed per zone under memory pressure."),
+        ("vmstat", "nr_zone_active_file") => ("Active file pages per zone", "Per-zone active file page count.", "Per-zone active file pages.\n\n💡 Tracks hot page cache per zone."),
+        ("vmstat", "nr_zone_unevictable") => ("Unevictable pages per zone", "Per-zone unevictable (mlock'd, ramfs) pages.", "Per-zone unevictable pages.\n\n💡 Reduce effective reclaimable memory in each zone."),
+        ("vmstat", "nr_zone_write_pending") => ("Pages with pending writes per zone", "Per-zone dirty + writeback pages.", "Per-zone write-pending pages.\n\n💡 High values → Write activity concentrated in that zone."),
+        ("vmstat", "nr_mlock") => ("Pages locked in memory (mlock)", "Total mlock'd pages. Cannot be swapped.", "mlock'd pages.\n\n💡 Compare with Mlocked in meminfo."),
+        ("vmstat", "nr_bounce") => ("Bounce buffer pages", "Bounce buffer pages for legacy DMA. Typically 0.", "Bounce buffer pages.\n\n💡 Should be 0 on modern 64-bit systems."),
+        ("vmstat", "nr_zspages") => ("Compressed pages (zswap/zram)", "Pages in compressed memory pools.", "Compressed swap pages.\n\n💡 If zswap enabled, these hold compressed swapped-out data."),
+        ("vmstat", "nr_free_cma") => ("Free CMA pages", "Free pages in CMA region.", "Free CMA pages.\n\n💡 Available for movable allocations when not needed by devices."),
+        ("vmstat", "nr_file_pages") => ("Total file-backed pages", "Total page cache + swap cache + buffers.", "Total file-backed pages.\n\n💡 Large values are healthy — kernel is caching file data."),
+        ("vmstat", "nr_shmem_hugepages") => ("Shared memory huge pages", "Huge pages for shared memory.", "Shared memory huge pages.\n\n💡 Non-zero when tmpfs uses huge pages."),
+        ("vmstat", "nr_shmem_pmdmapped") => ("Shared memory PMD-mapped", "Shmem pages mapped at PMD level (2MB).", "Shmem PMD-mapped pages.\n\n💡 Actually mapped at 2MB granularity."),
+        ("vmstat", "nr_file_hugepages") => ("File-backed huge pages", "Huge pages for file-backed memory.", "File-backed huge pages.\n\n💡 THP applied to file-backed memory."),
+        ("vmstat", "nr_file_pmdmapped") => ("File pages mapped by PMD", "File pages at PMD level (2MB).", "File PMD-mapped pages.\n\n💡 Actual huge page mappings for file content."),
+        ("vmstat", "nr_anon_transparent_hugepages") => ("Anonymous transparent huge pages", "THP count for anonymous memory. Each = 2MB.", "Anonymous THP count.\n\n💡 Count * 2MB = total THP memory. Zero → THP disabled or fragmented."),
+        ("vmstat", "nr_vmscan_write") => ("Pages written during reclaim", "Pages written by vmscan. Indicates heavy reclaim.", "Vmscan writes.\n\n💡 Writing during reclaim = clean pages exhausted."),
+        ("vmstat", "nr_vmscan_immediate_reclaim") => ("Pages immediately reclaimed", "Pages reclaimed immediately, bypassing LRU aging.", "Immediate reclaim pages.\n\n💡 High values → Aggressive reclaim under severe pressure."),
+        ("vmstat", "nr_dirtied") => ("Total pages dirtied since boot", "Cumulative dirtied page count.", "Total dirtied pages.\n\n💡 Delta gives current dirty rate. Compare with nr_written."),
+        ("vmstat", "nr_written") => ("Total pages written since boot", "Cumulative written page count.", "Total written pages.\n\n💡 nr_dirtied - nr_written = dirty backlog."),
+        ("vmstat", "nr_kernel_stack") => ("Kernel stack pages", "Pages for kernel thread stacks.", "Kernel stack pages.\n\n💡 Divide by pages-per-stack to estimate thread count."),
+        ("vmstat", "nr_page_table_pages") => ("Page table pages", "Pages for page table entries.", "Page table pages.\n\n💡 Compare with PageTables in meminfo."),
+        ("vmstat", "nr_swapcached") => ("Pages in swap cache", "Pages in both RAM and swap.", "Swap cache pages.\n\n💡 Non-zero after memory pressure events."),
+        ("vmstat", "nr_dirty_threshold") => ("Dirty page threshold", "Dirty pages at which writers are throttled.", "Dirty throttle threshold.\n\n💡 Tune vm.dirty_ratio if writers experience latency."),
+        ("vmstat", "nr_dirty_background_threshold") => ("Background dirty threshold", "Dirty pages triggering background writeback.", "Background writeback threshold.\n\n💡 Tune vm.dirty_background_ratio."),
+        ("vmstat", "workingset_nodes") => ("Workingset shadow nodes", "Shadow nodes tracking evicted page access.", "Workingset shadow nodes.\n\n💡 Used by kernel's adaptive LRU balancing."),
+        ("vmstat", "workingset_refault_anon") => ("Anon workingset refaults", "Evicted anon pages faulted back in.", "Anon refaults.\n\n💡 High rate → Working set exceeds RAM. Thrashing."),
+        ("vmstat", "workingset_refault_file") => ("File workingset refaults", "Evicted file pages re-read from disk.", "File refaults.\n\n💡 High rate → Page cache too small for file working set."),
+        ("vmstat", "workingset_activate_anon") => ("Anon workingset activations", "Anon pages promoted via refault detection.", "Anon workingset activations.\n\n💡 Refaulted pages placed on active list directly."),
+        ("vmstat", "workingset_activate_file") => ("File workingset activations", "File pages promoted via refault detection.", "File workingset activations.\n\n💡 Protects frequently-accessed file pages."),
+        ("vmstat", "workingset_restore_anon") => ("Anon workingset restores", "Anon pages restored to active state.", "Anon workingset restores.\n\n💡 High values → Churn in anonymous working set."),
+        ("vmstat", "workingset_restore_file") => ("File workingset restores", "File pages restored to active state.", "File workingset restores.\n\n💡 High values → Page cache under pressure."),
+        ("vmstat", "workingset_nodereclaim") => ("Shadow nodes reclaimed", "Shadow nodes freed under memory pressure.", "Shadow node reclaim.\n\n💡 Severe pressure causes loss of workingset tracking."),
+        ("vmstat", "numa_hit") => ("NUMA allocations on intended node", "Allocations on the intended NUMA node.", "NUMA-local allocations.\n\n💡 numa_hit / (hit + miss) = locality ratio. Close to 100% is ideal."),
+        ("vmstat", "numa_miss") => ("NUMA allocations on wrong node", "Allocations on non-intended NUMA node.", "NUMA misses.\n\n💡 High miss rate → Remote memory latency. Use numactl --membind."),
+        ("vmstat", "numa_foreign") => ("NUMA foreign allocations", "Allocations meant for this node but placed elsewhere.", "NUMA foreign.\n\n💡 Complement of numa_miss from the other node."),
+        ("vmstat", "numa_local") => ("NUMA local allocations", "Allocations on CPU's local NUMA node.", "NUMA-local allocations.\n\n💡 Higher is better for performance."),
+        ("vmstat", "numa_other") => ("NUMA remote allocations", "Allocations on a remote NUMA node.", "NUMA remote.\n\n💡 High → Poor memory affinity."),
+        ("vmstat", "pgfree") => ("Pages freed", "Total pages returned to free pool since boot.", "Pages freed.\n\n💡 Should track with pgalloc_*."),
+        ("vmstat", "pgactivate") => ("Pages moved to active list", "Pages promoted to active LRU due to access.", "Pages activated.\n\n💡 High rate → Healthy working set cycling."),
+        ("vmstat", "pgdeactivate") => ("Pages moved to inactive list", "Pages demoted to inactive LRU during reclaim.", "Pages deactivated.\n\n💡 Increasing rate → Memory pressure."),
+        ("vmstat", "pglazyfree") => ("Pages marked for lazy freeing", "Pages marked MADV_FREE, not yet reclaimed.", "Lazy-free pages.\n\n💡 Kernel reclaims only under memory pressure."),
+        ("vmstat", "pglazyfreed") => ("Pages actually lazy-freed", "MADV_FREE pages reclaimed by the kernel.", "Lazy-freed pages.\n\n💡 Reclaimed from the lazy-free pool."),
+        ("vmstat", "pgrefill") => ("Pages scanned during LRU refill", "Pages scanned refilling inactive from active list.", "LRU refill scans.\n\n💡 High rate → Active memory reclaim aging."),
+        ("vmstat", "pgreuse") => ("Pages reused via fast path", "Pages reused without full allocation path.", "Fast-path reuses.\n\n💡 Higher is better."),
+        ("vmstat", "pgsteal_kswapd") => ("Pages reclaimed by kswapd", "Background reclaim — no process blocked.", "kswapd reclaim.\n\n💡 High kswapd with low direct = healthy reclaim."),
+        ("vmstat", "pgsteal_direct") => ("Pages reclaimed by direct reclaim", "Blocking reclaim — allocating process waits.", "Direct reclaim.\n\n💡 High → kswapd can't keep up. Need more RAM."),
+        ("vmstat", "pgscan_kswapd") => ("Pages scanned by kswapd", "Pages examined during background reclaim.", "kswapd scans.\n\n💡 scan - steal = pages not reclaimable."),
+        ("vmstat", "pgscan_direct") => ("Pages scanned by direct reclaim", "Pages examined during blocking reclaim.", "Direct reclaim scans.\n\n💡 High scan/steal ratio → Inefficient reclaim."),
+        ("vmstat", "pgscan_direct_throttle") => ("Direct reclaim throttled", "Direct reclaim throttled to prevent CPU overuse.", "Reclaim throttle events.\n\n💡 Very heavy memory pressure."),
+        ("vmstat", "pgscan_anon") => ("Anonymous pages scanned", "Anon pages examined for reclaim (requires swap).", "Anon page scans.\n\n💡 Expensive — requires swap-out."),
+        ("vmstat", "pgscan_file") => ("File pages scanned", "File pages examined for reclaim.", "File page scans.\n\n💡 Cheaper than anon reclaim."),
+        ("vmstat", "pgsteal_anon") => ("Anonymous pages reclaimed", "Anon pages swapped out.", "Anon pages stolen.\n\n💡 > 0 → Active swapping."),
+        ("vmstat", "pgsteal_file") => ("File pages reclaimed", "File pages dropped or written back.", "File pages stolen.\n\n💡 Healthy reclaim path."),
+        ("vmstat", "zone_reclaim_failed") => ("Zone reclaim failures", "Zone reclaim couldn't free enough pages.", "Zone reclaim failures.\n\n💡 NUMA zones under pressure."),
+        ("vmstat", "pginodesteal") => ("Pages freed via inode reclaim", "Pages freed when inodes are evicted.", "Inode-steal pages.\n\n💡 Inode eviction frees associated page cache."),
+        ("vmstat", "kswapd_inodesteal") => ("Inodes reclaimed by kswapd", "Inodes evicted during background reclaim.", "kswapd inode reclaim.\n\n💡 Frees inode memory + associated page cache."),
+        ("vmstat", "kswapd_low_wmark_hit_quickly") => ("kswapd hit low watermark quickly", "Free pages dropped to low watermark soon after kswapd.", "Low watermark hit quickly.\n\n💡 kswapd not reclaiming enough per cycle."),
+        ("vmstat", "kswapd_high_wmark_hit_quickly") => ("kswapd hit high watermark quickly", "kswapd quickly restored free pages above high watermark.", "High watermark hit quickly.\n\n💡 Healthy — kswapd keeping up."),
+        ("vmstat", "pageoutrun") => ("kswapd wakeups", "Times kswapd woken for page-out.", "kswapd wakeups.\n\n💡 Increasing rate → Frequent memory pressure."),
+        ("vmstat", "pgrotated") => ("Pages rotated to LRU tail", "Dirty pages rotated during reclaim.", "LRU rotations.\n\n💡 Many dirty pages encountered during reclaim."),
+        ("vmstat", "drop_pagecache") => ("Page cache drops", "Manual page cache drop events.", "Page cache drops.\n\n💡 Triggered by drop_caches. Harmful in production."),
+        ("vmstat", "drop_slab") => ("Slab cache drops", "Manual slab cache drop events.", "Slab cache drops.\n\n💡 Triggered by drop_caches."),
+        ("vmstat", "pgmigrate_success") => ("Successful page migrations", "Pages migrated for NUMA balancing or compaction.", "Migration success.\n\n💡 High success rate is good."),
+        ("vmstat", "pgmigrate_fail") => ("Failed page migrations", "Pages that couldn't be migrated.", "Migration failures.\n\n💡 High → Many pinned pages."),
+        ("vmstat", "thp_fault_alloc") => ("THP fault allocations", "THP allocated on page fault (2MB instead of 4KB).", "THP fault alloc.\n\n💡 Higher is better."),
+        ("vmstat", "thp_fault_fallback") => ("THP fault fallbacks", "THP allocation fell back to 4KB page.", "THP fault fallback.\n\n💡 High → Memory too fragmented for THP."),
+        ("vmstat", "thp_collapse_alloc") => ("THP collapse allocations", "khugepaged collapsed base pages into THP.", "khugepaged collapses.\n\n💡 Background merging of 512 base pages into 2MB THP."),
+        ("vmstat", "thp_collapse_alloc_failed") => ("Failed THP collapses", "khugepaged collapse allocation failed.", "Failed collapses.\n\n💡 Fragmentation prevents THP formation."),
+        ("vmstat", "thp_split_page") => ("THP page splits", "THP split back into 512 base pages.", "THP splits.\n\n💡 High with high alloc → Workload doesn't benefit from THP."),
+        ("vmstat", "thp_split_pmd") => ("THP PMD splits", "PMD entries split from 2MB to 4KB mappings.", "THP PMD splits.\n\n💡 Happens during partial unmap or mprotect."),
+        ("vmstat", "thp_zero_page_alloc") => ("THP zero page allocations", "Huge zero pages for uninitialized memory.", "THP zero pages.\n\n💡 Shared read-only zero pages save memory."),
+        ("vmstat", "thp_swpout") => ("THP swapped out whole", "THP swapped as single 2MB unit.", "THP swap-out.\n\n💡 More efficient than splitting first."),
+        ("vmstat", "thp_swpout_fallback") => ("THP swap-out fallbacks", "THP had to be split before swapping.", "THP swap-out fallback.\n\n💡 Less efficient split-then-swap."),
+        ("vmstat", "compact_stall") => ("Direct compaction stalls", "Process stalled during memory compaction.", "Compaction stalls.\n\n💡 High → Fragmentation causing allocation delays."),
+        ("vmstat", "compact_fail") => ("Compaction failures", "Compaction failed to create contiguous block.", "Compaction failures.\n\n💡 High → Severe fragmentation."),
+        ("vmstat", "compact_success") => ("Successful compactions", "Compaction created requested contiguous block.", "Compaction success.\n\n💡 success/(success+fail) = success rate."),
+        ("vmstat", "compact_daemon_wake") => ("Compaction daemon wakeups", "kcompactd woken for proactive compaction.", "kcompactd wakeups.\n\n💡 Tunable via compaction_proactiveness."),
+        ("vmstat", "compact_migrate_scanned") => ("Compaction migration scanned", "Pages examined for movable pages.", "Compaction migration scans.\n\n💡 High with low success → Few movable pages."),
+        ("vmstat", "compact_free_scanned") => ("Compaction free space scanned", "Pages examined for free target pages.", "Compaction free scans.\n\n💡 More scanning = more fragmented."),
+        ("vmstat", "swap_ra") => ("Swap read-ahead pages", "Pages speculatively read from swap.", "Swap read-ahead.\n\n💡 Effective for sequential swap access."),
+        ("vmstat", "swap_ra_hit") => ("Swap read-ahead hits", "Read-ahead pages actually used.", "Swap read-ahead hits.\n\n💡 hit/ra = hit rate. Low → Random access; read-ahead wastes I/O."),
+        ("vmstat", "balloon_inflate") => ("Balloon inflate (VM)", "Pages returned to hypervisor.", "Balloon inflation.\n\n💡 VM returning memory to host."),
+        ("vmstat", "balloon_deflate") => ("Balloon deflate (VM)", "Pages reclaimed from hypervisor.", "Balloon deflation.\n\n💡 VM getting memory back from host."),
+        ("vmstat", "unevictable_pgs_culled") => ("Unevictable pages culled", "Pages moved to unevictable list.", "Pages culled.\n\n💡 Detected as non-evictable (mlock'd, ramfs)."),
+        ("vmstat", "unevictable_pgs_scanned") => ("Unevictable pages scanned", "Unevictable pages encountered during scan.", "Unevictable scans.\n\n💡 Wasted work scanning non-reclaimable pages."),
+        ("vmstat", "unevictable_pgs_rescued") => ("Unevictable pages rescued", "Pages moved back to normal LRU.", "Pages rescued.\n\n💡 After munlock, pages rejoin LRU."),
+        ("vmstat", "unevictable_pgs_mlocked") => ("Pages mlocked", "Pages made unevictable via mlock().", "Pages mlocked.\n\n💡 Rate of memory locking."),
+        ("vmstat", "unevictable_pgs_munlocked") => ("Pages munlocked", "Pages returned to LRU after munlock().", "Pages munlocked.\n\n💡 Now eligible for reclaim."),
+        ("vmstat", "direct_map_level2_splits") => ("Direct map 2MB splits", "2MB direct map entries split into 4KB.", "2MB page splits.\n\n💡 Caused by page attribute changes. Increases TLB pressure."),
+        ("vmstat", "direct_map_level3_splits") => ("Direct map 1GB splits", "1GB direct map entries split into 2MB.", "1GB page splits.\n\n💡 Less common but larger TLB impact."),
 
         _ => return None,
     })
@@ -1654,6 +2532,623 @@ fn field_desc_ja(source: &str, field: &str) -> Option<(&'static str, &'static st
         ("schedstat", "version") => ("スケジューラ統計バージョン。", "schedstat フォーマットのバージョン番号。", "schedstat フォーマットバージョン。\n\n💡 バージョン 15 が現在のフォーマット。"),
         ("schedstat", "cpu_count") => ("スケジューラ統計のある CPU 数。", "スケジューラ統計を報告する CPU 数。", "スケジューラ統計の CPU 数。\n\n💡 cpuinfo の CPU 数と一致するはず。少ない場合は一部がオフライン。"),
         ("schedstat", "cpu_stats") => ("CPU 別スケジューラ統計。", "yield 回数、スケジュール回数、アイドル回数、try-to-wake-up 回数等。", "CPU 別スケジューラ統計テーブル。\n\nカラム: cpu、yld_count、sched_count、sched_goidle、ttwu_count、...\n\n💡 診断:\n  • 高い sched_count → 多数のコンテキストスイッチ\n  • sched_goidle / sched_count → アイドル率\n  • CPU 間の大きな格差 → ワークロード不均衡"),
+
+        // file-nr — 追加フィールド
+        ("file-nr", "fd_unused") => (
+            "未使用（キャッシュ）ファイルディスクリプタ数",
+            "割り当て済みだが未使用のファイルハンドル数。再利用のためカーネルのフリーリストに保持。",
+            "カーネルのフリーリストに保持されている未使用ファイルハンドル。\n\n💡 診断: fd_allocated に対して fd_unused が多い場合、カーネルが事前に多く割り当てている。無害 — ハンドルは再利用される。"
+        ),
+        ("file-nr", "fd_max") => (
+            "ファイルディスクリプタ最大数（システム上限）",
+            "カーネルが割り当てるファイルハンドルの最大数。この上限に達すると全プロセスで EMFILE エラーが発生。",
+            "システム全体の FD 最大数 (fs.file-max)。\n\nfd_allocated が fd_max に近づくと、新しい open()/socket() が EMFILE で失敗する。\n\n💡 診断:\n  • デフォルトは RAM に応じて 100000-1000000\n  • 引き上げ: sysctl -w fs.file-max=<値> または /etc/sysctl.conf に永続化\n  • プロセスごとの上限 (ulimit -n) は別で、通常より低い"
+        ),
+
+        // df — 追加フィールド
+        ("df", "total_disk") => (
+            "ディスク容量合計（ルート FS）",
+            "ルート (/) ファイルシステムの合計容量（バイト）。root ユーザー用予約領域を含む。",
+            "ルートファイルシステムの合計ディスク容量。\n\n💡 診断: total_disk が物理パーティションより小さい場合、予約ブロック（ext4 で通常 5%）を確認。`tune2fs -m <pct> /dev/sdX` で調整可能。"
+        ),
+        ("df", "used_disk") => (
+            "使用ディスク容量（ルート FS）",
+            "ルートファイルシステムの使用済みバイト数。ファイル、ディレクトリ、ファイルシステムメタデータを含む。",
+            "ルートファイルシステムの使用ディスク容量。\n\n💡 診断: used_disk が total_disk に近い場合、システムが応答不能になる可能性。ログ書き込み失敗、DB クラッシュ、パッケージマネージャ障害。即座のクリーンアップが必要。"
+        ),
+        ("df", "available_disk") => (
+            "利用可能ディスク容量（ルート FS）",
+            "ルートファイルシステムの非 root ユーザーが利用可能なバイト数。予約ブロックのため total - used より少ない。",
+            "ルートファイルシステムの利用可能ディスク容量（非 root ユーザー向け）。\n\next4 のデフォルトでは約 5% が root 用に予約されるため (total - used) より少ない。\n\n💡 診断:\n  • 1 GB 未満 → 本番システムでは危険\n  • 急速に減少 → ログファイルやテンポラリファイルの蓄積\n  • 大きなファイルを見つける: `du -sh /* | sort -h | tail -10`"
+        ),
+
+        // ── net/snmp — 追加の重要カウンタ ────────────────────────────
+
+        ("net/snmp", "Ip_Forwarding") => (
+            "IP フォワーディング状態",
+            "ホストがパケット転送を行うか (1=有効 ルーターモード、2=無効 ホストモード)。",
+            "IP フォワーディング状態。\n\n1 = 転送有効（ルーターモード）、2 = 転送無効（ホストモード）。\n\n💡 診断:\n  • ほとんどのサーバー/ワークステーションでは 2\n  • ルーター、VPN ゲートウェイ、コンテナホストでは 1\n  • 切替: sysctl net.ipv4.ip_forward=1"
+        ),
+        ("net/snmp", "Ip_InHdrErrors") => (
+            "IP ヘッダーエラーのパケット数",
+            "不正な IP ヘッダー（チェックサムエラー、無効なバージョン等）によりドロップされたパケット。",
+            "IP ヘッダーエラーによるドロップ。\n\n💡 診断:\n  • 0 または 0 に近いはず\n  • 非ゼロ → ネットワーク上の破損パケット、NIC 障害、攻撃トラフィック"
+        ),
+        ("net/snmp", "Ip_InAddrErrors") => (
+            "IP アドレスエラーのパケット数",
+            "宛先 IP がこのホストに対して無効だったためドロップされたパケット。",
+            "IP アドレスエラーによるドロップ。\n\n💡 診断: 非ゼロはルーティングの問題、または誤設定されたクライアントが間違ったホストにトラフィックを送信していることを示唆。"
+        ),
+        ("net/snmp", "Ip_ForwDatagrams") => (
+            "IP 転送パケット数",
+            "別の宛先に転送されたパケット。非ゼロはホストがルーターとして動作していることを意味。",
+            "別ホップに転送された IP データグラム。\n\n💡 診断:\n  • ip_forward 無効時は 0 であるべき\n  • 転送無効で非ゼロ → 設定ミス\n  • ルーター/ゲートウェイではコアトラフィックカウンタ"
+        ),
+        ("net/snmp", "Ip_InDelivers") => (
+            "上位プロトコルに配信された IP パケット",
+            "上位レイヤープロトコル (TCP、UDP、ICMP) にデマルチプレクスされ配信されたパケット。",
+            "上位プロトコルに配信された IP パケット。\n\n💡 診断: Ip_InReceives - Ip_InDelivers = IP 層でドロップ/転送されたパケット。大きな差 = 多数のドロップまたは転送トラフィック。"
+        ),
+        ("net/snmp", "Ip_OutDiscards") => (
+            "送信 IP パケットの破棄数",
+            "送信準備ができたが破棄されたパケット（バッファ不足やルーティング失敗が原因）。",
+            "送信 IP パケットの破棄。\n\n💡 診断: 非ゼロ → TX パスの輻輳。NIC の TX リングバッファサイズとインターフェースエラーを確認。"
+        ),
+        ("net/snmp", "Ip_OutNoRoutes") => (
+            "ルートなしの IP パケット",
+            "ルーティングテーブルに宛先へのルートがなかったためドロップされたパケット。",
+            "ルート不在による IP パケットドロップ。\n\n💡 診断:\n  • 非ゼロ → アプリケーションが到達不能なネットワークに接続を試行\n  • ルーティングテーブルを確認: `ip route show`\n  • 一般的な原因: デフォルトゲートウェイ未設定または VPN トンネルダウン"
+        ),
+        ("net/snmp", "Ip_ReasmFails") => (
+            "IP 再構成失敗数",
+            "IP フラグメント再構成の試行が失敗した回数（タイムアウト、フラグメント欠落、リソース枯渇）。",
+            "IP フラグメント再構成の失敗。\n\n💡 診断:\n  • 非ゼロ → フラグメントが転送中に失われている（ファイアウォールブロック、MTU 問題）\n  • 対処: PMTUD が動作するようにする（ICMP type 3 をブロックしない）"
+        ),
+        ("net/snmp", "Tcp_CurrEstab") => (
+            "現在確立中の TCP 接続数",
+            "ESTABLISHED または CLOSE_WAIT 状態の TCP 接続のスナップショット。重要な容量指標。",
+            "現在の ESTABLISHED + CLOSE_WAIT TCP 接続数。\n\nポイントインタイムのゲージ（他のカウンタと異なり累積ではない）。\n\n💡 診断:\n  • ベースラインを把握して通常の接続負荷を理解\n  • プラトーなしの継続的増加 → 接続リーク\n  • 急激な減少 → 大量切断イベントまたはサービス再起動"
+        ),
+        ("net/snmp", "Tcp_InSegs") => (
+            "TCP セグメント受信数",
+            "受信した TCP セグメントの合計。OutSegs と合わせて TCP スループットの全体像を把握。",
+            "受信 TCP セグメント合計。\n\n💡 診断: 変化率がインバウンド TCP スループットを示す。InSegs レート vs OutSegs レートでトラフィック方向の偏りを確認。"
+        ),
+        ("net/snmp", "Tcp_OutSegs") => (
+            "TCP セグメント送信数",
+            "送信した TCP セグメントの合計（再送を含む）。主要なアウトバウンド TCP ボリュームカウンタ。",
+            "送信 TCP セグメント合計。\n\n💡 診断: RetransSegs / OutSegs で再送率を算出。0.1% 未満は優秀、1% 超は問題。"
+        ),
+        ("net/snmp", "Tcp_AttemptFails") => (
+            "TCP 接続試行失敗数",
+            "ハンドシェイク中に失敗した接続（SYN 送信後に SYN-ACK なし等）。",
+            "TCP 接続試行の失敗。\n\n💡 診断:\n  • 高レート → 対象ホストに到達不能、FW ブロック、または過負荷\n  • AttemptFails / ActiveOpens = アウトバウンド失敗率"
+        ),
+        ("net/snmp", "Tcp_EstabResets") => (
+            "確立済み接続のリセット",
+            "ESTABLISHED 接続がリセット (RST) された数。異常な接続終了を示す。",
+            "ESTABLISHED 状態からリセットされた TCP 接続。\n\n💡 診断:\n  • 高レート → リモートホストのクラッシュ、FW による接続切断、アプリのバグ\n  • OutRsts と比較してリセット送信元を特定"
+        ),
+        ("net/snmp", "Tcp_OutRsts") => (
+            "TCP RST セグメント送信数",
+            "このホストが送信した RST セグメント。接続拒否や異常切断を示す。",
+            "TCP RST セグメント送信数。\n\n💡 診断:\n  • 高レート → 閉じたポートへの多数の接続、またはアプリケーションの接続拒否\n  • 一般的な原因: ポートスキャン、またはサービス再起動"
+        ),
+        ("net/snmp", "Tcp_InCsumErrors") => (
+            "TCP チェックサムエラー",
+            "チェックサムが無効な TCP セグメント。ネットワーク経路上のデータ破損を示す。",
+            "TCP チェックサムエラーのセグメント。\n\n💡 診断:\n  • 健全なネットワークでは 0 であるべき\n  • 非ゼロ → NIC オフロードバグ、不良ケーブル、メモリ破損\n  • Udp_InCsumErrors も確認 → リンクレベルの破損"
+        ),
+        ("net/snmp", "Udp_InDatagrams") => (
+            "UDP データグラム受信数",
+            "アプリケーションに正常に配信された UDP データグラムの合計。",
+            "受信・配信された UDP データグラム。\n\n💡 診断: 変化率が UDP 入力スループットを示す。一般的な UDP 利用: DNS (53)、NTP (123)、SNMP (161)。"
+        ),
+        ("net/snmp", "Udp_OutDatagrams") => (
+            "UDP データグラム送信数",
+            "このホストが送信した UDP データグラムの合計。",
+            "送信 UDP データグラム。\n\n💡 診断: OutDatagrams が多く InDatagrams が少ない → UDP 送信者（syslog フォワーダー、DNS サーバー応答）。逆 → UDP コンシューマ。"
+        ),
+        ("net/snmp", "Udp_NoPorts") => (
+            "閉じたポートへの UDP パケット",
+            "リスナーがないポートに受信した UDP データグラム。各パケットで ICMP ポート到達不能応答を生成。",
+            "リスナーなしのポートへの UDP データグラム。\n\n💡 診断:\n  • 非ゼロは正常（散発的なプローブ、古い DNS 応答）\n  • 高レート → ポートスキャンまたは誤設定クライアント\n  • 各パケットで ICMP ポート到達不能を生成し帯域幅を消費"
+        ),
+        ("net/snmp", "Udp_RcvbufErrors") => (
+            "UDP 受信バッファオーバーフロー",
+            "ソケット受信バッファが満杯のためドロップされた UDP データグラム。アプリの読み取りが遅い。",
+            "UDP 受信バッファオーバーフローによるドロップ。\n\n💡 診断:\n  • 非ゼロ → アプリが UDP 受信レートに追いつけない\n  • 対処: SO_RCVBUF または sysctl net.core.rmem_max でバッファ拡大\n  • またはアプリの読み取り処理を最適化"
+        ),
+        ("net/snmp", "Udp_SndbufErrors") => (
+            "UDP 送信バッファオーバーフロー",
+            "送信バッファが満杯のためドロップされた UDP データグラム。送信速度がネットワークを超過。",
+            "UDP 送信バッファオーバーフローによるドロップ。\n\n💡 診断:\n  • アプリが NIC の送信速度を超えて送信\n  • 対処: net.core.wmem_max を増加、または送信レートを抑制"
+        ),
+        ("net/snmp", "Udp_InCsumErrors") => (
+            "UDP チェックサムエラー",
+            "チェックサムが無効な UDP データグラム。転送中のデータ破損。",
+            "UDP チェックサムエラー。\n\n💡 診断: TCP チェックサムエラーと同じ意味 — NIC/ケーブル/ドライバの問題。Tcp_InCsumErrors と相互確認。"
+        ),
+        ("net/snmp", "Icmp_InMsgs") => (
+            "ICMP メッセージ受信数",
+            "受信した ICMP メッセージの合計（ping 応答、到達不能、リダイレクト等）。",
+            "インバウンド ICMP メッセージ合計。\n\n💡 診断: 高レートは ping フラッド、PMTUD 活動、またはネットワークエラーシグナリングを示す可能性。"
+        ),
+        ("net/snmp", "Icmp_InErrors") => (
+            "ICMP 入力エラー",
+            "エラーのある ICMP メッセージ（不正チェックサム、短すぎる等）。",
+            "エラーのある ICMP メッセージ。\n\n💡 診断: 0 に近いはず。非ゼロはネットワーク上の破損した ICMP パケットを示す。"
+        ),
+        ("net/snmp", "Icmp_InDestUnreachs") => (
+            "ICMP 宛先到達不能受信数",
+            "受信した ICMP 宛先到達不能メッセージ。リモートポート/ホストへの到達不能を示す。",
+            "受信した ICMP 宛先到達不能メッセージ。\n\n💡 診断:\n  • 高レート → 多数のアウトバウンド接続が失敗（FW ドロップ、ホストダウン）\n  • Type 3 code 4 → PMTUD 問題、MTU を確認\n  • Type 3 code 3 → リモートアプリがリッスンしていない"
+        ),
+        ("net/snmp", "Icmp_OutMsgs") => (
+            "ICMP メッセージ送信数",
+            "このホストが送信した ICMP メッセージの合計（ping 要求、到達不能応答等）。",
+            "アウトバウンド ICMP メッセージ合計。\n\n💡 診断: 宛先到達不能を多く含む高い OutMsgs → このホストがトラフィックを拒否中（閉じたポートが ICMP 到達不能を生成）。"
+        ),
+
+        // ── net/netstat — 追加の重要カウンタ ─────────────────────────
+
+        ("net/netstat", "TcpExt_SyncookiesSent") => (
+            "SYN Cookie 送信数（SYN フラッド防御）",
+            "SYN Cookie が送信された回数。非ゼロは SYN キューがオーバーフローし SYN フラッド防御が作動したことを意味。",
+            "TCP SYN Cookie 送信数。\n\nSYN Cookie は SYN フラッド攻撃に対する防御。SYN キューが満杯の時、カーネルが SYN-ACK シーケンス番号に接続状態をエンコード。\n\n💡 診断:\n  • 非ゼロ → SYN フラッド検知またはリスンバックログが小さすぎる\n  • 正当なトラフィックの場合: net.ipv4.tcp_max_syn_backlog を増加"
+        ),
+        ("net/netstat", "TcpExt_SyncookiesRecv") => (
+            "SYN Cookie 受信数（検証済み）",
+            "正常に検証された SYN Cookie の数。SYN Cookie モードを通過した正当な接続。",
+            "クライアントから返された有効な SYN Cookie。\n\n💡 診断: SyncookiesSent >> SyncookiesRecv の場合、ほとんどの SYN フラッドトラフィックは偽装 IP から（ハンドシェイクを完了しない）。"
+        ),
+        ("net/netstat", "TcpExt_SyncookiesFailed") => (
+            "無効な SYN Cookie 受信数",
+            "検証に失敗した SYN Cookie。パケットが改変された正当なクライアントか攻撃トラフィック。",
+            "無効な SYN Cookie 検証失敗。\n\n💡 診断: SyncookiesSent と共に高レート → 偽装完了を試みるアクティブな SYN フラッド攻撃。"
+        ),
+        ("net/netstat", "TcpExt_TW") => (
+            "タイムアウトでリサイクルされた TIME_WAIT ソケット",
+            "2*MSL タイムアウト後に自然に期限切れとなった TIME_WAIT ソケット。",
+            "正常に期限切れした TIME_WAIT ソケット。\n\n💡 診断: これは通常のクリーンアップパス。TCPTimeWaitOverflow と比較してリサイクルが追いついているか確認。"
+        ),
+        ("net/netstat", "TcpExt_PAWSEstab") => (
+            "PAWS により拒否された確立済み接続のパケット",
+            "PAWS (Protection Against Wrapped Sequences) により確立済み接続で拒否されたセグメント。",
+            "確立済み接続での PAWS 拒否。\n\n💡 診断:\n  • 散発的は正常（ルート変更後の古い重複セグメント）\n  • 持続的な高レート → 片側のタイムスタンプクロック問題、またはミドルボックスが TCP タイムスタンプを除去"
+        ),
+        ("net/netstat", "TcpExt_DelayedACKs") => (
+            "遅延 ACK 送信数",
+            "データセグメントにピギーバックするために遅延された ACK。パケット数を削減する通常の TCP 最適化。",
+            "遅延 ACK 送信数（ピギーバック最適化）。\n\n💡 診断: 高い値は正常 — TCP が ACK を効率的にバッチ処理していることを意味する。"
+        ),
+        ("net/netstat", "TcpExt_TCPHPHits") => (
+            "TCP ヘッダー予測ヒット（高速パス）",
+            "高速パス（ヘッダー予測）で処理されたパケット。高いほど良い — 大部分が一般的なケースに従うことを意味。",
+            "TCP ヘッダー予測高速パスヒット。\n\n💡 診断: InSegs に対して HPHits が高いほどネットワークスタックが効率的。低い比率 → 異常なパケットパターンが低速パス処理を強制。"
+        ),
+        ("net/netstat", "TcpExt_TCPPureAcks") => (
+            "純粋 ACK 受信数（データなし）",
+            "データペイロードを含まない ACK セグメント。対話型プロトコルやデータバースト後に一般的。",
+            "純粋 ACK 受信（確認応答のみ、データなし）。\n\n💡 診断: 純粋 ACK の比率が高い → 一方向のデータフロー（片側が送信、もう片側が ACK のみ）。ダウンロード/アップロードでは正常。"
+        ),
+        ("net/netstat", "TcpExt_TCPSackRecovery") => (
+            "SACK ベースのロスリカバリ",
+            "TCP が SACK 情報を使ってフル再送タイムアウトなしにパケットロスから回復した回数。",
+            "TCP SACK ベースのロスリカバリイベント。\n\n💡 診断:\n  • SACK リカバリは RTO ベースより遥かに高速\n  • 高い値 → パケットロスが発生しているが SACK がうまく処理\n  • TCPTimeouts と比較 — タイムアウトは SACK では対処できなかったことを意味"
+        ),
+        ("net/netstat", "TcpExt_TCPFastRetrans") => (
+            "TCP 高速再送",
+            "タイムアウト待ちの代わりに高速再送（3重複 ACK）で再送されたセグメント。",
+            "TCP 高速再送（3 重複 ACK でトリガー）。\n\n💡 診断:\n  • 高速再送はタイムアウトより望ましい — リカバリが遥かに速い\n  • 高レート → ネットワーク上の頻繁なパケットロス"
+        ),
+        ("net/netstat", "TcpExt_TCPLossProbes") => (
+            "TCP テールロスプローブ送信数",
+            "フル RTO を待たずにトランザクション末尾のロスを検出する TLP セグメント。",
+            "TCP テールロスプローブ (TLP) 送信数。\n\nTLP は RTO より速くテールロスを検出するメカニズム。バーストの最後のセグメントが失われた場合、TLP が先行して再送。\n\n💡 診断: 高い TLP 数 → 多数のトランザクションで最後のパケットが失われている。"
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnData") => (
+            "接続中断（クローズ後のデータ）",
+            "接続クローズ後にデータが受信されたため中断された TCP 接続。",
+            "クローズ後の予期しないデータによる TCP 接続中断。\n\n💡 診断: 通常は接続シャットダウン後にピアがデータを送信したことを示す。アプリケーションレベルのプロトコル不一致。"
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnClose") => (
+            "接続中断（保留データありでクローズ）",
+            "未読データがバッファにある状態でアプリがソケットをクローズしたため RST で終了。",
+            "保留データありで close() による TCP 接続中断。\n\n💡 診断:\n  • アプリが全データを読まずにソケットをクローズ\n  • HTTP サーバーが遅いクライアントを中断する場合に一般的\n  • ピアに RST が送信される"
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnTimeout") => (
+            "タイムアウトによる接続中断",
+            "再送試行がタイムアウト制限を超えたため中断された TCP 接続。",
+            "タイムアウトによる TCP 接続中断。\n\n💡 診断: 持続的なパケットロスの最終結果 — 全再送試行が失敗。TCPTimeouts と相関。"
+        ),
+        ("net/netstat", "TcpExt_TCPAbortOnMemory") => (
+            "メモリ圧迫による接続中断",
+            "TCP バッファのメモリ不足のため終了された接続。",
+            "メモリ圧迫による TCP 接続強制終了。\n\n💡 診断:\n  • 非ゼロなら危険: システムが生き残るために接続を切断\n  • sockstat の TCP_mem と /proc/sys/net/ipv4/tcp_mem 制限を確認\n  • RAM 追加または同時接続数の削減が必要"
+        ),
+        ("net/netstat", "TcpExt_TCPMemoryPressures") => (
+            "TCP メモリ圧力イベント",
+            "TCP スタックがメモリ圧力モードに入り、バッファサイズを削減し接続をドロップする可能性がある回数。",
+            "TCP メモリ圧力モードの発動。\n\n💡 診断:\n  • 非ゼロ → TCP バッファメモリが 'pressure' しきい値に到達\n  • カーネルがソケットごとのバッファサイズを縮小して対処\n  • 対処: tcp_mem 制限の引き上げ、または物理 RAM の追加"
+        ),
+        ("net/netstat", "TcpExt_TCPSynRetrans") => (
+            "SYN/SYN-ACK 再送数",
+            "再送された SYN または SYN-ACK セグメント。接続確立の失敗を示す。",
+            "SYN および SYN-ACK の再送。\n\n💡 診断:\n  • 高レート → クライアントがサーバーに到達不能（FW、サーバー過負荷、ネットワークロス）\n  • サーバー側バックログが満杯の場合 ListenDrops と相関"
+        ),
+        ("net/netstat", "TcpExt_TCPOrigDataSent") => (
+            "オリジナルデータセグメント送信数",
+            "初めて送信されたデータセグメント（再送を除く）。OutSegs から引いて再送数を算出可能。",
+            "オリジナル（非再送）データセグメント送信数。\n\n💡 診断: (OutSegs - TCPOrigDataSent - 純粋 ACK) で再送ボリュームを概算。再送率の計算に有用。"
+        ),
+        ("net/netstat", "TcpExt_TCPKeepAlive") => (
+            "TCP キープアライブプローブ送信数",
+            "アイドル接続でピアの生存を確認するためのキープアライブプローブ。",
+            "TCP キープアライブプローブ送信数。\n\n💡 診断:\n  • 長時間アイドルの接続（DB 接続、SSH セッション）では正常\n  • 非常に高いレート → キープアライブ有効の多数のアイドル接続\n  • 調整: net.ipv4.tcp_keepalive_time (デフォルト 7200 秒)"
+        ),
+        ("net/netstat", "TcpExt_TCPAutoCorking") => (
+            "TCP 自動コーキングイベント",
+            "小さな書き込みを大きなセグメントに結合するためカーネルが遅延させた回数。",
+            "TCP 自動コーキング発動。\n\n💡 診断: 自動コーキングは未確認データがある時に書き込みをバッファリングして小パケットのオーバーヘッドを削減。書き込み集中ワークロードでは高い値は正常。"
+        ),
+        ("net/netstat", "TcpExt_TCPRcvCoalesce") => (
+            "TCP 受信キュー結合",
+            "効率化のため受信キューで結合（マージ）されたセグメント。",
+            "受信キューで結合された TCP セグメント。\n\n💡 診断: 結合は隣接セグメントをマージしてオーバーヘッドを削減。高い値は NIC の GRO/LRO が効率的に処理していることを示す。"
+        ),
+        ("net/netstat", "TcpExt_TCPOFOQueue") => (
+            "順序外パケットのキュー追加",
+            "順序外で受信しリオーダリングのためキューに追加されたパケット。ネットワーク経路のリオーダリングを示す。",
+            "順序外 TCP パケットのキュー追加。\n\n💡 診断:\n  • 一部の順序外は正常（マルチパス、ロードバランスされたトラフィック）\n  • 高レート → ネットワーク経路で顕著なリオーダリング\n  • SACK で処理されないと偽の高速再送をトリガーする可能性"
+        ),
+        ("net/netstat", "TcpExt_TCPChallengeACK") => (
+            "チャレンジ ACK 送信数 (RFC 5961)",
+            "接続を検証するため不審なセグメントに応答して送信された ACK。ブラインドインジェクション対策。",
+            "TCP チャレンジ ACK 送信 (RFC 5961)。\n\n💡 診断:\n  • 低レートは正常（散発的な古いセグメント）\n  • 高レート → ブラインド TCP インジェクション攻撃の可能性\n  • net.ipv4.tcp_challenge_ack_limit でレート制限"
+        ),
+        ("net/netstat", "TcpExt_TCPFastOpenActive") => (
+            "TCP Fast Open 接続開始数",
+            "SYN パケットにデータを含めて送信する TCP Fast Open (TFO) を使ったアウトバウンド接続。",
+            "TCP Fast Open アクティブ接続開始数。\n\n💡 診断: TFO はリピート接続で 1 RTT のレイテンシを削減。非ゼロならアプリが TFO を使用中。ゼロは TFO 無効またはアプリが要求していないことを意味。"
+        ),
+        ("net/netstat", "TcpExt_TCPFastOpenPassive") => (
+            "TCP Fast Open 接続受付数",
+            "SYN パケットの TCP Fast Open データ付きで受け付けたインバウンド接続。",
+            "TCP Fast Open パッシブ接続受付数。\n\n💡 診断: 非ゼロ → サーバーが TFO 接続を受付中。FastOpenPassiveFail と比較して失敗率を確認。"
+        ),
+        ("net/netstat", "TcpExt_TCPDelivered") => (
+            "アプリケーションに配信された TCP セグメント",
+            "アプリケーション層に正常配信されたセグメント合計。オリジナルと再送データを含む。",
+            "アプリケーションに配信された TCP セグメント。\n\n💡 診断: グッドプットカウンタ。OutSegs の合計パケット数と比較してオーバーヘッド比率を確認。"
+        ),
+        ("net/netstat", "TcpExt_TCPWinProbe") => (
+            "TCP ウィンドウプローブ送信数",
+            "受信ウィンドウがゼロの時に送信されたウィンドウプローブ。送信者が受信者のバッファ解放を待機。",
+            "TCP ゼロウィンドウプローブ送信数。\n\n💡 診断:\n  • 非ゼロ → 受信者のデータ消費が遅い（ゼロウィンドウ状態）\n  • 持続的 → アプリケーションバックプレッシャー\n  • TCPToZeroWindowAdv で受信者がゼロウィンドウを通知する頻度を確認"
+        ),
+        ("net/netstat", "TcpExt_TCPTimeWaitOverflow") => (
+            "TIME_WAIT バケットオーバーフロー",
+            "バケット制限に達して新しい TIME_WAIT ソケットを作成できなかった回数。",
+            "TIME_WAIT ソケットオーバーフローイベント。\n\n💡 診断:\n  • 非ゼロ → 短命接続が多すぎて TIME_WAIT スロットを枯渇\n  • net.ipv4.tcp_tw_reuse を有効化して再利用を許可\n  • アプリケーションでコネクションプーリングを検討"
+        ),
+        ("net/netstat", "TcpExt_TCPBacklogDrop") => (
+            "ソケットバックログからのドロップ",
+            "ソケットごとのバックログキューが満杯のためドロップされたセグメント。",
+            "TCP ソケットバックログドロップ。\n\n💡 診断:\n  • 非ゼロ → 受信アプリの処理が追いつかない\n  • ソケットバックログは NIC とアプリの read() の間のキュー\n  • 対処: SO_RCVBUF の増加またはアプリの読み取りループの最適化"
+        ),
+        ("net/netstat", "TcpExt_TCPSpuriousRTOs") => (
+            "偽の再送タイムアウト",
+            "偽と検出された RTO（元のパケットは到着していたが RTO が早すぎた）。",
+            "偽 RTO 検出。\n\n💡 診断:\n  • 高レート → ネットワークレイテンシに対して RTO が過度に積極的\n  • 不要な再送と輻輳ウィンドウ縮小を引き起こす"
+        ),
+        ("net/netstat", "IpExt_InOctets") => (
+            "受信バイト合計（IP 層）",
+            "IP 層で受信した合計バイト数（ヘッダー含む）。決定的なインバウンド帯域幅カウンタ。",
+            "IP 層インバウンド合計バイト。\n\n💡 診断: 変化率がインバウンド帯域幅を示す。net/dev の total_rx と比較 — 差分は非 IP トラフィック（ARP 等）。"
+        ),
+        ("net/netstat", "IpExt_OutOctets") => (
+            "送信バイト合計（IP 層）",
+            "IP 層で送信した合計バイト数（ヘッダー含む）。決定的なアウトバウンド帯域幅カウンタ。",
+            "IP 層アウトバウンド合計バイト。\n\n💡 診断: 変化率がアウトバウンド帯域幅を示す。IP トラフィックの最も正確な帯域幅カウンタ。"
+        ),
+        ("net/netstat", "IpExt_InMcastPkts") => (
+            "マルチキャストパケット受信数",
+            "受信した IP マルチキャストパケット。サービスディスカバリ (mDNS, SSDP) やクラスタ通信で一般的。",
+            "インバウンドマルチキャストパケット。\n\n💡 診断: サーバーで高レート → クラスタ/マルチキャストベースのサービスがアクティブ。デスクトップ → mDNS/Bonjour またはメディアストリーミング。"
+        ),
+        ("net/netstat", "IpExt_InCsumErrors") => (
+            "IP チェックサムエラー",
+            "IP レベルのチェックサムエラーのインバウンドパケット。ネットワーク層のデータ破損を示す。",
+            "IP 層チェックサムエラー。\n\n💡 診断:\n  • 健全なネットワークでは 0 であるべき\n  • 非ゼロ → リンクレベルの破損、不良 NIC オフロード、メモリエラー\n  • TCP/UDP チェックサムエラーと相関させて全体像を把握"
+        ),
+
+        // ── net/sockstat — 残りのフィールド ──────────────────────────
+
+        ("net/sockstat", "UDPLITE_inuse") => (
+            "使用中の UDP-Lite ソケット数",
+            "現在使用中の UDP-Lite ソケット数。部分チェックサムでエラー許容メディアストリーム用。",
+            "アクティブな UDP-Lite ソケット。\n\n💡 診断: ほとんどのシステムで通常 0。UDP-Lite は部分データの方がデータなしより良いメディアストリーミングで使用。"
+        ),
+        ("net/sockstat", "RAW_inuse") => (
+            "使用中の Raw ソケット数",
+            "Raw IP ソケットの数。ping、traceroute、カスタムネットワークプロトコルで使用。",
+            "アクティブな Raw IP ソケット。\n\n💡 診断:\n  • 通常: 0-2\n  • ping や traceroute が一時的に使用\n  • 永続的な Raw ソケット → カスタムプロトコルまたは監視ツール\n  • セキュリティ上の注意: Raw ソケットは root または CAP_NET_RAW が必要"
+        ),
+        ("net/sockstat", "FRAG_memory") => (
+            "IP フラグメント再構成メモリ（バイト）",
+            "再構成待ちの IP フラグメントを保持するためのカーネルメモリ（バイト）。",
+            "IP フラグメント再構成キューが消費するメモリ。\n\n💡 診断:\n  • 現代のネットワークでは通常 0（PMTUD がフラグメント化を回避）\n  • 大きな値 → フラグメント攻撃または PMTUD の故障\n  • 制限: net.ipv4.ipfrag_high_thresh"
+        ),
+
+        // ── ip/route ─────────────────────────────────────────────────
+
+        ("ip/route", "default_gateway") => (
+            "デフォルトゲートウェイ IP アドレス",
+            "デフォルトゲートウェイの IP アドレス。未知のネットワークへのトラフィックは全てここに転送。",
+            "デフォルトゲートウェイ IP アドレス。\n\n💡 診断:\n  • '(none)' → デフォルトルート未設定。インターネットに到達不可。\n  • 到達可能であるべき: `ping <ゲートウェイ>`。不可なら配線/リンクを確認。\n  • 複数のデフォルトルート → フェイルオーバーまたはポリシールーティング使用中"
+        ),
+        ("ip/route", "route_count") => (
+            "IP ルート数",
+            "'ip route show' からのルーティングエントリ合計。デフォルト、接続済み、静的ルートを含む。",
+            "IP ルーティングエントリ合計。\n\n💡 診断:\n  • インターネット接続ホストでは最低 1（デフォルトルート）\n  • 非常に多い → ダイナミックルーティングプロトコル (BGP/OSPF) がアクティブ"
+        ),
+        ("ip/route", "routes") => (
+            "IP ルーティングテーブル",
+            "完全なルーティングテーブル: 宛先、ゲートウェイ、デバイス、プロトコル、スコープ、メトリック。低いメトリック = 優先ルート。",
+            "'ip route show' からの IP ルーティングテーブル。\n\nカラム: Destination、Gateway、Device、Protocol、Scope、Metric。\n\n💡 診断:\n  • 'default via X.X.X.X' → デフォルトルート。インターネットアクセスに必須。\n  • Protocol 'kernel' → 直接接続ネットワーク用に自動作成\n  • Protocol 'dhcp' → DHCP サーバーから学習\n  • Scope 'link' → 直接接続ネットワーク、ゲートウェイ不要\n  • 低いメトリック = 複数ルート存在時の優先度が高い"
+        ),
+
+        // ── ip/neighbor ──────────────────────────────────────────────
+
+        ("ip/neighbor", "neighbor_count") => (
+            "ARP/NDP ネイバーエントリ合計",
+            "全ネイバーキャッシュエントリ (IPv4 ARP と IPv6 NDP) の数。このシステムが通信したホスト数を示す。",
+            "ARP/NDP ネイバーキャッシュエントリ数。\n\n💡 診断:\n  • 高い値 → ローカルネットワーク上のホストが多い\n  • 継続的に増加 → ネットワークスキャンまたはブロードキャストストーム\n  • FAILED エントリは failed_count で別途確認"
+        ),
+        ("ip/neighbor", "failed_count") => (
+            "FAILED 状態のネイバー数",
+            "解決できなかったネイバー（ARP/NDP 要求を送信したが応答なし）。到達不能ホストを示す。",
+            "FAILED 状態のネイバーエントリ（到達不能）。\n\n💡 診断:\n  • 非ゼロ → ローカルネットワーク上のホストに到達不能\n  • 一般的な原因: ホスト電源オフ、VLAN 誤り、IP 競合\n  • 一時的な失敗は正常; 持続的なものは実際の問題を示す"
+        ),
+        ("ip/neighbor", "neighbors") => (
+            "ネイバーテーブルエントリ",
+            "ARP/NDP ネイバーキャッシュ: IP アドレス、ネットワークデバイス、MAC アドレス、到達可能性状態。",
+            "ARP/NDP ネイバーキャッシュの内容。\n\nカラム: IP、Device、LLAddr (MAC)、State。\n\n💡 診断:\n  • State REACHABLE → 最近生存確認済み\n  • State STALE → 最近未確認、次回使用時に再プローブ\n  • State FAILED → ARP/NDP 解決失敗、ホスト到達不能\n  • State PERMANENT → 静的に設定されたエントリ\n  • FAILED で空の LLAddr → ホストが ARP に応答しなかった"
+        ),
+
+        // ── ss（ソケットサマリ）────────────────────────────────────
+
+        ("ss", "tcp_established") => (
+            "確立済み TCP 接続数",
+            "ESTABLISHED 状態の TCP 接続数。アクティブなネットワークセッションの主要指標。",
+            "ESTABLISHED TCP 接続数。\n\n💡 診断:\n  • ワークロードに応じたベースラインを設定（Web サーバー: 数百-数千、DB: 数十）\n  • 急増 → トラフィックスパイクまたは SYN フラッドの完了\n  • 急減 → サービスクラッシュまたはネットワーク分断\n  • プラトーなしの継続増加 → アプリの接続リーク"
+        ),
+        ("ss", "tcp_timewait") => (
+            "TIME_WAIT の TCP 接続数",
+            "クローズ後 2*MSL（通常 60 秒）のクールダウン中の TIME_WAIT 状態の接続。",
+            "TCP TIME_WAIT ソケット数。\n\n💡 診断:\n  • 5000 未満 → ほとんどのワークロードで正常\n  • 30000 超 → エフェメラルポート枯渇の危険\n  • 高い値 → 短命接続が多い; コネクションプーリングを検討\n  • 忙しいサーバーでは net.ipv4.tcp_tw_reuse を有効化"
+        ),
+        ("ss", "tcp_orphaned") => (
+            "孤立 TCP 接続数",
+            "所有プロセスのない TCP 接続。タイムアウトまでカーネルメモリを消費。",
+            "孤立 TCP 接続。\n\n💡 診断:\n  • 低い値であるべき（100 未満）\n  • 増加 → アプリが適切なソケットクリーンアップなしに終了\n  • 制限: /proc/sys/net/ipv4/tcp_max_orphans\n  • 制限超過 → カーネルが強制的に接続を RST"
+        ),
+        ("ss", "tcp_closed") => (
+            "クローズ済み TCP 接続数",
+            "CLOSED 状態の TCP 接続。カーネルによるクリーンアップ待ち。",
+            "CLOSED 状態の TCP 接続。\n\n💡 診断: これらは一時的 — カーネルが間もなくクリーンアップする。持続的に高い値はカーネルまたはドライバの問題を示す可能性。"
+        ),
+        ("ss", "udp_count") => (
+            "UDP ソケット合計",
+            "'ss -s' が報告するシステム上の全 UDP ソケット数。",
+            "ss -s からの UDP ソケット合計数。\n\n💡 診断:\n  • 一般的: 通常のサーバーで 5-30\n  • DNS リゾルバ、NTP クライアント、syslog、SNMP を含む\n  • 増加 → UDP アプリケーションの FD リークの可能性"
+        ),
+
+        // ── dns (/etc/resolv.conf) ───────────────────────────────────
+
+        ("dns", "nameservers") => (
+            "設定済み DNS ネームサーバー",
+            "/etc/resolv.conf からの DNS サーバーアドレス。名前解決時にこれらのサーバーに問い合わせ。",
+            "/etc/resolv.conf からの DNS ネームサーバーテーブル。\n\nカラム: IP アドレス、タイプ (IPv4/IPv6)。\n\n💡 診断:\n  • 空 → DNS 名前解決が失敗する。/etc/resolv.conf を確認。\n  • 127.0.0.53 → systemd-resolved が DNS を管理\n  • 複数エントリ → フェイルオーバー; 最初のサーバーが優先\n  • 8.8.8.8 / 1.1.1.1 → パブリック DNS (Google/Cloudflare)"
+        ),
+        ("dns", "search_domains") => (
+            "DNS 検索ドメイン",
+            "非修飾ホスト名に付加されるドメイン。'search example.com' は 'host' を 'host.example.com' として解決。",
+            "DNS 検索ドメインリスト。\n\n💡 診断:\n  • 短いホスト名の解決に影響（例: 'db' が 'db.example.com' になる）\n  • 検索ドメインが多すぎる → DNS 解決が遅い（各サフィックスを試行）\n  • 企業環境では複数の検索ドメインが一般的"
+        ),
+        ("dns", "options") => (
+            "DNS リゾルバオプション",
+            "/etc/resolv.conf からのリゾルバオプション。タイムアウト、リトライ、動作を制御。",
+            "DNS リゾルバオプション。\n\n💡 診断:\n  • 'ndots:N' → ドットが N 個未満のクエリは検索ドメインを先に試行\n  • 'timeout:N' → 別のネームサーバーに再試行するまでの秒数\n  • 'attempts:N' → ネームサーバーごとのリトライ回数\n  • コンテナ内で高い ndots は DNS 解決を遅くする可能性"
+        ),
+        ("dns", "dns_resolution_ms") => (
+            "DNS 解決時間（localhost テスト）",
+            "'localhost' をシステムリゾルバで解決する時間（ミリ秒）。リゾルバのオーバーヘッドを測定。",
+            "'localhost' の DNS 解決レイテンシ。\n\n💡 診断:\n  • 1 ms 未満 → 正常（/etc/hosts または nsswitch キャッシュから解決）\n  • 10 ms 超 → リゾルバが遅い可能性（DNS サーバーへのネットワーク往復）\n  • 100 ms 超 → DNS サーバーが応答しないか過負荷\n  • これはベースラインテスト; 外部名の実際の解決はより遅い可能性"
+        ),
+
+        // ── conntrack（コネクション追跡）─────────────────────────────
+
+        ("conntrack", "conntrack_count") => (
+            "現在の追跡接続数",
+            "netfilter コネクション追跡テーブルのエントリ数。各 TCP/UDP フローが 1 エントリを使用。",
+            "現在のコネクション追跡テーブルエントリ。\n\n💡 診断:\n  • 各確立済み接続（TCP、UDP、ICMP）が 1 エントリを使用\n  • conntrack_max に近づく → 新規接続がドロップされる！\n  • 忙しい NAT/FW ボックスではこれが重要な容量メトリクス"
+        ),
+        ("conntrack", "conntrack_max") => (
+            "最大追跡接続数",
+            "コネクション追跡テーブルの最大エントリ数。超過すると新規接続をドロップ。",
+            "コネクション追跡テーブル最大値 (nf_conntrack_max)。\n\n💡 診断:\n  • デフォルトは RAM に応じてスケール（1GB システムで通常 65536）\n  • 引き上げ: sysctl -w net.nf_conntrack_max=<値>\n  • 各エントリは約 300 バイトのカーネルメモリを使用\n  • 忙しい FW/NAT: conntrack_max > ピーク同時接続数"
+        ),
+        ("conntrack", "usage_pct") => (
+            "コネクション追跡テーブル使用率 %",
+            "コネクション追跡テーブルの使用割合。80% 超は新規接続ドロップの危険を示す。",
+            "コネクション追跡テーブルの使用率。\n\n💡 診断:\n  • 50% 未満 → 健全な余裕\n  • 50-80% → トレンドを監視。max の引き上げが必要かも。\n  • 80% 超 → 警告: 上限に接近。新規接続がドロップされる可能性。\n  • 95% 超 → 危険: 接続を積極的にドロップ中。即座に conntrack_max を増加。\n  • conntrack が必要かも確認 — NAT/iptables ステートフルルールを使わないなら無効化"
+        ),
+
+        // ── meminfo: 残りのフィールド ─────────────────────────────────
+        ("meminfo", "Active") => ("最近使用されたメモリ", "アクティブ LRU 上のメモリ。最近アクセスされ回収されにくい。", "アクティブメモリ = Active(anon) + Active(file)。\n\n💡 Active vs Inactive を比較してメモリの「ホット」度を確認。"),
+        ("meminfo", "Inactive") => ("最近未使用のメモリ（回収候補）", "非アクティブ LRU 上のメモリ。メモリ圧迫時に最初に回収。", "非アクティブメモリ = Inactive(anon) + Inactive(file)。\n\n💡 大きな Inactive はメモリ圧迫への良いバッファ。"),
+        ("meminfo", "Active(anon)") => ("最近使用された匿名メモリ", "最近アクセスされたヒープ/スタックメモリ。スワッピングでのみ解放。", "アクティブな匿名ページ。\n\n💡 増加中 → プロセスがヒープメモリを積極的に使用中。"),
+        ("meminfo", "Inactive(anon)") => ("非アクティブな匿名メモリ", "最近アクセスされていない匿名メモリ。スワップアウト候補。", "非アクティブな匿名ページ。\n\n💡 スワップ活動なしで大きい → 必要時にスワップで回収可能。"),
+        ("meminfo", "Active(file)") => ("最近使用されたファイルキャッシュ", "最近アクセスされたページキャッシュ。再読み込み高速化。", "アクティブなファイルページ。\n\n💡 負荷下で縮小 → メモリ圧迫でキャッシュが追い出されている。"),
+        ("meminfo", "Inactive(file)") => ("非アクティブなファイルキャッシュ", "最近アクセスされていないファイルページ。回収が容易。", "非アクティブなファイルページ。\n\n💡 大きい = 圧迫時の良いバッファ。ほぼゼロ = 回収可能メモリが逼迫。"),
+        ("meminfo", "Unevictable") => ("回収不可のロックされたメモリ", "mlock、ramfs、SHM_LOCK で RAM に固定されたメモリ。", "回収不可メモリ。\n\n💡 高い → mlock 使用プロセスを確認。キャッシュ可能メモリが減少。"),
+        ("meminfo", "Mlocked") => ("mlock でロックされたメモリ", "mlock() で RAM に固定。スワップアウト防止。", "mlock メモリ。\n\n💡 DB、リアルタイムオーディオ、暗号鍵保存で使用。"),
+        ("meminfo", "SwapCached") => ("RAM にもあるスワップページ", "スワップアウト後も RAM にキャッシュ。再アクセス時に I/O 不要。", "スワップキャッシュ。\n\n💡 メモリ圧迫後の非ゼロは正常な回復動作。"),
+        ("meminfo", "Zswap") => ("zswap 圧縮プール使用量", "zswap の圧縮ページプールが消費する RAM。", "zswap 圧縮プール。\n\n💡 Zswapped / Zswap = 圧縮率。高いほど効果的。"),
+        ("meminfo", "Zswapped") => ("zswap 内ページの元サイズ", "zswap に格納されたページの非圧縮サイズ。", "zswap 元サイズ。\n\n💡 一般的な圧縮率: 2:1〜4:1。"),
+        ("meminfo", "Dirty") => ("ディスク書き込み待ちメモリ", "変更済みだが未書き込みのページ。カーネルが定期フラッシュ。", "ダーティページ。\n\n💡 高い → 書き込み集中か低速ストレージ。dirty_ratio 超過 → write() がブロック。"),
+        ("meminfo", "Writeback") => ("ディスクに書き込み中のメモリ", "現在ストレージにフラッシュ中のページ。", "ライトバック中ページ。\n\n💡 通常はほぼゼロ。持続的に高い → ストレージ飽和。"),
+        ("meminfo", "AnonPages") => ("プロセスの匿名ページ", "ページテーブルにマップされた匿名メモリ。ヒープ、スタック等。", "匿名ページ。\n\n💡 時間とともに増加 → メモリリークの可能性。`ps aux --sort=-rss | head` で犯人探し。"),
+        ("meminfo", "Mapped") => ("メモリマップされたファイル", "mmap() でマップされたファイル。共有ライブラリ等を含む。", "メモリマップファイルページ。\n\n💡 高い → 多数のプロセスがライブラリを共有、または大きな mmap DB ファイル。"),
+        ("meminfo", "Shmem") => ("共有メモリ (tmpfs, shmem)", "共有メモリ、tmpfs、devtmpfs。Cached に含まれるが回収不可。", "共有メモリページ。\n\n💡 `df -h /dev/shm` で確認。通常のキャッシュと異なり MemAvailable を減少させる。"),
+        ("meminfo", "KReclaimable") => ("回収可能なカーネルメモリ", "SReclaimable を含む回収可能なカーネルメモリ合計。", "回収可能カーネルメモリ。\n\n💡 大きいのは健全 — 必要時にカーネルが解放。"),
+        ("meminfo", "Slab") => ("スラブアロケータメモリ合計", "SReclaimable + SUnreclaim。カーネルオブジェクト用。", "スラブメモリ合計。\n\n💡 SUnreclaim が増加中 → カーネルメモリリークの可能性。"),
+        ("meminfo", "SReclaimable") => ("回収可能なスラブキャッシュ", "回収可能なスラブ。主に dentry/inode キャッシュ。", "回収可能スラブ。\n\n💡 `echo 2 > /proc/sys/vm/drop_caches` で手動回収。"),
+        ("meminfo", "SUnreclaim") => ("回収不可のスラブメモリ", "解放できないカーネルデータ構造。", "回収不可スラブ。\n\n💡 増加中 → カーネルメモリリークの可能性。slabinfo を確認。"),
+        ("meminfo", "KernelStack") => ("カーネルスタックメモリ", "全スレッドのカーネルモードスタック。各 8-16KB。", "カーネルスタック。\n\n💡 KernelStack / 16KB ≈ スレッド数。非常に高い → スレッドリーク。"),
+        ("meminfo", "PageTables") => ("ページテーブルメモリ", "仮想→物理アドレス変換テーブル用メモリ。", "ページテーブル。\n\n💡 高い → プロセス数が多いか大きな仮想メモリマッピング。"),
+        ("meminfo", "SecPageTables") => ("二次ページテーブル (KVM, IOMMU)", "KVM と IOMMU 用のネストされたページテーブル。", "二次ページテーブル。\n\n💡 高い → 多数の VM が稼働中または IOMMU が活発。"),
+        ("meminfo", "NFS_Unstable") => ("NFS 未コミットページ (廃止)", "最新カーネルでは常に 0。廃止フィールド。", "NFS 未コミットページ — 常に 0。\n\n💡 廃止。無視して可。"),
+        ("meminfo", "Bounce") => ("バウンスバッファメモリ", "DMA デバイスが全物理メモリにアクセスできない場合のバッファ。", "バウンスバッファ。最新 64 ビットシステムでは通常 0。\n\n💡 非ゼロ → レガシーデバイスを確認。"),
+        ("meminfo", "WritebackTmp") => ("FUSE 一時ライトバックメモリ", "FUSE ファイルシステムの一時バッファ。", "FUSE 一時ライトバック。\n\n💡 FUSE 書き込み中のみ非ゼロ（sshfs、s3fs 等）。"),
+        ("meminfo", "CommitLimit") => ("メモリ確保上限", "オーバーコミット比率に基づく最大確保可能メモリ。", "コミットリミット。\n\n💡 overcommit_memory = 2 (厳格) の場合のみ有意。"),
+        ("meminfo", "Committed_AS") => ("コミット済みメモリ合計", "全プロセスの確保済みメモリ合計。物理 RAM を超えることがある。", "コミット済み仮想メモリ。\n\n💡 Committed_AS > RAM + Swap → オーバーコミット状態。OOM リスクあり。"),
+        ("meminfo", "VmallocTotal") => ("vmalloc アドレス空間合計", "vmalloc 仮想アドレス範囲。64 ビットでは極大。", "vmalloc 総アドレス空間。64 ビットでは事実上無意味。\n\n💡 VmallocUsed を確認。"),
+        ("meminfo", "VmallocUsed") => ("vmalloc 使用量", "実際に使用中の vmalloc メモリ。カーネルモジュール等。", "vmalloc 使用量。\n\n💡 通常 100MB 未満。増加中 → カーネルモジュールのメモリリークの可能性。"),
+        ("meminfo", "VmallocChunk") => ("vmalloc 最大空きブロック", "vmalloc の最大連続空きブロック。64 ビットでは無関係。", "vmalloc 最大空きブロック。\n\n💡 32 ビットカーネルでのみ関連。"),
+        ("meminfo", "Percpu") => ("Per-CPU データ構造メモリ", "CPU ごとの変数用メモリ。CPU 数に比例。", "Per-CPU メモリ。\n\n💡 ≈ 定数 × CPU 数。"),
+        ("meminfo", "HardwareCorrupted") => ("ハードウェアエラーメモリ (ECC)", "ECC エラーで退避されたメモリ。使用不可。", "ハードウェアエラーメモリ。\n\n💡 非ゼロ → 危険: ハードウェア障害。交換を計画。"),
+        ("meminfo", "AnonHugePages") => ("匿名ヒュージページ", "THP (2MB) を使用する匿名メモリ。TLB ミス削減。", "匿名 THP。\n\n💡 ゼロ → THP 無効または断片化。一部 DB は THP を無効化。"),
+        ("meminfo", "ShmemHugePages") => ("共有メモリヒュージページ", "ヒュージページを使用する共有メモリ。", "共有メモリヒュージページ。\n\n💡 tmpfs の huge=always 設定が必要。"),
+        ("meminfo", "ShmemPmdMapped") => ("共有メモリ PMD マップ", "PMD レベル（2MB）でマップされた共有メモリ。", "共有メモリ PMD マップ。\n\n💡 ShmemHugePages のうち実際に 2MB でマップされた部分。"),
+        ("meminfo", "FileHugePages") => ("ファイルヒュージページ", "THP を使用するファイル連動メモリ。", "ファイル THP。\n\n💡 比較的新しい機能。"),
+        ("meminfo", "FilePmdMapped") => ("ファイル PMD マップ", "PMD レベルでマップされたファイルページ。", "ファイル PMD マップ。\n\n💡 ファイルコンテンツの実際の 2MB マッピング。"),
+        ("meminfo", "CmaTotal") => ("CMA 予約メモリ合計", "連続メモリアロケータの予約メモリ。DMA デバイス用。", "CMA 予約領域。\n\n💡 0 → CMA 未設定（サーバーでは一般的）。"),
+        ("meminfo", "CmaFree") => ("CMA 空きページ", "CMA 予約領域の未使用メモリ。", "CMA 空きメモリ。\n\n💡 CmaFree = CmaTotal → 予約済みだがデバイス未使用。"),
+        ("meminfo", "HugePages_Total") => ("ヒュージページ総数", "事前確保されたヒュージページ数。各 2MB。", "ヒュージページプール。\n\n💡 DB、DPDK、VM で使用。このメモリは他に使えない。"),
+        ("meminfo", "HugePages_Free") => ("未使用ヒュージページ", "プロセスに未割り当てのヒュージページ。", "空きヒュージページ。\n\n💡 Free = Total → 予約メモリが無駄。"),
+        ("meminfo", "HugePages_Rsvd") => ("予約済み未割り当てヒュージページ", "コミット済みだが未フォールトのヒュージページ。", "予約済みヒュージページ。\n\n💡 Free - Rsvd = 新規予約可能なページ数。"),
+        ("meminfo", "HugePages_Surp") => ("超過ヒュージページ", "nr_hugepages を超えて確保されたヒュージページ。", "超過ヒュージページ。\n\n💡 不要になれば解放される。"),
+        ("meminfo", "Hugepagesize") => ("デフォルトヒュージページサイズ", "各ヒュージページのサイズ。x86_64 で通常 2MB。", "ヒュージページサイズ。\n\n💡 hugepagesz= カーネルパラメータで設定。"),
+        ("meminfo", "Hugetlb") => ("ヒュージページ使用メモリ合計", "全ヒュージページサイズの合計メモリ。他用途に使用不可。", "ヒュージページメモリ合計。\n\n💡 大きいが未使用 → nr_hugepages を削減。"),
+        ("meminfo", "DirectMap4k") => ("直接マップ 4KB", "カーネル直接マップで 4KB ページを使用するメモリ。", "直接マップ 4KB エントリ。\n\n💡 2M/1G に比べて多い → 直接マップの断片化。"),
+        ("meminfo", "DirectMap2M") => ("直接マップ 2MB", "カーネル直接マップで 2MB ページを使用するメモリ。", "直接マップ 2MB エントリ。\n\n💡 大部分のメモリがここにあるべき。"),
+        ("meminfo", "DirectMap1G") => ("直接マップ 1GB", "カーネル直接マップで 1GB ページを使用するメモリ。", "直接マップ 1GB エントリ。\n\n💡 CPU が pdpe1gb フラグ対応なら利用可能。"),
+
+        // ── pressure: 残りの PSI フィールド ───────────────────────────
+        ("pressure", "cpu_some_avg60") => ("CPU 圧力: 一部停滞 (60秒平均)", "60秒間で少なくとも1タスクが CPU 待ちの時間割合。", "CPU PSI 60秒平均。\n\n💡 avg10 >> avg60 = 直近スパイク。avg10 ≈ avg60 = 持続的。"),
+        ("pressure", "cpu_some_avg300") => ("CPU 圧力: 一部停滞 (5分平均)", "5分間で少なくとも1タスクが CPU 待ちの時間割合。", "CPU PSI 5分平均。ベースライン指標。\n\n💡 5% 超が持続 → CPU リソース不足。"),
+        ("pressure", "cpu_some_total") => ("CPU 圧力: 累積停滞時間 (us)", "起動以来の CPU 停滞マイクロ秒累計。", "CPU 停滞累計。\n\n💡 スナップショット間のデルタで現在レートを算出。"),
+        ("pressure", "memory_some_avg60") => ("メモリ圧力: 一部停滞 (60秒平均)", "60秒間でメモリ待ち時間の割合。", "メモリ PSI 60秒平均。\n\n💡 持続的に非ゼロ → 継続的なメモリ圧迫。"),
+        ("pressure", "memory_some_avg300") => ("メモリ圧力: 一部停滞 (5分平均)", "5分間でメモリ待ち時間の割合。", "メモリ PSI 5分平均。\n\n💡 10% 超 → RAM 追加。40% 超 → スラッシング。"),
+        ("pressure", "memory_some_total") => ("メモリ圧力: 累積停滞時間 (us)", "起動以来のメモリ停滞マイクロ秒累計。", "メモリ停滞累計 (some)。\n\n💡 デルタで現在レートを算出。"),
+        ("pressure", "memory_full_avg10") => ("メモリ圧力: 全停滞 (10秒平均)", "全タスクがメモリで停滞した時間割合 (10秒)。", "メモリ PSI 'full' 10秒平均。全タスク停滞 = 進捗ゼロ。\n\n💡 > 0% → 深刻。> 10% → システムがほぼ機能不全。"),
+        ("pressure", "memory_full_avg60") => ("メモリ圧力: 全停滞 (60秒平均)", "全タスクがメモリで停滞した時間割合 (60秒)。", "メモリ PSI 'full' 60秒平均。\n\n💡 持続的に非ゼロ → 危機的。即対処が必要。"),
+        ("pressure", "memory_full_avg300") => ("メモリ圧力: 全停滞 (5分平均)", "全タスクがメモリで停滞した時間割合 (5分)。", "メモリ PSI 'full' 5分平均。\n\n💡 長時間非ゼロ → システムが危機的状態。"),
+        ("pressure", "memory_full_total") => ("メモリ圧力: 全停滞累計 (us)", "全タスクがメモリで停滞したマイクロ秒累計。", "メモリ全停滞累計。\n\n💡 full ≤ some。高い比率 = 停滞時に全タスクが影響。"),
+        ("pressure", "io_some_avg60") => ("I/O 圧力: 一部停滞 (60秒平均)", "60秒間で I/O 待ち時間の割合。", "I/O PSI 60秒平均。\n\n💡 5% 超が持続 → 一貫した I/O ボトルネック。"),
+        ("pressure", "io_some_avg300") => ("I/O 圧力: 一部停滞 (5分平均)", "5分間で I/O 待ち時間の割合。", "I/O PSI 5分平均。\n\n💡 20% 超 → SSD アップグレードまたは I/O スケジューラ調整を検討。"),
+        ("pressure", "io_some_total") => ("I/O 圧力: 累積停滞時間 (us)", "起動以来の I/O 停滞マイクロ秒累計。", "I/O 停滞累計 (some)。\n\n💡 デルタで現在レートを算出。"),
+        ("pressure", "io_full_avg10") => ("I/O 圧力: 全停滞 (10秒平均)", "全タスクが I/O で停滞した時間割合 (10秒)。", "I/O PSI 'full' 10秒平均。全タスクが I/O 待ち。\n\n💡 > 10% → 深刻な I/O バウンド。"),
+        ("pressure", "io_full_avg60") => ("I/O 圧力: 全停滞 (60秒平均)", "全タスクが I/O で停滞した時間割合 (60秒)。", "I/O PSI 'full' 60秒平均。\n\n💡 持続 → ストレージが追いつけない。NVMe SSD へアップグレード。"),
+        ("pressure", "io_full_avg300") => ("I/O 圧力: 全停滞 (5分平均)", "全タスクが I/O で停滞した時間割合 (5分)。", "I/O PSI 'full' 5分平均。\n\n💡 長期 → 根本的な I/O 容量問題。"),
+        ("pressure", "io_full_total") => ("I/O 圧力: 全停滞累計 (us)", "全タスクが I/O で停滞したマイクロ秒累計。", "I/O 全停滞累計。\n\n💡 full/some 比が高い = 単一デバイスのボトルネック。"),
+
+        // ── vmstat: 残りの重要フィールド ──────────────────────────────
+        ("vmstat", "nr_zone_inactive_anon") => ("ゾーン別非アクティブ匿名ページ", "ゾーンごとの非アクティブ匿名ページ数。", "ゾーン別非アクティブ匿名ページ。\n\n💡 kswapd のゾーン別回収判断に使用。"),
+        ("vmstat", "nr_zone_active_anon") => ("ゾーン別アクティブ匿名ページ", "ゾーンごとのアクティブ匿名ページ数。", "ゾーン別アクティブ匿名ページ。\n\n💡 kswapd のゾーン別回収判断に使用。"),
+        ("vmstat", "nr_zone_inactive_file") => ("ゾーン別非アクティブファイルページ", "ゾーンごとの非アクティブファイルページ数。", "ゾーン別非アクティブファイルページ。\n\n💡 各ゾーンで最初に回収される。"),
+        ("vmstat", "nr_zone_active_file") => ("ゾーン別アクティブファイルページ", "ゾーンごとのアクティブファイルページ数。", "ゾーン別アクティブファイルページ。\n\n💡 ゾーン別のホットなページキャッシュ。"),
+        ("vmstat", "nr_zone_unevictable") => ("ゾーン別回収不可ページ", "ゾーンごとの回収不可ページ数。", "ゾーン別回収不可ページ。\n\n💡 各ゾーンの実効回収可能メモリを減少。"),
+        ("vmstat", "nr_zone_write_pending") => ("ゾーン別書き込み保留ページ", "ゾーンごとのダーティ+ライトバックページ数。", "ゾーン別書き込み保留。\n\n💡 高い → そのゾーンに書き込み集中。"),
+        ("vmstat", "nr_mlock") => ("mlock ロックページ", "mlock で固定されたページ数。", "mlock ページ。\n\n💡 meminfo の Mlocked と比較。"),
+        ("vmstat", "nr_bounce") => ("バウンスバッファページ", "レガシー DMA 用バウンスバッファ。通常 0。", "バウンスバッファ。\n\n💡 64ビットでは 0 が正常。"),
+        ("vmstat", "nr_zspages") => ("圧縮ページ (zswap/zram)", "圧縮メモリプール内のページ。", "圧縮スワップページ。\n\n💡 zswap 有効時、圧縮データを RAM に保持。"),
+        ("vmstat", "nr_free_cma") => ("CMA 空きページ", "CMA 領域の空きページ。", "CMA 空きページ。\n\n💡 デバイス未使用時は移動可能割り当てに利用可。"),
+        ("vmstat", "nr_file_pages") => ("ファイルページ合計", "ページキャッシュ+スワップキャッシュ+バッファの合計。", "ファイルページ合計。\n\n💡 大きい値は健全。"),
+        ("vmstat", "nr_shmem_hugepages") => ("共有メモリヒュージページ", "共有メモリ用ヒュージページ数。", "共有メモリヒュージページ。\n\n💡 tmpfs でヒュージページ使用時に非ゼロ。"),
+        ("vmstat", "nr_shmem_pmdmapped") => ("共有メモリ PMD マップ", "PMD レベルでマップされた共有メモリページ。", "共有メモリ PMD マップ。\n\n💡 2MB 粒度で実際にマップ。"),
+        ("vmstat", "nr_file_hugepages") => ("ファイルヒュージページ", "ファイル連動メモリ用ヒュージページ。", "ファイルヒュージページ。\n\n💡 ファイル連動 THP。"),
+        ("vmstat", "nr_file_pmdmapped") => ("ファイル PMD マップ", "PMD レベルのファイルページ。", "ファイル PMD マップ。\n\n💡 ファイルコンテンツのヒュージページマッピング。"),
+        ("vmstat", "nr_anon_transparent_hugepages") => ("匿名 THP", "匿名メモリの THP 数。各 2MB。", "匿名 THP。\n\n💡 数 × 2MB = THP メモリ合計。ゼロ → THP 無効か断片化。"),
+        ("vmstat", "nr_vmscan_write") => ("回収時書き込みページ", "vmscan がディスクに書き込んだページ。", "vmscan 書き込み。\n\n💡 クリーンページ枯渇を示す。"),
+        ("vmstat", "nr_vmscan_immediate_reclaim") => ("即時回収ページ", "LRU エージングをバイパスして即回収。", "即時回収。\n\n💡 高い → 深刻なメモリ圧迫下の積極的回収。"),
+        ("vmstat", "nr_dirtied") => ("起動以来のダーティページ合計", "累積ダーティ化ページ数。", "ダーティ化合計。\n\n💡 デルタで現在の汚染レートを把握。"),
+        ("vmstat", "nr_written") => ("起動以来の書き込みページ合計", "累積書き込みページ数。", "書き込み合計。\n\n💡 nr_dirtied - nr_written = ダーティバックログ。"),
+        ("vmstat", "nr_kernel_stack") => ("カーネルスタックページ", "カーネルスレッドスタック用ページ。", "カーネルスタック。\n\n💡 スタックあたりページ数で割ってスレッド数を推定。"),
+        ("vmstat", "nr_page_table_pages") => ("ページテーブルページ", "ページテーブルエントリ用ページ。", "ページテーブルページ。\n\n💡 meminfo の PageTables と比較。"),
+        ("vmstat", "nr_swapcached") => ("スワップキャッシュページ", "RAM とスワップ両方にあるページ。", "スワップキャッシュ。\n\n💡 メモリ圧迫後に非ゼロ。"),
+        ("vmstat", "nr_dirty_threshold") => ("ダーティページ閾値", "ライターがスロットルされるダーティページ数。", "ダーティスロットル閾値。\n\n💡 vm.dirty_ratio で調整。"),
+        ("vmstat", "nr_dirty_background_threshold") => ("バックグラウンドダーティ閾値", "バックグラウンドライトバック開始閾値。", "バックグラウンドライトバック閾値。\n\n💡 vm.dirty_background_ratio で調整。"),
+        ("vmstat", "workingset_nodes") => ("ワーキングセットシャドウノード", "退避ページアクセスパターン追跡ノード。", "シャドウノード。\n\n💡 カーネルの適応的 LRU バランシングに使用。"),
+        ("vmstat", "workingset_refault_anon") => ("匿名ワーキングセットリフォルト", "退避された匿名ページへの再アクセス。", "匿名リフォルト。\n\n💡 高レート → ワーキングセットが RAM を超過。スラッシング。"),
+        ("vmstat", "workingset_refault_file") => ("ファイルワーキングセットリフォルト", "退避されたファイルページのディスク再読み込み。", "ファイルリフォルト。\n\n💡 高レート → ページキャッシュ不足。"),
+        ("vmstat", "workingset_activate_anon") => ("匿名ワーキングセット活性化", "リフォルト検出で匿名ページをアクティブリストに昇格。", "匿名活性化。\n\n💡 再退避を防止。"),
+        ("vmstat", "workingset_activate_file") => ("ファイルワーキングセット活性化", "リフォルト検出でファイルページをアクティブリストに昇格。", "ファイル活性化。\n\n💡 頻繁アクセスページを保護。"),
+        ("vmstat", "workingset_restore_anon") => ("匿名ワーキングセット復元", "匿名ページのアクティブ状態復元。", "匿名復元。\n\n💡 高い → 匿名ワーキングセットの変動が激しい。"),
+        ("vmstat", "workingset_restore_file") => ("ファイルワーキングセット復元", "ファイルページのアクティブ状態復元。", "ファイル復元。\n\n💡 高い → ページキャッシュが圧迫下。"),
+        ("vmstat", "workingset_nodereclaim") => ("シャドウノード回収", "メモリ圧迫でシャドウノードを回収。", "シャドウノード回収。\n\n💡 深刻な圧迫でワーキングセット追跡データを喪失。"),
+        ("vmstat", "numa_hit") => ("NUMA 意図ノード割り当て", "意図した NUMA ノードでの割り当て。", "NUMA ヒット。\n\n💡 hit / (hit + miss) = ローカリティ率。100% に近いほど良い。"),
+        ("vmstat", "numa_miss") => ("NUMA 非意図ノード割り当て", "意図しない NUMA ノードでの割り当て。", "NUMA ミス。\n\n💡 高い → リモートメモリレイテンシ。numactl --membind を使用。"),
+        ("vmstat", "numa_foreign") => ("NUMA 外部割り当て", "このノード向けだが別ノードに配置された割り当て。", "NUMA 外部。\n\n💡 他ノードの numa_miss の対。"),
+        ("vmstat", "numa_local") => ("NUMA ローカル割り当て", "CPU のローカル NUMA ノードでの割り当て。", "NUMA ローカル。\n\n💡 高いほどパフォーマンスが良い。"),
+        ("vmstat", "numa_other") => ("NUMA リモート割り当て", "リモート NUMA ノードでの割り当て。", "NUMA リモート。\n\n💡 高い → メモリアフィニティが悪い。"),
+        ("vmstat", "pgfree") => ("解放ページ数", "起動以来の解放ページ合計。", "解放ページ。\n\n💡 pgalloc_* と連動するはず。"),
+        ("vmstat", "pgactivate") => ("アクティブリスト昇格ページ", "アクセスにより非アクティブ→アクティブに昇格。", "ページ活性化。\n\n💡 健全なワーキングセットサイクル。"),
+        ("vmstat", "pgdeactivate") => ("非アクティブリスト降格ページ", "回収時にアクティブ→非アクティブに降格。", "ページ非活性化。\n\n💡 レート増加 → メモリ圧迫。"),
+        ("vmstat", "pglazyfree") => ("遅延解放マークページ", "MADV_FREE でマークされたが未回収のページ。", "遅延解放ページ。\n\n💡 メモリ圧迫時のみカーネルが回収。"),
+        ("vmstat", "pglazyfreed") => ("実際に遅延解放されたページ", "MADV_FREE ページがカーネルにより回収。", "遅延解放済みページ。\n\n💡 カーネルがメモリを必要とした結果。"),
+        ("vmstat", "pgrefill") => ("LRU 補充スキャンページ", "アクティブ→非アクティブの補充時にスキャン。", "LRU 補充スキャン。\n\n💡 高レート → 活発なメモリ回収エージング。"),
+        ("vmstat", "pgreuse") => ("高速パス再利用ページ", "完全な割り当てパスを経ずに再利用。", "高速パス再利用。\n\n💡 高いほど良い。"),
+        ("vmstat", "pgsteal_kswapd") => ("kswapd 回収ページ", "バックグラウンド回収。プロセスをブロックしない。", "kswapd 回収。\n\n💡 kswapd 高 + direct 低 = 健全な回収。"),
+        ("vmstat", "pgsteal_direct") => ("ダイレクト回収ページ", "ブロッキング回収。確保プロセスが待機。", "ダイレクト回収。\n\n💡 高い → kswapd が追いつけない。RAM 追加を検討。"),
+        ("vmstat", "pgscan_kswapd") => ("kswapd スキャンページ", "バックグラウンド回収でスキャン。", "kswapd スキャン。\n\n💡 スキャン - 回収 = 回収不可ページ。"),
+        ("vmstat", "pgscan_direct") => ("ダイレクト回収スキャンページ", "ブロッキング回収でスキャン。", "ダイレクト回収スキャン。\n\n💡 高いスキャン/回収比 → 非効率な回収。"),
+        ("vmstat", "pgscan_direct_throttle") => ("ダイレクト回収スロットル", "CPU 過負荷防止でスロットル。", "回収スロットル。\n\n💡 非常に重いメモリ圧迫。"),
+        ("vmstat", "pgscan_anon") => ("匿名ページスキャン", "回収候補としてスキャンされた匿名ページ。", "匿名スキャン。\n\n💡 コストが高い — スワップアウトが必要。"),
+        ("vmstat", "pgscan_file") => ("ファイルページスキャン", "回収候補としてスキャンされたファイルページ。", "ファイルスキャン。\n\n💡 匿名回収より低コスト。"),
+        ("vmstat", "pgsteal_anon") => ("匿名ページ回収", "スワップアウトされた匿名ページ。", "匿名回収。\n\n💡 > 0 → アクティブにスワッピング中。"),
+        ("vmstat", "pgsteal_file") => ("ファイルページ回収", "ドロップまたはライトバックされたファイルページ。", "ファイル回収。\n\n💡 健全な回収パス。"),
+        ("vmstat", "zone_reclaim_failed") => ("ゾーン回収失敗", "ゾーン回収でページ不足。", "ゾーン回収失敗。\n\n💡 NUMA ゾーンの圧迫。"),
+        ("vmstat", "pginodesteal") => ("inode 回収によるページ解放", "inode 退避でページも解放。", "inode スチール。\n\n💡 inode 退避で関連ページキャッシュも解放。"),
+        ("vmstat", "kswapd_inodesteal") => ("kswapd inode 回収", "バックグラウンド回収で inode を退避。", "kswapd inode 回収。\n\n💡 inode メモリと関連ページキャッシュを解放。"),
+        ("vmstat", "kswapd_low_wmark_hit_quickly") => ("kswapd low ウォーターマーク即到達", "kswapd 完了後すぐに low ウォーターマークに到達。", "low 即到達。\n\n💡 kswapd の回収量が不足。"),
+        ("vmstat", "kswapd_high_wmark_hit_quickly") => ("kswapd high ウォーターマーク即到達", "kswapd が素早く high ウォーターマークを回復。", "high 即到達。\n\n💡 健全 — kswapd が需要に追いついている。"),
+        ("vmstat", "pageoutrun") => ("kswapd 起動回数", "kswapd がページアウトのために起動された回数。", "kswapd 起動。\n\n💡 増加レート → 頻繁なメモリ圧迫。"),
+        ("vmstat", "pgrotated") => ("LRU 末尾ローテーションページ", "回収時にダーティだったページを LRU 末尾に移動。", "LRU ローテーション。\n\n💡 回収時に多数のダーティページに遭遇。"),
+        ("vmstat", "drop_pagecache") => ("ページキャッシュドロップ", "手動のページキャッシュ破棄イベント。", "ページキャッシュドロップ。\n\n💡 drop_caches で発動。本番では有害。"),
+        ("vmstat", "drop_slab") => ("スラブキャッシュドロップ", "手動のスラブキャッシュ破棄イベント。", "スラブドロップ。\n\n💡 drop_caches で発動。"),
+        ("vmstat", "pgmigrate_success") => ("ページ移行成功", "NUMA バランシングやコンパクションで移行成功。", "移行成功。\n\n💡 成功率が高いほど良い。"),
+        ("vmstat", "pgmigrate_fail") => ("ページ移行失敗", "移行できなかったページ。", "移行失敗。\n\n💡 高い → 固定ページが多い。"),
+        ("vmstat", "thp_fault_alloc") => ("THP フォルト割り当て", "ページフォルトで THP (2MB) を割り当て。", "THP フォルト割り当て。\n\n💡 高いほど良い。"),
+        ("vmstat", "thp_fault_fallback") => ("THP フォルトフォールバック", "THP 割り当て失敗で 4KB にフォールバック。", "THP フォールバック。\n\n💡 高い → 断片化で THP 割り当て不可。"),
+        ("vmstat", "thp_collapse_alloc") => ("THP 折りたたみ割り当て", "khugepaged がベースページを THP に統合。", "khugepaged 統合。\n\n💡 512 ベースページを 2MB THP に統合。"),
+        ("vmstat", "thp_collapse_alloc_failed") => ("THP 折りたたみ失敗", "khugepaged 統合の割り当て失敗。", "統合失敗。\n\n💡 断片化で THP 形成不可。"),
+        ("vmstat", "thp_split_page") => ("THP ページ分割", "THP を 512 ベースページに分割。", "THP 分割。\n\n💡 高い + 高い alloc → THP の恩恵が少ないワークロード。"),
+        ("vmstat", "thp_split_pmd") => ("THP PMD 分割", "PMD エントリを 2MB→4KB マッピングに分割。", "THP PMD 分割。\n\n💡 部分的 unmap や mprotect で発生。"),
+        ("vmstat", "thp_zero_page_alloc") => ("THP ゼロページ割り当て", "未初期化メモリ用の共有ゼロページ。", "THP ゼロページ。\n\n💡 共有読み取り専用でメモリ節約。"),
+        ("vmstat", "thp_swpout") => ("THP 一括スワップアウト", "THP を 2MB 単位でスワップアウト。", "THP スワップアウト。\n\n💡 分割より効率的。"),
+        ("vmstat", "thp_swpout_fallback") => ("THP スワップアウトフォールバック", "THP を分割してからスワップアウト。", "THP スワップアウトフォールバック。\n\n💡 分割が必要で非効率。"),
+        ("vmstat", "compact_stall") => ("コンパクション停滞", "メモリコンパクションでプロセスが停滞。", "コンパクション停滞。\n\n💡 高い → 断片化が割り当て遅延を引き起こす。"),
+        ("vmstat", "compact_fail") => ("コンパクション失敗", "連続ブロック作成に失敗。", "コンパクション失敗。\n\n💡 高い → 深刻な断片化。"),
+        ("vmstat", "compact_success") => ("コンパクション成功", "連続ブロック作成に成功。", "コンパクション成功。\n\n💡 success/(success+fail) = 成功率。"),
+        ("vmstat", "compact_daemon_wake") => ("コンパクションデーモン起動", "kcompactd のプロアクティブコンパクション起動。", "kcompactd 起動。\n\n💡 compaction_proactiveness で調整可能。"),
+        ("vmstat", "compact_migrate_scanned") => ("コンパクション移行スキャン", "移動可能ページを探してスキャン。", "移行スキャン。\n\n💡 高い + 低成功 → 移動可能ページが少ない。"),
+        ("vmstat", "compact_free_scanned") => ("コンパクション空き領域スキャン", "空きターゲットページを探してスキャン。", "空き領域スキャン。\n\n💡 多いスキャン = より断片化。"),
+        ("vmstat", "swap_ra") => ("スワップ先読みページ", "投機的にスワップから先読み。", "スワップ先読み。\n\n💡 シーケンシャルアクセスで効果的。"),
+        ("vmstat", "swap_ra_hit") => ("スワップ先読みヒット", "先読みページの実際の使用。", "先読みヒット。\n\n💡 hit/ra = ヒット率。低い → ランダムアクセスで I/O が無駄。"),
+        ("vmstat", "balloon_inflate") => ("バルーンインフレート (VM)", "ハイパーバイザにメモリ返却。", "バルーンインフレーション。\n\n💡 VM がホストにメモリを返却中。"),
+        ("vmstat", "balloon_deflate") => ("バルーンデフレート (VM)", "ハイパーバイザからメモリ取得。", "バルーンデフレーション。\n\n💡 VM がメモリを取り戻し中。"),
+        ("vmstat", "unevictable_pgs_culled") => ("回収不可ページ選別", "回収不可と判定され LRU から移動。", "選別。\n\n💡 mlock や ramfs で回収不可と判定。"),
+        ("vmstat", "unevictable_pgs_scanned") => ("回収不可ページスキャン", "LRU スキャン中に遭遇した回収不可ページ。", "回収不可スキャン。\n\n💡 回収不可ページのスキャンは無駄な作業。"),
+        ("vmstat", "unevictable_pgs_rescued") => ("回収不可ページ救出", "回収不可リストから通常 LRU に復帰。", "ページ救出。\n\n💡 munlock 後に LRU エージングに復帰。"),
+        ("vmstat", "unevictable_pgs_mlocked") => ("mlock 化ページ", "mlock() で回収不可にされたページ。", "mlock 化。\n\n💡 メモリロックのレートを追跡。"),
+        ("vmstat", "unevictable_pgs_munlocked") => ("munlock 化ページ", "munlock() で通常 LRU に復帰したページ。", "munlock 化。\n\n💡 回収対象に復帰。"),
+        ("vmstat", "direct_map_level2_splits") => ("直接マップ 2MB 分割", "2MB エントリを 4KB に分割。", "2MB ページ分割。\n\n💡 ページ属性変更で発生。TLB 圧力増加。"),
+        ("vmstat", "direct_map_level3_splits") => ("直接マップ 1GB 分割", "1GB エントリを 2MB に分割。", "1GB ページ分割。\n\n💡 より大きな TLB への影響。"),
+
         _ => return None,
     })
 }
