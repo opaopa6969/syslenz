@@ -20,7 +20,7 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
             for part in &parts[1..] {
                 if let Some((key, val)) = part.split_once('=') {
                     let field_name = format!("{}_{}_{}",resource, level, key);
-                    let description = format!("{} {} pressure: {}", resource, level, key);
+                    let description = describe_psi_field(resource, level, key);
                     if key == "total" {
                         let v: i64 = val.parse().unwrap_or(0);
                         fields.push(Field {
@@ -47,4 +47,25 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         source: "/proc/pressure/{cpu,io,memory}".into(),
         fields,
     })
+}
+
+fn describe_psi_field(resource: &str, level: &str, key: &str) -> String {
+    let resource_desc = match resource {
+        "cpu" => "CPU",
+        "io" => "I/O",
+        "memory" => "memory",
+        other => other,
+    };
+    let level_desc = match level {
+        "some" => "at least one task stalled on",
+        "full" => "all non-idle tasks stalled on",
+        other => other,
+    };
+    match key {
+        "avg10" => format!("Pct of time {} {} (10s avg)", level_desc, resource_desc),
+        "avg60" => format!("Pct of time {} {} (60s avg)", level_desc, resource_desc),
+        "avg300" => format!("Pct of time {} {} (5min avg)", level_desc, resource_desc),
+        "total" => format!("Total us {} {} since boot", level_desc, resource_desc),
+        _ => format!("{} {} pressure: {}", resource_desc, level, key),
+    }
 }

@@ -591,6 +591,26 @@ fn field_desc_en(source: &str, field: &str) -> Option<(&'static str, &'static st
             "Number of times the OOM (Out of Memory) killer has been triggered since boot. Each invocation kills a process to free memory.",
             "OOM (Out of Memory) killer invocations since boot.\n\nThe OOM killer is the kernel's last resort — when all memory (RAM + swap) is exhausted, it kills a process to survive.\n\n💡 Diagnostic:\n  • Any non-zero value deserves investigation\n  • Check `dmesg | grep -i oom` for details on which processes were killed and why\n  • Prevent OOM: add swap, increase RAM, set memory limits via cgroups\n  • Protect critical processes: `echo -1000 > /proc/<pid>/oom_score_adj`"
         ),
+        ("vmstat", "nr_mapped") => (
+            "Pages mapped into page tables",
+            "Pages currently mapped into at least one process's virtual address space. Includes both file-backed and anonymous mapped pages.",
+            "Pages mapped into process page tables.\n\nThese are pages actively referenced by processes via their virtual memory mappings, including mmap'd files and shared libraries.\n\n💡 Diagnostic:\n  • High nr_mapped relative to total memory → Many processes sharing libraries or mmap'd files\n  • Steadily growing → Possible memory-mapped file leak or growing shared memory usage\n  • Compare with nr_anon_pages + nr_file_pages for the full memory picture"
+        ),
+        ("vmstat", "nr_shmem") => (
+            "Shared memory pages (tmpfs, shmem)",
+            "Pages used by shared memory segments, tmpfs filesystems, and POSIX shared memory. Counted as part of Cached in meminfo.",
+            "Shared memory pages — tmpfs, POSIX shmem, and SysV shared memory.\n\nThese pages appear in Cached (meminfo) but are NOT reclaimable like normal page cache — they persist until explicitly freed.\n\n💡 Diagnostic:\n  • High nr_shmem → Check tmpfs mounts (`df -h /dev/shm`, `/tmp` if tmpfs)\n  • Common consumers: databases (PostgreSQL shared buffers), web browsers, Docker overlays\n  • Unlike regular cache, shmem counts against MemAvailable"
+        ),
+        ("vmstat", "nr_anon_pages") => (
+            "Total anonymous pages",
+            "Pages allocated for process heap, stack, and private anonymous mappings. These can only be freed by the process exiting or by swapping.",
+            "Total anonymous (non-file-backed) pages in use.\n\nAnonymous pages hold process private data: heap (malloc), stack, and mmap(MAP_ANONYMOUS|MAP_PRIVATE).\n\n💡 Diagnostic:\n  • nr_anon_pages growing over time → Possible memory leak in one or more processes\n  • Large nr_anon_pages + low MemAvailable → Processes consuming most RAM\n  • To find the culprit: `ps aux --sort=-rss | head` or check /proc/<pid>/smaps_rollup"
+        ),
+        ("vmstat", "allocstall_normal") => (
+            "Allocation stalls in Normal zone",
+            "Times a process stalled waiting for memory from the Normal zone. Direct reclaim is triggered, causing latency spikes.",
+            "Allocation stalls in the Normal memory zone.\n\nWhen free pages drop below the low watermark, new allocations trigger direct reclaim — the allocating process must wait while the kernel frees pages. This causes latency spikes.\n\n💡 Diagnostic:\n  • allocstall increasing → System is under memory pressure\n  • Correlates with high latency in applications\n  • High stall rate → kswapd cannot keep up; consider adding RAM\n  • Compare with pgscan_direct and pgsteal_direct for the full picture"
+        ),
 
         // buddyinfo
         ("buddyinfo", "zone_count") => (
@@ -1414,6 +1434,26 @@ fn field_desc_ja(source: &str, field: &str) -> Option<(&'static str, &'static st
             "OOM Killer 発動回数",
             "起動以来 OOM（Out of Memory）Killer が発動した回数。各発動でメモリ解放のためプロセスが強制終了される。",
             "起動以来の OOM（Out of Memory）Killer 発動回数。\n\nOOM Killer はカーネルの最終手段 — 全メモリ（RAM + スワップ）が枯渇した時、生存のためにプロセスを強制終了する。\n\n💡 診断:\n  • 非ゼロの値は全て調査に値する\n  • `dmesg | grep -i oom` でどのプロセスが殺されたか、理由の詳細を確認\n  • OOM 防止: スワップ追加、RAM 増設、cgroups でメモリ制限を設定\n  • 重要プロセスの保護: `echo -1000 > /proc/<pid>/oom_score_adj`"
+        ),
+        ("vmstat", "nr_mapped") => (
+            "ページテーブルにマップされたページ数",
+            "少なくとも1つのプロセスの仮想アドレス空間にマップされているページ数。ファイル連動と匿名の両方のマップページを含む。",
+            "プロセスのページテーブルにマップされたページ数。\n\nmmap されたファイルや共有ライブラリなど、プロセスの仮想メモリマッピングを通じてアクティブに参照されているページ。\n\n💡 診断:\n  • 総メモリに対して nr_mapped が高い → 多くのプロセスがライブラリやmmap ファイルを共有\n  • 着実に増加 → メモリマップファイルのリークや共有メモリ使用量の増加の可能性\n  • nr_anon_pages + nr_file_pages と比較して全体像を把握"
+        ),
+        ("vmstat", "nr_shmem") => (
+            "共有メモリページ数（tmpfs, shmem）",
+            "共有メモリセグメント、tmpfs ファイルシステム、POSIX 共有メモリで使用されるページ数。meminfo の Cached に含まれる。",
+            "共有メモリページ — tmpfs、POSIX shmem、SysV 共有メモリ。\n\nこれらのページは meminfo の Cached に含まれるが、通常のページキャッシュのように回収可能ではない — 明示的に解放されるまで持続する。\n\n💡 診断:\n  • 高い nr_shmem → tmpfs マウントを確認（`df -h /dev/shm`、tmpfs の場合 `/tmp`）\n  • 主な消費者: データベース（PostgreSQL 共有バッファ）、Web ブラウザ、Docker オーバーレイ\n  • 通常のキャッシュと異なり、shmem は MemAvailable にカウントされる"
+        ),
+        ("vmstat", "nr_anon_pages") => (
+            "匿名ページの合計",
+            "プロセスのヒープ、スタック、プライベート匿名マッピングに割り当てられたページ数。プロセスの終了またはスワッピングでのみ解放される。",
+            "使用中の匿名（ファイル非連動）ページの合計。\n\n匿名ページはプロセスのプライベートデータを保持: ヒープ（malloc）、スタック、mmap(MAP_ANONYMOUS|MAP_PRIVATE)。\n\n💡 診断:\n  • nr_anon_pages が時間とともに増加 → 1つ以上のプロセスにメモリリークの可能性\n  • 大きな nr_anon_pages + 低い MemAvailable → プロセスが RAM の大部分を消費\n  • 犯人を見つける: `ps aux --sort=-rss | head` または /proc/<pid>/smaps_rollup を確認"
+        ),
+        ("vmstat", "allocstall_normal") => (
+            "Normal ゾーンのメモリ確保停滞回数",
+            "Normal ゾーンからのメモリ確保でプロセスが停滞した回数。ダイレクトリクレームが発動し、レイテンシスパイクを引き起こす。",
+            "Normal メモリゾーンでのメモリ確保停滞回数。\n\n空きページが low ウォーターマーク以下に低下すると、新規メモリ確保でダイレクトリクレームが発動 — 確保しようとするプロセスがカーネルのページ解放を待つ必要がある。これがレイテンシスパイクを引き起こす。\n\n💡 診断:\n  • allocstall が増加 → システムがメモリ圧迫下にある\n  • アプリケーションの高レイテンシと相関\n  • 高い停滞率 → kswapd が追いつけない。RAM の追加を検討\n  • pgscan_direct と pgsteal_direct も併せて確認して全体像を把握"
         ),
 
         // buddyinfo

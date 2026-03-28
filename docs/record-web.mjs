@@ -11,6 +11,25 @@ const PORT = 3456;
 const BASE = `http://localhost:${PORT}`;
 const ASSETS = 'docs/assets';
 
+// Human-like delays
+const PAUSE_SHORT = 800;
+const PAUSE_MED = 1500;
+const PAUSE_LONG = 2500;
+const PAUSE_READ = 3500;
+const KEY_INTERVAL = 600;
+
+async function pressSlowly(page, key, pause = KEY_INTERVAL) {
+  await page.keyboard.press(key);
+  await setTimeout(pause);
+}
+
+async function scrollDown(page, times = 3) {
+  for (let i = 0; i < times; i++) {
+    await page.keyboard.press('j');
+    await setTimeout(KEY_INTERVAL);
+  }
+}
+
 async function main() {
   // Build and start web server
   console.log('Building syslenz with web feature...');
@@ -23,8 +42,7 @@ async function main() {
     stdio: 'ignore', detached: true
   });
 
-  // Wait for server to start
-  await setTimeout(2000);
+  await setTimeout(2500);
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -34,96 +52,99 @@ async function main() {
   const page = await context.newPage();
 
   try {
+    // --- Scene 1: Dashboard ---
     console.log('Opening Web UI...');
     await page.goto(BASE);
-    await setTimeout(2000);
-
-    // Screenshot: Dashboard (default)
+    await setTimeout(PAUSE_READ);
     await page.screenshot({ path: `${ASSETS}/web-dashboard.png` });
-    console.log('  [1/8] Dashboard screenshot');
-    await setTimeout(1500);
+    console.log('  [1/8] Dashboard');
 
-    // Navigate to Classic mode (press O)
-    await page.keyboard.press('o');
-    await setTimeout(1500);
+    // Let it auto-refresh a couple times
+    await setTimeout(PAUSE_LONG);
+
+    // --- Scene 2: Classic mode ---
+    await pressSlowly(page, 'o', PAUSE_LONG);
     await page.screenshot({ path: `${ASSETS}/web-classic.png` });
-    console.log('  [2/8] Classic mode screenshot');
+    console.log('  [2/8] Classic mode');
 
-    // Navigate down in sidebar
-    await page.keyboard.press('j');
-    await setTimeout(300);
-    await page.keyboard.press('j');
-    await setTimeout(300);
-    await page.keyboard.press('j');
-    await setTimeout(300);
-    await page.keyboard.press('j');
-    await setTimeout(300);
-    await page.keyboard.press('j');
-    await setTimeout(500);
+    // Browse sources slowly
+    await setTimeout(PAUSE_MED);
+    await scrollDown(page, 5);
+    await setTimeout(PAUSE_SHORT);
 
-    // Drill into detail
-    await page.keyboard.press('Enter');
-    await setTimeout(1500);
+    // --- Scene 3: Drill into detail ---
+    await pressSlowly(page, 'Enter', PAUSE_LONG);
     await page.screenshot({ path: `${ASSETS}/web-detail.png` });
-    console.log('  [3/8] Detail view screenshot');
+    console.log('  [3/8] Detail view');
 
-    // Show help (?)
-    await page.keyboard.press('?');
-    await setTimeout(1000);
-    await page.keyboard.press('?');
-    await setTimeout(1000);
-    await page.keyboard.press('?');
-    await setTimeout(1500);
+    // Scroll fields slowly
+    await setTimeout(PAUSE_MED);
+    await scrollDown(page, 4);
+    await setTimeout(PAUSE_SHORT);
+
+    // --- Scene 4: Help levels ---
+    await pressSlowly(page, '?', PAUSE_MED);   // NORMAL
+    await setTimeout(PAUSE_MED);
+    await pressSlowly(page, '?', PAUSE_MED);   // DETAILED
+    await setTimeout(PAUSE_LONG);
+    await pressSlowly(page, '?', PAUSE_READ);  // EXTRA - read it
     await page.screenshot({ path: `${ASSETS}/web-help.png` });
-    console.log('  [4/8] Help EXTRA screenshot');
-    await page.keyboard.press('?');
-    await setTimeout(500);
+    console.log('  [4/8] Help EXTRA');
+    await pressSlowly(page, '?', PAUSE_SHORT); // OFF
 
-    // Diff view
-    await page.keyboard.press('d');
-    await setTimeout(2000);
+    // --- Scene 5: Back and Diff ---
+    await pressSlowly(page, 'Backspace', PAUSE_SHORT);
+    await pressSlowly(page, 'Backspace', PAUSE_MED);
+    await pressSlowly(page, 'd', PAUSE_READ);
     await page.screenshot({ path: `${ASSETS}/web-diff.png` });
-    console.log('  [5/8] Diff view screenshot');
+    console.log('  [5/8] Diff view');
 
-    // Diagnostics
-    await page.keyboard.press('x');
-    await setTimeout(1500);
+    // --- Scene 6: Diagnostics ---
+    await pressSlowly(page, 'x', PAUSE_READ);
     await page.screenshot({ path: `${ASSETS}/web-diagnostics.png` });
-    console.log('  [6/8] Diagnostics screenshot');
+    console.log('  [6/8] Diagnostics');
 
-    // Category Guide
-    await page.keyboard.press('c');
-    await setTimeout(1500);
+    // --- Scene 7: Category Guide ---
+    await pressSlowly(page, 'c', PAUSE_LONG);
+    await scrollDown(page, 3);
+    await setTimeout(PAUSE_LONG);
     await page.screenshot({ path: `${ASSETS}/web-category.png` });
-    console.log('  [7/8] Category Guide screenshot');
+    console.log('  [7/8] Category Guide');
 
-    // Switch to Japanese
-    await page.keyboard.press('l');
-    await setTimeout(1500);
-
-    // Back to Dashboard
-    await page.keyboard.press('d');
-    await setTimeout(2000);
+    // --- Scene 8: Switch to Japanese ---
+    await pressSlowly(page, 'l', PAUSE_LONG);
+    await pressSlowly(page, 'd', PAUSE_READ);
     await page.screenshot({ path: `${ASSETS}/web-dashboard-ja.png` });
-    console.log('  [8/8] Japanese Dashboard screenshot');
+    console.log('  [8/8] Japanese Dashboard');
 
-    await setTimeout(1000);
+    // Linger on final shot
+    await setTimeout(PAUSE_LONG);
 
   } finally {
     await context.close();
     await browser.close();
-
-    // Stop server
     try { process.kill(-server.pid); } catch(e) {}
 
     console.log('');
-    console.log('Done! Files saved:');
-    console.log(`  Video: ${ASSETS}/web-demo.webm`);
-    console.log(`  Screenshots: ${ASSETS}/web-*.png`);
-    console.log('');
-    console.log('To convert video to GIF:');
-    console.log(`  ffmpeg -i ${ASSETS}/*.webm -vf "fps=10,scale=1280:-1" -loop 0 ${ASSETS}/web-demo.gif`);
+    console.log('Done! Converting to GIF...');
   }
+
+  // Find the webm and convert
+  const { readdirSync } = await import('fs');
+  const webm = readdirSync(ASSETS).find(f => f.endsWith('.webm') && f !== 'web-demo.webm');
+  if (webm) {
+    const src = `${ASSETS}/${webm}`;
+    execSync(`mv "${src}" ${ASSETS}/web-demo.webm`);
+  }
+  execSync(`ffmpeg -i ${ASSETS}/web-demo.webm -vf "fps=8,scale=1280:-1" -loop 0 ${ASSETS}/web-demo.gif -y`, {
+    shell: '/bin/bash', stdio: 'inherit'
+  });
+
+  console.log('');
+  console.log('Files:');
+  console.log(`  ${ASSETS}/web-demo.gif`);
+  console.log(`  ${ASSETS}/web-demo.webm`);
+  console.log(`  ${ASSETS}/web-*.png (8 screenshots)`);
 }
 
 main().catch(console.error);
