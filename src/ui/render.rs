@@ -72,7 +72,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Overview | View::Detail => draw_detail(f, app, main_chunks[1]),
             View::Diff => draw_diff(f, app, main_chunks[1]),
             View::TableView => draw_table_view(f, app, main_chunks[1]),
-            View::Graph => graph::draw_graph(f, app, main_chunks[1]),
+            View::Graph => {
+                // Split: detail on top, graph on bottom
+                let content_split = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(50),
+                        Constraint::Percentage(50),
+                    ])
+                    .split(main_chunks[1]);
+                draw_detail(f, app, content_split[0]);
+                graph::draw_graph(f, app, content_split[1]);
+            }
             _ => {}
         }
     }
