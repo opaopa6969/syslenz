@@ -52,6 +52,20 @@ pub fn analyze(snapshot: &Snapshot, locale: Locale) -> Vec<DiagnosticFinding> {
     check_conntrack(&mut findings, snapshot, locale);
     check_gpu(&mut findings, snapshot, locale);
     check_systemd(&mut findings, snapshot, locale);
+    check_memory_leak(&mut findings, snapshot, locale);
+    check_swap_activity(&mut findings, snapshot, locale);
+    check_context_switches(&mut findings, snapshot, locale);
+    check_oom_kills(&mut findings, snapshot, locale);
+    check_network_errors(&mut findings, snapshot, locale);
+    check_inode_pressure(&mut findings, snapshot, locale);
+    check_uptime(&mut findings, snapshot, locale);
+    check_load_trend(&mut findings, snapshot, locale);
+    check_tcp_listen(&mut findings, snapshot, locale);
+    check_kernel_taint(&mut findings, snapshot, locale);
+    check_high_memory_process(&mut findings, snapshot, locale);
+    check_ss_orphaned(&mut findings, snapshot, locale);
+    check_conntrack_rate(&mut findings, snapshot, locale);
+    check_ip_forwarding(&mut findings, snapshot, locale);
 
     // Sort: Critical first, then Warning, then Info
     findings.sort_by(|a, b| {
@@ -118,6 +132,16 @@ fn get_table_col_values(snapshot: &Snapshot, source: &str, field: &str, col: usi
             _ => vec![],
         })
         .unwrap_or_default()
+}
+
+fn get_table_rows<'a>(snapshot: &'a Snapshot, source: &str, field: &str) -> Option<&'a Vec<Vec<String>>> {
+    snapshot.entries.get(source)?
+        .fields.iter()
+        .find(|f| f.name == field)
+        .and_then(|f| match &f.value {
+            FieldValue::Table(rows) => Some(rows),
+            _ => None,
+        })
 }
 
 fn check_memory(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
@@ -726,6 +750,589 @@ fn check_systemd(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale:
                 });
             }
         }
+    }
+}
+
+fn check_memory_leak(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let total = match get_bytes(snap, "meminfo", "MemTotal") {
+        Some(v) if v > 0 => v,
+        _ => return,
+    };
+
+    // Check if Cached is very low relative to MemTotal
+    if let Some(cached) = get_bytes(snap, "meminfo", "Cached") {
+        let cached_pct = (cached as f64 / total as f64) * 100.0;
+        if cached_pct < 5.0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "meminfo".into(),
+                    title: format!("ページキャッシュ枯渇: Cached {:.1}%", cached_pct),
+                    detail: format!("Cached ({}) が MemTotal ({}) の 5% 未満。ページキャッシュが追い出されており、I/O 性能が悪化。",
+                        format_bytes(cached), format_bytes(total)),
+                    suggestion: "メモリ消費の多いプロセスを調査。アプリケーションがメモリを大量に確保している可能性。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "meminfo".into(),
+                    title: format!("Page cache starved: Cached {:.1}%", cached_pct),
+                    detail: format!("Cached ({}) is below 5% of MemTotal ({}). Page cache is being evicted, degrading I/O performance.",
+                        format_bytes(cached), format_bytes(total)),
+                    suggestion: "Investigate high-memory processes. Applications may be hoarding memory.".into(),
+                }
+            });
+        }
+    }
+
+    // Check for write storm (Dirty > 10% of MemTotal)
+    if let Some(dirty) = get_bytes(snap, "meminfo", "Dirty") {
+        let dirty_pct = (dirty as f64 / total as f64) * 100.0;
+        if dirty_pct > 10.0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "meminfo".into(),
+                    title: format!("書き込みストーム: Dirty {:.1}%", dirty_pct),
+                    detail: format!("Dirty ページ ({}) が MemTotal の 10% を超過。大量のデータがディスクへの書き込み待ち。",
+                        format_bytes(dirty)),
+                    suggestion: "I/O 負荷の高いプロセスを特定。iotop で調査。vm.dirty_ratio の調整も検討。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "meminfo".into(),
+                    title: format!("Write storm: Dirty {:.1}%", dirty_pct),
+                    detail: format!("Dirty pages ({}) exceed 10% of MemTotal. Large amount of data pending disk write.",
+                        format_bytes(dirty)),
+                    suggestion: "Identify I/O-heavy processes with iotop. Consider tuning vm.dirty_ratio.".into(),
+                }
+            });
+        }
+    }
+}
+
+fn check_swap_activity(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    if snap.entries.get("vmstat").is_none() { return; }
+
+    let pswpin = get_integer(snap, "vmstat", "pswpin").unwrap_or(0);
+    let pswpout = get_integer(snap, "vmstat", "pswpout").unwrap_or(0);
+
+    if pswpin > 0 || pswpout > 0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "vmstat".into(),
+                title: format!("スワップ活動検出: in={} out={} ページ", pswpin, pswpout),
+                detail: "スワップイン/アウトが発生している。メモリ不足によりディスクとの間でページが移動中。パフォーマンスが劣化。".into(),
+                suggestion: "メモリ消費量の多いプロセスを確認。スワップ使用量と MemAvailable を監視。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "vmstat".into(),
+                title: format!("Swap activity detected: in={} out={} pages", pswpin, pswpout),
+                detail: "Pages are being swapped in/out. Memory pressure is causing disk I/O for paging. Performance is degraded.".into(),
+                suggestion: "Check top memory-consuming processes. Monitor swap usage and MemAvailable.".into(),
+            }
+        });
+    }
+}
+
+fn check_context_switches(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let procs_running = match get_integer(snap, "stat", "procs_running") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let cpu_count = get_integer(snap, "stat", "cpu_count")
+        .or_else(|| get_integer(snap, "cpuinfo", "cpu_count"))
+        .or_else(|| get_integer(snap, "interrupts", "cpu_count"))
+        .unwrap_or(1);
+
+    if cpu_count <= 0 { return; }
+
+    if procs_running > cpu_count * 2 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "stat".into(),
+                title: format!("実行中プロセス過多: {} (CPU{}個の{:.0}倍)", procs_running, cpu_count, procs_running as f64 / cpu_count as f64),
+                detail: "実行可能なプロセスがCPU数の2倍を超過。過剰なコンテキストスイッチが発生し、スループットが低下。".into(),
+                suggestion: "top で CPU 消費の高いプロセスを特定。並列度を CPU 数に合わせて調整。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "stat".into(),
+                title: format!("Runnable process overload: {} ({:.0}x {} CPUs)", procs_running, procs_running as f64 / cpu_count as f64, cpu_count),
+                detail: "Runnable processes exceed 2x CPU count. Excessive context switching is reducing throughput.".into(),
+                suggestion: "Identify high-CPU processes with top. Tune parallelism to match CPU count.".into(),
+            }
+        });
+    }
+}
+
+fn check_oom_kills(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let oom_kill = match get_integer(snap, "vmstat", "oom_kill") {
+        Some(v) => v,
+        None => return,
+    };
+
+    if oom_kill > 0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "vmstat".into(),
+                title: format!("OOM Killer 発動 {}回", oom_kill),
+                detail: "起動以降、OOM Killer がプロセスを強制終了した回数。メモリ不足が過去に発生。".into(),
+                suggestion: "dmesg | grep -i oom で詳細を確認。メモリの増設またはワークロードの見直しを検討。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "vmstat".into(),
+                title: format!("OOM Killer invoked {} time(s)", oom_kill),
+                detail: "OOM Killer has killed processes since boot. System experienced memory exhaustion.".into(),
+                suggestion: "Run: dmesg | grep -i oom for details. Consider adding memory or reviewing workload.".into(),
+            }
+        });
+    }
+}
+
+fn check_network_errors(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    if snap.entries.get("net/snmp").is_none() { return; }
+
+    let tcp_in_errs = get_integer(snap, "net/snmp", "Tcp_InErrs").unwrap_or(0);
+    let tcp_retrans = get_integer(snap, "net/snmp", "Tcp_RetransSegs").unwrap_or(0);
+    let tcp_out_segs = get_integer(snap, "net/snmp", "Tcp_OutSegs").unwrap_or(0);
+    let udp_in_errs = get_integer(snap, "net/snmp", "Udp_InErrors").unwrap_or(0);
+    let udp_rcvbuf_errs = get_integer(snap, "net/snmp", "Udp_RcvbufErrors").unwrap_or(0);
+
+    if tcp_in_errs > 0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "net/snmp".into(),
+                title: format!("TCPエラー受信: {} セグメント", tcp_in_errs),
+                detail: "チェックサムエラー等のある TCP セグメントを受信。NIC障害、不良ケーブル、またはドライバの問題。".into(),
+                suggestion: "ethtool -S <iface> でNICレベルのエラーカウンタを確認。ケーブル接続を点検。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "net/snmp".into(),
+                title: format!("TCP input errors: {} segments", tcp_in_errs),
+                detail: "TCP segments received with checksum or other errors. Possible NIC failure, bad cable, or driver issue.".into(),
+                suggestion: "Check NIC-level counters with ethtool -S <iface>. Inspect cable connections.".into(),
+            }
+        });
+    }
+
+    if tcp_out_segs > 1000 && tcp_retrans > 0 {
+        let retrans_pct = (tcp_retrans as f64 / tcp_out_segs as f64) * 100.0;
+        if retrans_pct > 1.0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "net/snmp".into(),
+                    title: format!("TCP再送率 {:.2}%", retrans_pct),
+                    detail: format!("TCP 再送 {} / 送信 {} — 1%超はパケットロスが深刻。ネットワーク品質に問題。", tcp_retrans, tcp_out_segs),
+                    suggestion: "ネットワーク経路を調査。mtr でパケットロスの発生箇所を特定。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "net/snmp".into(),
+                    title: format!("TCP retransmission rate {:.2}%", retrans_pct),
+                    detail: format!("TCP retransmits {} / sent {} — above 1% indicates serious packet loss.", tcp_retrans, tcp_out_segs),
+                    suggestion: "Investigate network path. Use mtr to locate where packet loss occurs.".into(),
+                }
+            });
+        }
+    }
+
+    if udp_in_errs > 0 || udp_rcvbuf_errs > 0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "net/snmp".into(),
+                title: format!("UDPエラー: InErrors={} RcvbufErrors={}", udp_in_errs, udp_rcvbuf_errs),
+                detail: "UDP データグラムの配信失敗または受信バッファオーバーフロー。パケットがドロップされている。".into(),
+                suggestion: "受信バッファサイズを確認: sysctl net.core.rmem_max。アプリケーションの受信処理速度も確認。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "net/snmp".into(),
+                title: format!("UDP errors: InErrors={} RcvbufErrors={}", udp_in_errs, udp_rcvbuf_errs),
+                detail: "UDP datagram delivery failures or receive buffer overflows. Packets are being dropped.".into(),
+                suggestion: "Check receive buffer size: sysctl net.core.rmem_max. Review application receive throughput.".into(),
+            }
+        });
+    }
+}
+
+fn check_inode_pressure(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let total = match get_bytes(snap, "meminfo", "MemTotal") {
+        Some(v) if v > 0 => v,
+        _ => return,
+    };
+    let sreclaimable = match get_bytes(snap, "meminfo", "SReclaimable") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let slab_pct = (sreclaimable as f64 / total as f64) * 100.0;
+    if slab_pct > 25.0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "meminfo".into(),
+                title: format!("スラブキャッシュ肥大: SReclaimable {:.1}%", slab_pct),
+                detail: format!("SReclaimable ({}) が MemTotal の 25% 超。dentry/inode キャッシュが大量のメモリを使用。",
+                    format_bytes(sreclaimable)),
+                suggestion: "ファイルサーバーでは正常。必要なら echo 2 > /proc/sys/vm/drop_caches で手動回収。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "meminfo".into(),
+                title: format!("Large slab cache: SReclaimable {:.1}%", slab_pct),
+                detail: format!("SReclaimable ({}) exceeds 25% of MemTotal. Dentry/inode caches are consuming significant memory.",
+                    format_bytes(sreclaimable)),
+                suggestion: "Normal on fileservers. If needed: echo 2 > /proc/sys/vm/drop_caches to reclaim manually.".into(),
+            }
+        });
+    }
+}
+
+fn check_uptime(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let uptime_secs = match get_float(snap, "uptime", "uptime") {
+        Some(v) => v,
+        None => return,
+    };
+
+    if uptime_secs < 300.0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "uptime".into(),
+                title: format!("直近の再起動: {:.0}秒前", uptime_secs),
+                detail: "システムが5分以内に再起動された。予期しない再起動の可能性を確認。".into(),
+                suggestion: "last reboot と dmesg で再起動の原因を確認。panic やハードウェア障害のログを調査。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "uptime".into(),
+                title: format!("System recently rebooted: {:.0}s ago", uptime_secs),
+                detail: "System was rebooted within the last 5 minutes. Check for unexpected restarts.".into(),
+                suggestion: "Run: last reboot and dmesg to investigate cause. Check for panic or hardware failure logs.".into(),
+            }
+        });
+    }
+}
+
+fn check_load_trend(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let load1 = match get_float(snap, "loadavg", "load_1min") {
+        Some(v) => v,
+        None => return,
+    };
+    let load15 = match get_float(snap, "loadavg", "load_15min") {
+        Some(v) if v > 0.0 => v,
+        _ => return,
+    };
+
+    let ratio = load1 / load15;
+
+    if ratio > 2.0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "loadavg".into(),
+                title: format!("負荷急上昇: load1={:.2} load15={:.2} ({:.1}倍)", load1, load15, ratio),
+                detail: "1分間のロードが15分間の2倍を超過。負荷が急激に上昇中。".into(),
+                suggestion: "直近で開始されたプロセスやジョブを確認。top でリアルタイムの CPU 状況を監視。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "loadavg".into(),
+                title: format!("Load spiking: load1={:.2} load15={:.2} ({:.1}x)", load1, load15, ratio),
+                detail: "1-minute load is more than 2x the 15-minute average. Load is increasing rapidly.".into(),
+                suggestion: "Check for recently started processes or jobs. Monitor with top in real time.".into(),
+            }
+        });
+    } else if ratio < 0.5 && load15 > 1.0 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "loadavg".into(),
+                title: format!("負荷回復中: load1={:.2} load15={:.2}", load1, load15),
+                detail: "1分間のロードが15分間の半分未満。以前の高負荷から回復中。".into(),
+                suggestion: "状況を監視。回復が継続するか確認。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "loadavg".into(),
+                title: format!("Load recovering: load1={:.2} load15={:.2}", load1, load15),
+                detail: "1-minute load is less than half the 15-minute average. System is recovering from prior load.".into(),
+                suggestion: "Monitor the trend. Confirm recovery continues.".into(),
+            }
+        });
+    }
+}
+
+fn check_tcp_listen(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let rows = match get_table_rows(snap, "net/tcp", "connections") {
+        Some(r) => r,
+        None => return,
+    };
+
+    // Table columns: proto, local_addr, remote_addr, state, uid
+    let well_known_ports: &[(u16, &str)] = &[
+        (22, "SSH"), (80, "HTTP"), (443, "HTTPS"), (3306, "MySQL"),
+        (5432, "PostgreSQL"), (6379, "Redis"), (8080, "HTTP-alt"),
+        (8443, "HTTPS-alt"), (3000, "Dev server"), (5000, "Dev server"),
+        (9090, "Prometheus"), (27017, "MongoDB"),
+    ];
+
+    let mut listening_services: Vec<String> = Vec::new();
+    for row in rows {
+        if row.len() >= 4 && row[3] == "LISTEN" {
+            let local_addr = &row[1];
+            if let Some(port_str) = local_addr.rsplit(':').next() {
+                if let Ok(port) = port_str.parse::<u16>() {
+                    for (known_port, name) in well_known_ports {
+                        if port == *known_port {
+                            listening_services.push(format!("{}({})", name, port));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    listening_services.sort();
+    listening_services.dedup();
+
+    if !listening_services.is_empty() {
+        let services = listening_services.join(", ");
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "net/tcp".into(),
+                title: format!("リスン中のサービス: {}", services),
+                detail: "よく知られたポートでリスンしているサービスを検出。".into(),
+                suggestion: "想定外のサービスがないか確認。不要なサービスは停止を検討。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "net/tcp".into(),
+                title: format!("Listening services: {}", services),
+                detail: "Detected services listening on well-known ports.".into(),
+                suggestion: "Verify all listed services are expected. Consider stopping unnecessary ones.".into(),
+            }
+        });
+    }
+}
+
+fn check_kernel_taint(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let tainted = match get_integer(snap, "sysctl", "kernel_tainted")
+        .or_else(|| get_integer(snap, "kernel", "tainted")) {
+        Some(v) => v,
+        None => return,
+    };
+
+    if tainted != 0 {
+        let mut reasons = Vec::new();
+        if tainted & 1 != 0 { reasons.push("proprietary module"); }
+        if tainted & 2 != 0 { reasons.push("module force-loaded"); }
+        if tainted & 4 != 0 { reasons.push("SMP unsafe module"); }
+        if tainted & 8 != 0 { reasons.push("module force-unloaded"); }
+        if tainted & 16 != 0 { reasons.push("MCE (hardware error)"); }
+        if tainted & 32 != 0 { reasons.push("bad page found"); }
+        if tainted & 64 != 0 { reasons.push("user request"); }
+        if tainted & 128 != 0 { reasons.push("kernel died/OOPS"); }
+        if tainted & 256 != 0 { reasons.push("ACPI overridden"); }
+        if tainted & 512 != 0 { reasons.push("kernel warning"); }
+        if tainted & 1024 != 0 { reasons.push("staging driver"); }
+
+        let detail_str = if reasons.is_empty() {
+            format!("tainted={}", tainted)
+        } else {
+            reasons.join(", ")
+        };
+
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "kernel".into(),
+                title: format!("カーネル汚染フラグ: {}", tainted),
+                detail: format!("カーネルが汚染状態: {}。カーネルのバグレポートが受理されない可能性。", detail_str),
+                suggestion: "lsmod でロードされたモジュールを確認。プロプライエタリモジュール (nvidia 等) は一般的。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "kernel".into(),
+                title: format!("Kernel tainted: {}", tainted),
+                detail: format!("Kernel is tainted: {}. Kernel bug reports may not be accepted upstream.", detail_str),
+                suggestion: "Check loaded modules with lsmod. Proprietary modules (e.g., nvidia) are common causes.".into(),
+            }
+        });
+    }
+}
+
+fn check_high_memory_process(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let total = match get_bytes(snap, "meminfo", "MemTotal") {
+        Some(v) if v > 0 => v,
+        _ => return,
+    };
+
+    let rows = match get_table_rows(snap, "processes", "processes") {
+        Some(r) => r,
+        None => return,
+    };
+
+    // Process table columns: PID, name, state, RSS, threads, UID
+    let threshold = total / 2; // 50% of MemTotal
+
+    for row in rows {
+        if row.len() < 4 { continue; }
+        let rss_bytes = parse_formatted_bytes(&row[3]);
+        if rss_bytes > threshold {
+            let pct = (rss_bytes as f64 / total as f64) * 100.0;
+            let pid = &row[0];
+            let name = &row[1];
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "processes".into(),
+                    title: format!("高メモリプロセス: {} (PID {}) — RSS {:.1}%", name, pid, pct),
+                    detail: format!("単一プロセスが MemTotal の 50% 以上 ({}) を使用。メモリリークまたは設定の問題の可能性。",
+                        &row[3]),
+                    suggestion: format!("pmap -x {} でメモリマップを確認。RSS が増え続けていないか監視。", pid),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "processes".into(),
+                    title: format!("High-memory process: {} (PID {}) — RSS {:.1}%", name, pid, pct),
+                    detail: format!("Single process using over 50% of MemTotal ({}). Possible memory leak or misconfiguration.",
+                        &row[3]),
+                    suggestion: format!("Run: pmap -x {} to inspect memory map. Monitor if RSS keeps growing.", pid),
+                }
+            });
+        }
+    }
+}
+
+fn check_ss_orphaned(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let orphaned = match get_integer(snap, "ss", "tcp_orphaned") {
+        Some(v) => v,
+        None => return,
+    };
+
+    if orphaned > 100 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "ss".into(),
+                title: format!("孤立TCPソケット: {}個", orphaned),
+                detail: "プロセスに属さない TCP ソケットが100個以上。接続のクリーンアップに問題がある。".into(),
+                suggestion: "net.ipv4.tcp_max_orphans を確認。アプリケーションのソケットクローズ処理を調査。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Warning,
+                source: "ss".into(),
+                title: format!("Orphaned TCP sockets: {}", orphaned),
+                detail: "Over 100 TCP sockets not attached to any process. Connection cleanup issues.".into(),
+                suggestion: "Check net.ipv4.tcp_max_orphans. Investigate application socket close handling.".into(),
+            }
+        });
+    }
+}
+
+fn check_conntrack_rate(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    let usage_pct = match get_float(snap, "conntrack", "usage_pct") {
+        Some(v) => v,
+        None => return,
+    };
+
+    // Only fire at >50% (the existing check_conntrack fires at >80%)
+    if usage_pct > 50.0 && usage_pct <= 80.0 {
+        let max = get_integer(snap, "conntrack", "conntrack_max").unwrap_or(0);
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "conntrack".into(),
+                title: format!("conntrack テーブル {:.1}% 使用", usage_pct),
+                detail: format!("コネクション追跡テーブルが半分以上使用中 (max={})。高トラフィック時に枯渇する可能性。", max),
+                suggestion: format!("sysctl net.nf_conntrack_max の引き上げを検討 (現在: {})。nf_conntrack_tcp_timeout_* の短縮も効果的。", max),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "conntrack".into(),
+                title: format!("Conntrack table {:.1}% used", usage_pct),
+                detail: format!("Connection tracking table is over half full (max={}). May exhaust under high traffic.", max),
+                suggestion: format!("Consider increasing sysctl net.nf_conntrack_max (currently: {}). Shortening nf_conntrack_tcp_timeout_* values also helps.", max),
+            }
+        });
+    }
+}
+
+fn check_ip_forwarding(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    // Ip_Forwarding: 1 = forwarding enabled (gateway), 2 = forwarding disabled (host-only)
+    let forwarding = match get_integer(snap, "net/snmp", "Ip_Forwarding") {
+        Some(v) => v,
+        None => return,
+    };
+
+    if forwarding == 1 {
+        findings.push(if locale == Locale::Ja {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "net/snmp".into(),
+                title: "IP転送が有効".into(),
+                detail: "net.ipv4.ip_forward = 1。このホストはルーター/NATゲートウェイとして動作中。".into(),
+                suggestion: "ルーター/コンテナホストとして意図的であれば問題なし。通常のサーバーでは無効にすることを推奨。".into(),
+            }
+        } else {
+            DiagnosticFinding {
+                severity: Severity::Info,
+                source: "net/snmp".into(),
+                title: "IP forwarding enabled".into(),
+                detail: "net.ipv4.ip_forward = 1. This host is acting as a router/NAT gateway.".into(),
+                suggestion: "Expected on routers/container hosts. For regular servers, consider disabling with sysctl net.ipv4.ip_forward=0.".into(),
+            }
+        });
+    }
+}
+
+/// Parse a human-formatted byte string back to raw bytes.
+/// Handles formats like "1.5 GiB", "512.0 MiB", "100.0 KiB", "0 B", "-".
+fn parse_formatted_bytes(s: &str) -> u64 {
+    let s = s.trim();
+    if s == "-" || s.is_empty() { return 0; }
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 2 { return parts[0].parse().unwrap_or(0); }
+    let num: f64 = match parts[0].parse() {
+        Ok(v) => v,
+        Err(_) => return 0,
+    };
+    match parts[1] {
+        "GiB" => (num * 1024.0 * 1024.0 * 1024.0) as u64,
+        "MiB" => (num * 1024.0 * 1024.0) as u64,
+        "KiB" => (num * 1024.0) as u64,
+        "B" => num as u64,
+        _ => 0,
     }
 }
 
