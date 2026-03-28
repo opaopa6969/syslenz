@@ -1075,6 +1075,29 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let l = app.locale;
+
+    // If searching, show search input instead of normal status bar
+    if app.searching {
+        let label = if l == crate::i18n::Locale::Ja { " 検索: " } else { " Search: " };
+        let search_line = Line::from(vec![
+            Span::styled(label, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.search_query,
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("█", Style::default().fg(Color::Cyan)), // cursor
+            Span::styled(
+                if l == crate::i18n::Locale::Ja { "  (Enter で確定, Esc でキャンセル)" } else { "  (Enter to apply, Esc to cancel)" },
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        let p = Paragraph::new(search_line)
+            .block(Block::default().borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow)));
+        f.render_widget(p, area);
+        return;
+    }
+
     let refresh_indicator = if app.auto_refresh { "AUTO" } else { "MANUAL" };
     let elapsed = app.last_refresh.elapsed().as_secs();
     let snapshot_count = app.snapshots.len();
