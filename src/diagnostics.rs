@@ -50,6 +50,8 @@ pub fn analyze(snapshot: &Snapshot, locale: Locale) -> Vec<DiagnosticFinding> {
     check_fd(&mut findings, snapshot, locale);
     check_dns(&mut findings, snapshot, locale);
     check_conntrack(&mut findings, snapshot, locale);
+    check_gpu(&mut findings, snapshot, locale);
+    check_systemd(&mut findings, snapshot, locale);
 
     // Sort: Critical first, then Warning, then Info
     findings.sort_by(|a, b| {
@@ -605,6 +607,125 @@ fn check_conntrack(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, local
                 suggestion: "Increase sysctl net.nf_conntrack_max or add NOTRACK rules for high-traffic flows".into(),
             }
         });
+    }
+}
+
+fn check_gpu(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    if let Some(gpu_temp) = get_float(snap, "gpu", "gpu_temp") {
+        if gpu_temp > 90.0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Critical,
+                    source: "gpu".into(),
+                    title: format!("GPU温度 {:.0}°C — 過熱", gpu_temp),
+                    detail: "GPU温度が90°Cを超過。サーマルスロットリングが発生し、パフォーマンスが大幅に低下。ハードウェア損傷の危険。".into(),
+                    suggestion: "GPU冷却システムを確認。ファンの動作、ケース内エアフローを点検。nvidia-smi で電力制限の引き下げも検討。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Critical,
+                    source: "gpu".into(),
+                    title: format!("GPU temperature {:.0}°C — overheating", gpu_temp),
+                    detail: "GPU temperature exceeds 90°C. Thermal throttling active, severely degrading performance. Risk of hardware damage.".into(),
+                    suggestion: "Check GPU cooling: fan operation, case airflow. Consider lowering power limit with nvidia-smi.".into(),
+                }
+            });
+        } else if gpu_temp > 80.0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "gpu".into(),
+                    title: format!("GPU温度 {:.0}°C — 高温", gpu_temp),
+                    detail: "GPU温度が80°Cを超過。スロットリング手前。負荷が高い状態が続くと更に上昇。".into(),
+                    suggestion: "GPU冷却の改善を検討。ファンカーブの調整やケースエアフローの改善。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "gpu".into(),
+                    title: format!("GPU temperature {:.0}°C — running hot", gpu_temp),
+                    detail: "GPU temperature exceeds 80°C. Near throttling threshold. May rise further under sustained load.".into(),
+                    suggestion: "Consider improving GPU cooling. Adjust fan curve or improve case airflow.".into(),
+                }
+            });
+        }
+    }
+
+    if let Some(gpu_util) = get_float(snap, "gpu", "gpu_util") {
+        if gpu_util > 95.0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "gpu".into(),
+                    title: format!("GPU使用率 {:.1}% — 飽和状態", gpu_util),
+                    detail: "GPUがほぼ100%使用されている。ワークロードがGPUバウンド。".into(),
+                    suggestion: "nvidia-smi でGPUを使用しているプロセスを確認。ワークロードの最適化またはGPUのアップグレードを検討。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "gpu".into(),
+                    title: format!("GPU utilization {:.1}% — saturated", gpu_util),
+                    detail: "GPU is nearly 100% utilized. Workload is GPU-bound.".into(),
+                    suggestion: "Check nvidia-smi for GPU-consuming processes. Consider optimizing workload or upgrading GPU.".into(),
+                }
+            });
+        }
+    }
+}
+
+fn check_systemd(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
+    if let Some(failed_count) = get_integer(snap, "systemd", "failed_count") {
+        if failed_count > 0 {
+            findings.push(if locale == Locale::Ja {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "systemd".into(),
+                    title: format!("systemd: {}個のサービスが失敗", failed_count),
+                    detail: "1つ以上のsystemdサービスが失敗状態。システムの機能が一部損なわれている可能性。".into(),
+                    suggestion: "systemctl --failed で失敗したサービスを確認。journalctl -u <service> でログを調査。".into(),
+                }
+            } else {
+                DiagnosticFinding {
+                    severity: Severity::Warning,
+                    source: "systemd".into(),
+                    title: format!("systemd: {} failed service(s)", failed_count),
+                    detail: "One or more systemd services are in failed state. System functionality may be impaired.".into(),
+                    suggestion: "Run: systemctl --failed to see failed services. journalctl -u <service> for logs.".into(),
+                }
+            });
+        }
+    }
+
+    if let Some(entry) = snap.entries.get("systemd") {
+        let system_state = entry.fields.iter()
+            .find(|f| f.name == "system_state")
+            .and_then(|f| match &f.value {
+                FieldValue::Text(s) => Some(s.as_str()),
+                _ => None,
+            });
+
+        if let Some(state) = system_state {
+            if state == "degraded" {
+                findings.push(if locale == Locale::Ja {
+                    DiagnosticFinding {
+                        severity: Severity::Warning,
+                        source: "systemd".into(),
+                        title: "systemd: システム状態 degraded".into(),
+                        detail: "systemdがシステムをdegraded（劣化）と報告。1つ以上のユニットが失敗。".into(),
+                        suggestion: "systemctl --failed で詳細を確認。systemctl reset-failed でリセット後、再起動を試行。".into(),
+                    }
+                } else {
+                    DiagnosticFinding {
+                        severity: Severity::Warning,
+                        source: "systemd".into(),
+                        title: "systemd: system state degraded".into(),
+                        detail: "systemd reports the system as degraded. One or more units have failed.".into(),
+                        suggestion: "Run: systemctl --failed for details. systemctl reset-failed then restart affected units.".into(),
+                    }
+                });
+            }
+        }
     }
 }
 

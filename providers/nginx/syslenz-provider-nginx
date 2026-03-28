@@ -1,0 +1,101 @@
+#!/bin/bash
+# syslenz provider: nginx
+# Collects metrics from the nginx stub_status module.
+#
+# Configuration via environment variables:
+#   NGINX_STATUS_URL  (default: http://localhost/nginx_status)
+#
+# Requires nginx compiled with --with-http_stub_status_module
+# and a location block like:
+#   location /nginx_status {
+#       stub_status;
+#       allow 127.0.0.1;
+#       deny all;
+#   }
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# JSON builder helpers
+# ---------------------------------------------------------------------------
+_SYSLENZ_FIELDS=""
+_SYSLENZ_FIELD_COUNT=0
+
+add_field() {
+    local name="$1" type="$2" value="$3" unit="$4" desc="$5"
+    local json_value
+    case "$type" in
+        Text)     json_value="{\"Text\": \"$value\"}" ;;
+        Integer)  json_value="{\"Integer\": $value}" ;;
+        Float)    json_value="{\"Float\": $value}" ;;
+        Bytes)    json_value="{\"Bytes\": $value}" ;;
+        Duration) json_value="{\"Duration\": $value}" ;;
+        *)        json_value="{\"Text\": \"$value\"}" ;;
+    esac
+    local comma=""
+    [ "$_SYSLENZ_FIELD_COUNT" -gt 0 ] && comma=","
+    _SYSLENZ_FIELDS="${_SYSLENZ_FIELDS}${comma}{\"name\": \"${name}\", \"value\": ${json_value}, \"unit\": ${unit}, \"description\": \"${desc}\"}"
+    _SYSLENZ_FIELD_COUNT=$((_SYSLENZ_FIELD_COUNT + 1))
+}
+
+emit_entry() {
+    local source="$1"
+    echo "{\"source\": \"${source}\", \"fields\": [${_SYSLENZ_FIELDS}]}"
+}
+
+# ---------------------------------------------------------------------------
+# Preflight checks
+# ---------------------------------------------------------------------------
+if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not found" >&2
+    exit 1
+fi
+
+NGINX_STATUS_URL="${NGINX_STATUS_URL:-http://localhost/nginx_status}"
+
+# ---------------------------------------------------------------------------
+# Fetch stub_status page
+# ---------------------------------------------------------------------------
+# Expected format:
+#   Active connections: 291
+#   server accepts handled requests
+#    16630948 16630948 31070465
+#   Reading: 6 Writing: 179 Waiting: 106
+
+STATUS_PAGE=$(curl -s --max-time 3 "$NGINX_STATUS_URL" 2>/dev/null) || {
+    echo "Failed to fetch nginx status from $NGINX_STATUS_URL" >&2
+    exit 1
+}
+
+# Validate we got a stub_status response
+if ! echo "$STATUS_PAGE" | grep -q "Active connections"; then
+    echo "Response does not look like nginx stub_status output" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Parse metrics
+# ---------------------------------------------------------------------------
+active_connections=$(echo "$STATUS_PAGE" | awk '/Active connections/ { print $3 }')
+
+# Line 3: accepts handled requests
+read -r accepts handled requests <<< "$(echo "$STATUS_PAGE" | sed -n '3p' | tr -s ' ')"
+
+# Line 4: Reading Writing Waiting
+reading=$(echo "$STATUS_PAGE" | awk '/Reading/ { print $2 }')
+writing=$(echo "$STATUS_PAGE" | awk '/Writing/ { print $4 }')
+waiting=$(echo "$STATUS_PAGE" | awk '/Waiting/ { print $6 }')
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+add_field "active_connections" "Integer" "${active_connections:-0}" "null" "Current active client connections"
+add_field "accepts"            "Integer" "${accepts:-0}"            "null" "Total accepted connections"
+add_field "handled"            "Integer" "${handled:-0}"            "null" "Total handled connections"
+add_field "requests"           "Integer" "${requests:-0}"           "null" "Total client requests"
+add_field "reading"            "Integer" "${reading:-0}"            "null" "Connections reading request header"
+add_field "writing"            "Integer" "${writing:-0}"            "null" "Connections writing response"
+add_field "waiting"            "Integer" "${waiting:-0}"            "null" "Keep-alive connections waiting for request"
+
+emit_entry "nginx stub_status"
+exit 0

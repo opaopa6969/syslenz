@@ -224,6 +224,8 @@ fn source_desc_en(source: &str) -> &'static str {
         "ss" => "Socket statistics summary from 'ss -s': TCP established/timewait/orphaned, UDP counts",
         "dns" => "DNS configuration from /etc/resolv.conf: nameservers, search domains, resolution timing",
         "conntrack" => "Connection tracking table usage: current count, max limit, utilization percentage",
+        "gpu" => "NVIDIA GPU metrics: temperature, utilization, memory, fan speed, power draw",
+        "systemd" => "Systemd service status: running, failed, and degraded service counts",
         _ => "System information source",
     }
 }
@@ -284,6 +286,8 @@ fn source_desc_ja(source: &str) -> &'static str {
         "ss" => "ソケット統計サマリ (ss -s): TCP確立/タイムウェイト/孤立、UDP数",
         "dns" => "DNS設定 (/etc/resolv.conf): ネームサーバ、検索ドメイン、名前解決時間",
         "conntrack" => "コネクション追跡テーブル使用状況: 現在数、上限、使用率",
+        "gpu" => "NVIDIA GPUメトリクス: 温度、使用率、メモリ、ファン速度、消費電力",
+        "systemd" => "systemdサービス状態: 実行中、失敗、劣化のサービス数",
         _ => "システム情報ソース",
     }
 }
@@ -5149,6 +5153,7 @@ mod tests {
         "pressure", "cgroups", "cmdline", "consoles", "crypto",
         "devices", "filesystems", "iomem", "ioports", "locks",
         "misc", "dma", "df", "thermal", "file-nr",
+        "gpu", "systemd",
     ];
 
     // T8: All EN keys return non-"?" values

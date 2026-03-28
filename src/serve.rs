@@ -7,6 +7,7 @@
 //! Usage: `syslenz --serve [bind_addr]` (default: `0.0.0.0:9100`)
 
 use crate::proc::Snapshot;
+use crate::prometheus;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 
@@ -27,13 +28,18 @@ pub fn run_server(bind_addr: &str) -> anyhow::Result<()> {
                     match line {
                         Ok(cmd) => {
                             let cmd = cmd.trim();
-                            if cmd == "SNAPSHOT" {
+                            if cmd == "SNAPSHOT" || cmd == "METRICS" {
                                 match Snapshot::capture() {
                                     Ok(snap) => {
-                                        let json = serde_json::to_string(&snap)
-                                            .unwrap_or_else(|_| "{}".to_string());
-                                        let _ = stream.write_all(json.as_bytes());
-                                        let _ = stream.write_all(b"\n");
+                                        if cmd == "METRICS" {
+                                            let prom = prometheus::format_prometheus(&snap);
+                                            let _ = stream.write_all(prom.as_bytes());
+                                        } else {
+                                            let json = serde_json::to_string(&snap)
+                                                .unwrap_or_else(|_| "{}".to_string());
+                                            let _ = stream.write_all(json.as_bytes());
+                                            let _ = stream.write_all(b"\n");
+                                        }
                                         let _ = stream.flush();
                                     }
                                     Err(e) => {

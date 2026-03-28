@@ -1,0 +1,120 @@
+#!/bin/bash
+# syslenz provider: MySQL
+# Collects key metrics from MySQL via the mysql CLI client.
+#
+# Configuration via environment variables:
+#   MYSQL_USER  (default: root)
+#   MYSQL_PASS  (required for authenticated connections)
+#   MYSQL_HOST  (default: localhost)
+#   MYSQL_PORT  (default: 3306)
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# JSON builder helpers
+# ---------------------------------------------------------------------------
+_SYSLENZ_FIELDS=""
+_SYSLENZ_FIELD_COUNT=0
+
+add_field() {
+    local name="$1" type="$2" value="$3" unit="$4" desc="$5"
+    local json_value
+    case "$type" in
+        Text)     json_value="{\"Text\": \"$value\"}" ;;
+        Integer)  json_value="{\"Integer\": $value}" ;;
+        Float)    json_value="{\"Float\": $value}" ;;
+        Bytes)    json_value="{\"Bytes\": $value}" ;;
+        Duration) json_value="{\"Duration\": $value}" ;;
+        *)        json_value="{\"Text\": \"$value\"}" ;;
+    esac
+    local comma=""
+    [ "$_SYSLENZ_FIELD_COUNT" -gt 0 ] && comma=","
+    _SYSLENZ_FIELDS="${_SYSLENZ_FIELDS}${comma}{\"name\": \"${name}\", \"value\": ${json_value}, \"unit\": ${unit}, \"description\": \"${desc}\"}"
+    _SYSLENZ_FIELD_COUNT=$((_SYSLENZ_FIELD_COUNT + 1))
+}
+
+emit_entry() {
+    local source="$1"
+    echo "{\"source\": \"${source}\", \"fields\": [${_SYSLENZ_FIELDS}]}"
+}
+
+# ---------------------------------------------------------------------------
+# Preflight checks
+# ---------------------------------------------------------------------------
+if ! command -v mysql >/dev/null 2>&1; then
+    echo "mysql CLI not found" >&2
+    exit 1
+fi
+
+MYSQL_USER="${MYSQL_USER:-root}"
+MYSQL_HOST="${MYSQL_HOST:-localhost}"
+MYSQL_PORT="${MYSQL_PORT:-3306}"
+
+# Build mysql command arguments
+MYSQL_ARGS=(-u"${MYSQL_USER}" -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -B -N)
+if [ -n "${MYSQL_PASS:-}" ]; then
+    MYSQL_ARGS+=(-p"${MYSQL_PASS}")
+fi
+
+# ---------------------------------------------------------------------------
+# Collect GLOBAL STATUS
+# ---------------------------------------------------------------------------
+STATUS_OUTPUT=$(mysql "${MYSQL_ARGS[@]}" -e "SHOW GLOBAL STATUS" 2>/dev/null) || {
+    echo "Failed to connect to MySQL" >&2
+    exit 1
+}
+
+# Parse a value from the status output by variable name
+get_status() {
+    local varname="$1"
+    echo "$STATUS_OUTPUT" | awk -v name="$varname" '$1 == name { print $2; exit }'
+}
+
+# ---------------------------------------------------------------------------
+# Extract metrics
+# ---------------------------------------------------------------------------
+connections=$(get_status "Connections")
+threads_running=$(get_status "Threads_running")
+threads_connected=$(get_status "Threads_connected")
+slow_queries=$(get_status "Slow_queries")
+questions=$(get_status "Questions")
+innodb_bp_read_requests=$(get_status "Innodb_buffer_pool_read_requests")
+innodb_bp_reads=$(get_status "Innodb_buffer_pool_reads")
+innodb_row_lock_waits=$(get_status "Innodb_row_lock_waits")
+innodb_rows_read=$(get_status "Innodb_rows_read")
+innodb_rows_inserted=$(get_status "Innodb_rows_inserted")
+innodb_rows_updated=$(get_status "Innodb_rows_updated")
+innodb_rows_deleted=$(get_status "Innodb_rows_deleted")
+bytes_received=$(get_status "Bytes_received")
+bytes_sent=$(get_status "Bytes_sent")
+uptime=$(get_status "Uptime")
+
+# Calculate buffer pool hit rate
+if [ -n "$innodb_bp_read_requests" ] && [ "$innodb_bp_read_requests" -gt 0 ] 2>/dev/null; then
+    buffer_pool_hit_rate=$(awk "BEGIN { printf \"%.6f\", 1.0 - (${innodb_bp_reads:-0} / ${innodb_bp_read_requests}) }")
+else
+    buffer_pool_hit_rate="0.0"
+fi
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+add_field "connections"                    "Integer"  "${connections:-0}"              "null" "Total connection attempts since startup"
+add_field "threads_running"                "Integer"  "${threads_running:-0}"          "null" "Threads actively executing queries"
+add_field "threads_connected"              "Integer"  "${threads_connected:-0}"        "null" "Currently connected client threads"
+add_field "slow_queries"                   "Integer"  "${slow_queries:-0}"             "null" "Queries exceeding long_query_time"
+add_field "questions"                      "Integer"  "${questions:-0}"                "null" "Total queries executed"
+add_field "innodb_buffer_pool_read_requests" "Integer" "${innodb_bp_read_requests:-0}" "null" "InnoDB buffer pool logical read requests"
+add_field "innodb_buffer_pool_reads"       "Integer"  "${innodb_bp_reads:-0}"          "null" "InnoDB buffer pool reads from disk (cache misses)"
+add_field "buffer_pool_hit_rate"           "Float"    "$buffer_pool_hit_rate"          "null" "InnoDB buffer pool hit rate (1.0 = perfect)"
+add_field "innodb_row_lock_waits"          "Integer"  "${innodb_row_lock_waits:-0}"    "null" "Row lock waits in InnoDB"
+add_field "innodb_rows_read"               "Integer"  "${innodb_rows_read:-0}"         "null" "Rows read from InnoDB tables"
+add_field "innodb_rows_inserted"           "Integer"  "${innodb_rows_inserted:-0}"     "null" "Rows inserted into InnoDB tables"
+add_field "innodb_rows_updated"            "Integer"  "${innodb_rows_updated:-0}"      "null" "Rows updated in InnoDB tables"
+add_field "innodb_rows_deleted"            "Integer"  "${innodb_rows_deleted:-0}"      "null" "Rows deleted from InnoDB tables"
+add_field "bytes_received"                 "Bytes"    "${bytes_received:-0}"           "null" "Total bytes received from clients"
+add_field "bytes_sent"                     "Bytes"    "${bytes_sent:-0}"               "null" "Total bytes sent to clients"
+add_field "uptime"                         "Duration" "${uptime:-0}.0"                 "null" "Server uptime"
+
+emit_entry "mysql SHOW GLOBAL STATUS"
+exit 0

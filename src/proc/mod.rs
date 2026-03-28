@@ -328,6 +328,8 @@ impl Snapshot {
         if let Ok(e) = crate::sys::df::parse() { entries.insert("df".into(), e); }
         if let Ok(e) = crate::sys::thermal::parse() { entries.insert("thermal".into(), e); }
         if let Ok(e) = crate::sys::file_nr::parse() { entries.insert("file-nr".into(), e); }
+        if let Ok(e) = crate::sys::gpu::parse() { entries.insert("gpu".into(), e); }
+        if let Ok(e) = crate::sys::systemd::parse() { entries.insert("systemd".into(), e); }
 
         // Network deep-dive
         if let Ok(e) = crate::net::ip_route::parse() { entries.insert("ip/route".into(), e); }

@@ -1,0 +1,110 @@
+#!/bin/bash
+# syslenz provider template
+# Copy this file, rename it, and customize the collect_metrics() function.
+# Place in ~/.config/syslenz/plugins/ to use.
+#
+# Protocol: output a single ProcEntry JSON object to stdout
+# Exit 0 on success, non-zero to skip silently
+#
+# ProcEntry format:
+# {
+#   "source": "description of data source",
+#   "fields": [
+#     { "name": "field_name", "value": {"Integer": 42}, "unit": null, "description": "what this field means" },
+#     ...
+#   ]
+# }
+#
+# FieldValue variants:
+#   {"Integer": 123}        - signed 64-bit integer
+#   {"Float": 3.14}         - 64-bit float
+#   {"Bytes": 1048576}      - byte count (auto-formatted as KiB/MiB/GiB)
+#   {"Text": "hello"}       - arbitrary string
+#   {"Duration": 86400.0}   - seconds (auto-formatted as Xd Xh Xm Xs)
+#   {"Table": [["a","b"],["c","d"]]} - tabular data
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# JSON builder helpers
+# ---------------------------------------------------------------------------
+
+# Start building a fields array. Call once before adding fields.
+_SYSLENZ_FIELDS=""
+_SYSLENZ_FIELD_COUNT=0
+
+# Add a field to the output.
+# Usage: add_field "name" "FieldType" "value" "unit_or_null" "description"
+# Examples:
+#   add_field "connections"  "Integer"  "42"       "null"       "Active connections"
+#   add_field "memory_used"  "Bytes"    "1048576"  "null"       "Memory in use"
+#   add_field "hit_rate"     "Float"    "0.95"     "null"       "Cache hit rate"
+#   add_field "version"      "Text"     "8.0.32"   "null"       "Server version"
+#   add_field "uptime"       "Duration" "86400.0"  "null"       "Time since start"
+#   add_field "status"       "Text"     "running"  '"status"'   "Current status"
+add_field() {
+    local name="$1"
+    local type="$2"
+    local value="$3"
+    local unit="$4"
+    local desc="$5"
+
+    # Quote text values, leave numbers bare
+    local json_value
+    case "$type" in
+        Text)
+            json_value="{\"Text\": \"$value\"}"
+            ;;
+        Integer)
+            json_value="{\"Integer\": $value}"
+            ;;
+        Float)
+            json_value="{\"Float\": $value}"
+            ;;
+        Bytes)
+            json_value="{\"Bytes\": $value}"
+            ;;
+        Duration)
+            json_value="{\"Duration\": $value}"
+            ;;
+        *)
+            json_value="{\"Text\": \"$value\"}"
+            ;;
+    esac
+
+    local comma=""
+    if [ "$_SYSLENZ_FIELD_COUNT" -gt 0 ]; then
+        comma=","
+    fi
+
+    _SYSLENZ_FIELDS="${_SYSLENZ_FIELDS}${comma}{\"name\": \"${name}\", \"value\": ${json_value}, \"unit\": ${unit}, \"description\": \"${desc}\"}"
+    _SYSLENZ_FIELD_COUNT=$((_SYSLENZ_FIELD_COUNT + 1))
+}
+
+# Emit the final ProcEntry JSON to stdout.
+# Usage: emit_entry "source description"
+emit_entry() {
+    local source="$1"
+    echo "{\"source\": \"${source}\", \"fields\": [${_SYSLENZ_FIELDS}]}"
+}
+
+# ---------------------------------------------------------------------------
+# Collect metrics — CUSTOMIZE THIS FUNCTION
+# ---------------------------------------------------------------------------
+collect_metrics() {
+    # Example: report current timestamp and hostname
+    add_field "hostname" "Text" "$(hostname)" "null" "System hostname"
+    add_field "timestamp" "Integer" "$(date +%s)" "null" "Current unix timestamp"
+
+    # TODO: Add your metrics here. For example:
+    # local my_value
+    # my_value=$(some_command | awk '{print $1}')
+    # add_field "my_metric" "Integer" "$my_value" "null" "Description of my metric"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+collect_metrics
+emit_entry "my-provider"
+exit 0

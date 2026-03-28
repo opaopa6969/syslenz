@@ -1,0 +1,137 @@
+#!/bin/bash
+# syslenz provider: PostgreSQL
+# Collects key metrics from PostgreSQL via psql.
+#
+# Configuration via environment variables:
+#   PGHOST      (default: localhost)
+#   PGPORT      (default: 5432)
+#   PGUSER      (default: postgres)
+#   PGDATABASE  (default: postgres)
+#   PGPASSWORD  (standard libpq variable)
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# JSON builder helpers
+# ---------------------------------------------------------------------------
+_SYSLENZ_FIELDS=""
+_SYSLENZ_FIELD_COUNT=0
+
+add_field() {
+    local name="$1" type="$2" value="$3" unit="$4" desc="$5"
+    local json_value
+    case "$type" in
+        Text)     json_value="{\"Text\": \"$value\"}" ;;
+        Integer)  json_value="{\"Integer\": $value}" ;;
+        Float)    json_value="{\"Float\": $value}" ;;
+        Bytes)    json_value="{\"Bytes\": $value}" ;;
+        Duration) json_value="{\"Duration\": $value}" ;;
+        *)        json_value="{\"Text\": \"$value\"}" ;;
+    esac
+    local comma=""
+    [ "$_SYSLENZ_FIELD_COUNT" -gt 0 ] && comma=","
+    _SYSLENZ_FIELDS="${_SYSLENZ_FIELDS}${comma}{\"name\": \"${name}\", \"value\": ${json_value}, \"unit\": ${unit}, \"description\": \"${desc}\"}"
+    _SYSLENZ_FIELD_COUNT=$((_SYSLENZ_FIELD_COUNT + 1))
+}
+
+emit_entry() {
+    local source="$1"
+    echo "{\"source\": \"${source}\", \"fields\": [${_SYSLENZ_FIELDS}]}"
+}
+
+# ---------------------------------------------------------------------------
+# Preflight checks
+# ---------------------------------------------------------------------------
+if ! command -v psql >/dev/null 2>&1; then
+    echo "psql CLI not found" >&2
+    exit 1
+fi
+
+export PGHOST="${PGHOST:-localhost}"
+export PGPORT="${PGPORT:-5432}"
+export PGUSER="${PGUSER:-postgres}"
+export PGDATABASE="${PGDATABASE:-postgres}"
+
+PSQL_ARGS=(-t -A -F '|')
+
+run_query() {
+    psql "${PSQL_ARGS[@]}" -c "$1" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Collect metrics from pg_stat_database (current database)
+# ---------------------------------------------------------------------------
+DB_STATS=$(run_query "
+    SELECT numbackends, xact_commit, xact_rollback,
+           blks_read, blks_hit,
+           tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
+           conflicts, deadlocks
+    FROM pg_stat_database
+    WHERE datname = current_database()
+    LIMIT 1;
+") || {
+    echo "Failed to connect to PostgreSQL" >&2
+    exit 1
+}
+
+IFS='|' read -r numbackends xact_commit xact_rollback \
+    blks_read blks_hit \
+    tup_returned tup_fetched tup_inserted tup_updated tup_deleted \
+    conflicts deadlocks <<< "$DB_STATS"
+
+# ---------------------------------------------------------------------------
+# Collect connection state counts from pg_stat_activity
+# ---------------------------------------------------------------------------
+ACTIVITY_STATS=$(run_query "
+    SELECT
+        count(*) FILTER (WHERE state = 'active'),
+        count(*) FILTER (WHERE state = 'idle'),
+        count(*) FILTER (WHERE state = 'idle in transaction')
+    FROM pg_stat_activity
+    WHERE backend_type = 'client backend';
+") || true
+
+IFS='|' read -r active_conns idle_conns idle_in_tx_conns <<< "${ACTIVITY_STATS:-0|0|0}"
+
+# ---------------------------------------------------------------------------
+# Database size
+# ---------------------------------------------------------------------------
+DB_SIZE=$(run_query "SELECT pg_database_size(current_database());") || true
+
+# ---------------------------------------------------------------------------
+# Cache hit ratio
+# ---------------------------------------------------------------------------
+if [ -n "$blks_hit" ] && [ -n "$blks_read" ]; then
+    total_blocks=$((blks_hit + blks_read))
+    if [ "$total_blocks" -gt 0 ] 2>/dev/null; then
+        cache_hit_ratio=$(awk "BEGIN { printf \"%.6f\", ${blks_hit} / ${total_blocks} }")
+    else
+        cache_hit_ratio="0.0"
+    fi
+else
+    cache_hit_ratio="0.0"
+fi
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+add_field "numbackends"           "Integer"  "${numbackends:-0}"         "null" "Number of active backends"
+add_field "active_connections"    "Integer"  "${active_conns:-0}"        "null" "Connections in active state"
+add_field "idle_connections"      "Integer"  "${idle_conns:-0}"          "null" "Connections in idle state"
+add_field "idle_in_transaction"   "Integer"  "${idle_in_tx_conns:-0}"    "null" "Connections idle in transaction"
+add_field "xact_commit"           "Integer"  "${xact_commit:-0}"         "null" "Transactions committed"
+add_field "xact_rollback"         "Integer"  "${xact_rollback:-0}"       "null" "Transactions rolled back"
+add_field "blks_read"             "Integer"  "${blks_read:-0}"           "null" "Disk blocks read"
+add_field "blks_hit"              "Integer"  "${blks_hit:-0}"            "null" "Buffer cache hits"
+add_field "cache_hit_ratio"       "Float"    "$cache_hit_ratio"          "null" "Cache hit ratio (1.0 = perfect)"
+add_field "tup_returned"          "Integer"  "${tup_returned:-0}"        "null" "Rows returned by queries"
+add_field "tup_fetched"           "Integer"  "${tup_fetched:-0}"         "null" "Rows fetched by queries"
+add_field "tup_inserted"          "Integer"  "${tup_inserted:-0}"        "null" "Rows inserted"
+add_field "tup_updated"           "Integer"  "${tup_updated:-0}"         "null" "Rows updated"
+add_field "tup_deleted"           "Integer"  "${tup_deleted:-0}"         "null" "Rows deleted"
+add_field "conflicts"             "Integer"  "${conflicts:-0}"           "null" "Queries canceled due to recovery conflicts"
+add_field "deadlocks"             "Integer"  "${deadlocks:-0}"           "null" "Deadlocks detected"
+add_field "database_size"         "Bytes"    "${DB_SIZE:-0}"             "null" "Size of current database"
+
+emit_entry "postgresql pg_stat_database + pg_stat_activity"
+exit 0

@@ -1,0 +1,114 @@
+#!/bin/bash
+# syslenz provider: Redis
+# Collects key metrics from Redis via redis-cli INFO.
+#
+# Configuration via environment variables:
+#   REDIS_HOST  (default: localhost)
+#   REDIS_PORT  (default: 6379)
+#   REDIS_PASS  (optional)
+#   REDIS_URL   (optional, overrides host/port/pass, e.g. redis://:pass@host:port)
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# JSON builder helpers
+# ---------------------------------------------------------------------------
+_SYSLENZ_FIELDS=""
+_SYSLENZ_FIELD_COUNT=0
+
+add_field() {
+    local name="$1" type="$2" value="$3" unit="$4" desc="$5"
+    local json_value
+    case "$type" in
+        Text)     json_value="{\"Text\": \"$value\"}" ;;
+        Integer)  json_value="{\"Integer\": $value}" ;;
+        Float)    json_value="{\"Float\": $value}" ;;
+        Bytes)    json_value="{\"Bytes\": $value}" ;;
+        Duration) json_value="{\"Duration\": $value}" ;;
+        *)        json_value="{\"Text\": \"$value\"}" ;;
+    esac
+    local comma=""
+    [ "$_SYSLENZ_FIELD_COUNT" -gt 0 ] && comma=","
+    _SYSLENZ_FIELDS="${_SYSLENZ_FIELDS}${comma}{\"name\": \"${name}\", \"value\": ${json_value}, \"unit\": ${unit}, \"description\": \"${desc}\"}"
+    _SYSLENZ_FIELD_COUNT=$((_SYSLENZ_FIELD_COUNT + 1))
+}
+
+emit_entry() {
+    local source="$1"
+    echo "{\"source\": \"${source}\", \"fields\": [${_SYSLENZ_FIELDS}]}"
+}
+
+# ---------------------------------------------------------------------------
+# Preflight checks
+# ---------------------------------------------------------------------------
+if ! command -v redis-cli >/dev/null 2>&1; then
+    echo "redis-cli not found" >&2
+    exit 1
+fi
+
+REDIS_HOST="${REDIS_HOST:-localhost}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+
+CLI_ARGS=(-h "$REDIS_HOST" -p "$REDIS_PORT")
+if [ -n "${REDIS_PASS:-}" ]; then
+    CLI_ARGS+=(-a "$REDIS_PASS" --no-auth-warning)
+fi
+if [ -n "${REDIS_URL:-}" ]; then
+    CLI_ARGS=(-u "$REDIS_URL" --no-auth-warning)
+fi
+
+# ---------------------------------------------------------------------------
+# Collect INFO
+# ---------------------------------------------------------------------------
+INFO_OUTPUT=$(redis-cli "${CLI_ARGS[@]}" INFO 2>/dev/null) || {
+    echo "Failed to connect to Redis" >&2
+    exit 1
+}
+
+# Parse a value from INFO output
+get_info() {
+    local key="$1"
+    echo "$INFO_OUTPUT" | awk -F: -v k="$key" '$1 == k { gsub(/\r/,"",$2); print $2; exit }'
+}
+
+# ---------------------------------------------------------------------------
+# Extract metrics
+# ---------------------------------------------------------------------------
+connected_clients=$(get_info "connected_clients")
+blocked_clients=$(get_info "blocked_clients")
+used_memory=$(get_info "used_memory")
+used_memory_peak=$(get_info "used_memory_peak")
+used_memory_rss=$(get_info "used_memory_rss")
+total_commands=$(get_info "total_commands_processed")
+instantaneous_ops=$(get_info "instantaneous_ops_per_sec")
+keyspace_hits=$(get_info "keyspace_hits")
+keyspace_misses=$(get_info "keyspace_misses")
+connected_slaves=$(get_info "connected_slaves")
+uptime=$(get_info "uptime_in_seconds")
+
+# Calculate hit rate
+total_keyspace=$((${keyspace_hits:-0} + ${keyspace_misses:-0}))
+if [ "$total_keyspace" -gt 0 ] 2>/dev/null; then
+    hit_rate=$(awk "BEGIN { printf \"%.6f\", ${keyspace_hits} / ${total_keyspace} }")
+else
+    hit_rate="0.0"
+fi
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+add_field "connected_clients"        "Integer"  "${connected_clients:-0}"    "null" "Number of connected clients"
+add_field "blocked_clients"          "Integer"  "${blocked_clients:-0}"      "null" "Clients blocked on BLPOP/BRPOP/etc"
+add_field "used_memory"              "Bytes"    "${used_memory:-0}"          "null" "Total memory allocated by Redis"
+add_field "used_memory_peak"         "Bytes"    "${used_memory_peak:-0}"     "null" "Peak memory consumption"
+add_field "used_memory_rss"          "Bytes"    "${used_memory_rss:-0}"      "null" "Resident set size from OS"
+add_field "total_commands_processed" "Integer"  "${total_commands:-0}"       "null" "Total commands processed since startup"
+add_field "instantaneous_ops_per_sec" "Integer" "${instantaneous_ops:-0}"   "null" "Commands processed per second"
+add_field "keyspace_hits"            "Integer"  "${keyspace_hits:-0}"        "null" "Successful key lookups"
+add_field "keyspace_misses"          "Integer"  "${keyspace_misses:-0}"      "null" "Failed key lookups"
+add_field "hit_rate"                 "Float"    "$hit_rate"                  "null" "Keyspace hit rate (1.0 = perfect)"
+add_field "connected_slaves"         "Integer"  "${connected_slaves:-0}"     "null" "Number of connected replicas"
+add_field "uptime"                   "Duration" "${uptime:-0}.0"             "null" "Server uptime"
+
+emit_entry "redis INFO"
+exit 0

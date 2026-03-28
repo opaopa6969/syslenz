@@ -3,6 +3,7 @@ mod config;
 mod diagnostics;
 mod education;
 mod serve;
+mod prometheus;
 mod proc;
 mod sys;
 mod net;
@@ -84,6 +85,16 @@ fn main() -> Result<()> {
             .map(|s| s.as_str())
             .unwrap_or("0.0.0.0:9100");
         return serve::run_server(bind);
+    }
+
+    // --prometheus [bind_addr] — Prometheus metrics HTTP server
+    if args.iter().any(|a| a == "--prometheus") {
+        let bind = args.iter().position(|a| a == "--prometheus")
+            .and_then(|pos| args.get(pos + 1))
+            .filter(|s| !s.starts_with("--"))
+            .map(|s| s.as_str())
+            .unwrap_or("0.0.0.0:9101");
+        return prometheus::run_prometheus_server(bind);
     }
 
     // --otel [endpoint]

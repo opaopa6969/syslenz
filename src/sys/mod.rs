@@ -4,3 +4,7 @@ pub mod df;
 pub mod thermal;
 #[cfg(target_os = "linux")]
 pub mod file_nr;
+#[cfg(target_os = "linux")]
+pub mod gpu;
+#[cfg(target_os = "linux")]
+pub mod systemd;
