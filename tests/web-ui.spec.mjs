@@ -13,9 +13,18 @@ let passed = 0, failed = 0;
 const failures = [];
 const jsErrors = [];
 
-function assert(condition, name) {
+async function assert(condition, name) {
   if (condition) { console.log(`  ✓ ${name}`); passed++; }
-  else { console.log(`  ✗ ${name}`); failed++; failures.push(name); }
+  else {
+    console.log(`  ✗ ${name}`);
+    failed++;
+    failures.push(name);
+    // Screenshot on failure
+    if (page) {
+      const safeName = name.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 60);
+      await page.screenshot({ path: `tests/videos/fail-${safeName}.png` }).catch(() => {});
+    }
+  }
 }
 
 async function textContains(text, name) {
@@ -53,7 +62,10 @@ async function main() {
   await setTimeout(2500);
 
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    recordVideo: { dir: 'tests/videos', size: { width: 1280, height: 800 } },
+  });
   page = await context.newPage();
   page.on('pageerror', err => jsErrors.push(err.message));
   page.on('console', msg => { if (msg.type() === 'error') jsErrors.push(msg.text()); });
@@ -476,8 +488,19 @@ async function main() {
     }
 
   } finally {
+    // Save video path before closing
+    const videoPath = await page.video()?.path();
+    await context.close();
     await browser.close();
     try { process.kill(-server.pid); } catch(e) {}
+
+    // Rename video to something meaningful
+    if (videoPath) {
+      const { renameSync } = await import('fs');
+      const dest = 'tests/videos/test-run.webm';
+      try { renameSync(videoPath, dest); } catch(e) {}
+      console.log(`\n  Video saved: ${dest}`);
+    }
   }
 
   // === SUMMARY ===
@@ -486,9 +509,11 @@ async function main() {
   if (failures.length > 0) {
     console.log('\n  FAILURES:');
     failures.forEach(f => console.log(`    ✗ ${f}`));
+    console.log('\n  Failure screenshots: tests/fail-*.png');
   } else {
     console.log('  All tests passed!');
   }
+  console.log('  Video: tests/videos/test-run.webm');
   console.log('='.repeat(60));
   process.exit(failed > 0 ? 1 : 0);
 }
