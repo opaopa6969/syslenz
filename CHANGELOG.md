@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] - 2026-03-29
+
+### Added
+- Multi-host monitoring: multiple --ssh/--docker/--connect flags, F1-F9 tab switching
+- Education: Storage, Process, Hardware categories with full EN/JA content
+- Learning paths: Beginner, Performance Diagnosis, Server Health stubs
+- JVM plugin (plugins/jvm/syslenz-jvm): comprehensive JVM monitoring via jstat/jcmd
+- syslenz4j: separate Java library (github.com/opaopa6969/syslenz4j)
+- i18n: 584 entries, 86% field coverage (521/600)
+- Document restructure: DGE-toolkit pattern (docs/features, design-materials)
+
 ## [1.1.0] - 2026-03-29
 
 ### Added

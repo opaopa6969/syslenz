@@ -1,0 +1,257 @@
+#!/bin/bash
+# syslenz plugin: Comprehensive JVM monitoring
+# Collects heap, GC, threads, class loading, CPU, and uptime for all running JVMs.
+# Place in ~/.config/syslenz/plugins/ (chmod +x)
+#
+# Requirements: JDK tools (jstat, jcmd) on PATH, and permission to attach to target JVMs.
+
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Compute CPU% for a given PID from /proc/<pid>/stat.
+# We take two samples 200ms apart and calculate the delta.
+cpu_percent_for_pid() {
+    local pid="$1"
+    local stat_file="/proc/${pid}/stat"
+    local ncpu
+    ncpu=$(nproc 2>/dev/null || echo 1)
+    local hz
+    hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
+
+    if [[ ! -f "$stat_file" ]]; then
+        echo "0.0"
+        return
+    fi
+
+    # Fields 14 (utime) and 15 (stime) in /proc/<pid>/stat
+    read_cpu_ticks() {
+        awk '{print $14 + $15}' "$stat_file" 2>/dev/null || echo 0
+    }
+    read_total_ticks() {
+        awk '{s=0; for(i=1;i<=NF;i++) s+=$i; print s}' /proc/stat 2>/dev/null | head -1
+    }
+
+    local proc1 total1 proc2 total2
+    proc1=$(read_cpu_ticks)
+    total1=$(read_total_ticks)
+    sleep 0.2
+    proc2=$(read_cpu_ticks)
+    total2=$(read_total_ticks)
+
+    local dproc=$((proc2 - proc1))
+    local dtotal=$((total2 - total1))
+
+    if [[ "$dtotal" -eq 0 ]]; then
+        echo "0.0"
+    else
+        awk "BEGIN {printf \"%.1f\", ($dproc / $dtotal) * 100.0 * $ncpu}"
+    fi
+}
+
+# Safely run jstat, returns empty string on failure.
+safe_jstat() {
+    local flag="$1" pid="$2"
+    jstat "$flag" "$pid" 2>/dev/null || true
+}
+
+# Safely run jcmd, returns empty string on failure.
+safe_jcmd() {
+    local pid="$1" cmd="$2"
+    jcmd "$pid" "$cmd" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Discover JVMs
+# ---------------------------------------------------------------------------
+
+PIDS=$(pgrep -x java 2>/dev/null || pgrep -f 'java ' 2>/dev/null || true)
+if [[ -z "$PIDS" ]]; then
+    # No JVMs -- output a minimal valid ProcEntry so syslenz knows the plugin ran.
+    cat <<'NOJVM'
+{
+  "source": "jvm (no JVMs detected)",
+  "fields": [
+    {"name": "status", "value": {"Text": "No running Java processes found"}, "unit": null, "description": "Plugin status"}
+  ]
+}
+NOJVM
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Collect per-JVM metrics
+# ---------------------------------------------------------------------------
+
+# We build a JSON table and summary fields.
+# Table columns: PID | HeapUsed | HeapMax | HeapCommit | YGC | YGCT | FGC | FGCT | Threads | Classes | CPU% | Uptime
+
+TABLE_ROWS=""       # JSON array elements (each a JSON array of strings)
+TOTAL_HEAP_USED=0
+TOTAL_YGC=0
+TOTAL_FGC=0
+TOTAL_GCT="0.0"
+JVM_COUNT=0
+FIELD_ENTRIES=""    # per-JVM detail fields
+
+for PID in $PIDS; do
+    # Skip if process already gone
+    [[ -d "/proc/${PID}" ]] || continue
+
+    JVM_COUNT=$((JVM_COUNT + 1))
+
+    # -- jstat -gc --------------------------------------------------------
+    GC_RAW=$(safe_jstat "-gc" "$PID")
+    if [[ -n "$GC_RAW" ]]; then
+        GC_VALS=$(echo "$GC_RAW" | tail -1 | tr -s ' ')
+
+        # jstat -gc columns (JDK 11+):
+        # S0C S1C S0U S1U EC EU OC OU MC MU CCSC CCSU YGC YGCT FGC FGCT CGC CGCT GCT
+        S0C=$(echo "$GC_VALS" | awk '{print $1}')
+        S1C=$(echo "$GC_VALS" | awk '{print $2}')
+        S0U=$(echo "$GC_VALS" | awk '{print $3}')
+        S1U=$(echo "$GC_VALS" | awk '{print $4}')
+        EC=$(echo "$GC_VALS"  | awk '{print $5}')
+        EU=$(echo "$GC_VALS"  | awk '{print $6}')
+        OC=$(echo "$GC_VALS"  | awk '{print $7}')
+        OU=$(echo "$GC_VALS"  | awk '{print $8}')
+        MU=$(echo "$GC_VALS"  | awk '{print $10}')
+
+        YGC=$(echo "$GC_VALS"  | awk '{printf "%d", $13}')
+        YGCT=$(echo "$GC_VALS" | awk '{print $14}')
+        FGC=$(echo "$GC_VALS"  | awk '{printf "%d", $15}')
+        FGCT=$(echo "$GC_VALS" | awk '{print $16}')
+        GCT=$(echo "$GC_VALS"  | awk '{print $NF}')
+
+        # Heap used = S0U + S1U + EU + OU (KB)
+        HEAP_USED_KB=$(awk "BEGIN {printf \"%.0f\", $S0U + $S1U + $EU + $OU}")
+        # Heap committed = S0C + S1C + EC + OC (KB)
+        HEAP_COMMIT_KB=$(awk "BEGIN {printf \"%.0f\", $S0C + $S1C + $EC + $OC}")
+    else
+        HEAP_USED_KB=0; HEAP_COMMIT_KB=0; MU=0
+        YGC=0; YGCT="0.0"; FGC=0; FGCT="0.0"; GCT="0.0"
+    fi
+
+    # -- Heap max from jstat -gccapacity -----------------------------------
+    GCCAP_RAW=$(safe_jstat "-gccapacity" "$PID")
+    if [[ -n "$GCCAP_RAW" ]]; then
+        GCCAP_VALS=$(echo "$GCCAP_RAW" | tail -1 | tr -s ' ')
+        # Columns: NGCMN NGCMX NGC S0C S1C EC OGCMN OGCMX OGC OC MCMN MCMX MC ...
+        NGCMX=$(echo "$GCCAP_VALS" | awk '{print $2}')
+        OGCMX=$(echo "$GCCAP_VALS" | awk '{print $8}')
+        HEAP_MAX_KB=$(awk "BEGIN {printf \"%.0f\", $NGCMX + $OGCMX}")
+    else
+        HEAP_MAX_KB=0
+    fi
+
+    # Convert KB to bytes
+    HEAP_USED_B=$(awk "BEGIN {printf \"%.0f\", $HEAP_USED_KB * 1024}")
+    HEAP_MAX_B=$(awk "BEGIN {printf \"%.0f\", $HEAP_MAX_KB * 1024}")
+    HEAP_COMMIT_B=$(awk "BEGIN {printf \"%.0f\", $HEAP_COMMIT_KB * 1024}")
+
+    # -- Threads -----------------------------------------------------------
+    THREAD_OUTPUT=$(safe_jcmd "$PID" "Thread.print")
+    if [[ -n "$THREAD_OUTPUT" ]]; then
+        THREAD_COUNT=$(echo "$THREAD_OUTPUT" | grep -c '^"' 2>/dev/null || echo 0)
+    else
+        # Fallback: count from /proc
+        THREAD_COUNT=$(ls /proc/"$PID"/task 2>/dev/null | wc -l || echo 0)
+    fi
+
+    # -- Class loading -----------------------------------------------------
+    CLASS_RAW=$(safe_jstat "-class" "$PID")
+    if [[ -n "$CLASS_RAW" ]]; then
+        LOADED_CLASSES=$(echo "$CLASS_RAW" | tail -1 | awk '{printf "%d", $1}')
+    else
+        LOADED_CLASSES=0
+    fi
+
+    # -- CPU % -------------------------------------------------------------
+    CPU_PCT=$(cpu_percent_for_pid "$PID")
+
+    # -- Uptime ------------------------------------------------------------
+    UPTIME_RAW=$(safe_jcmd "$PID" "VM.uptime")
+    if [[ -n "$UPTIME_RAW" ]]; then
+        UPTIME_SEC=$(echo "$UPTIME_RAW" | grep -oP '[\d.]+' | head -1)
+        [[ -z "$UPTIME_SEC" ]] && UPTIME_SEC="0"
+    else
+        # Fallback: /proc/<pid>/stat field 22 (starttime) vs system uptime
+        UPTIME_SEC="0"
+    fi
+
+    # -- Human-readable sizes for table ------------------------------------
+    fmt_bytes() {
+        local b="$1"
+        if [[ "$b" -ge 1073741824 ]]; then
+            awk "BEGIN {printf \"%.1f GiB\", $b / 1073741824}"
+        elif [[ "$b" -ge 1048576 ]]; then
+            awk "BEGIN {printf \"%.1f MiB\", $b / 1048576}"
+        elif [[ "$b" -ge 1024 ]]; then
+            awk "BEGIN {printf \"%.1f KiB\", $b / 1024}"
+        else
+            echo "${b} B"
+        fi
+    }
+
+    HEAP_USED_H=$(fmt_bytes "$HEAP_USED_B")
+    HEAP_MAX_H=$(fmt_bytes "$HEAP_MAX_B")
+    HEAP_COMMIT_H=$(fmt_bytes "$HEAP_COMMIT_B")
+
+    # -- Build table row ---------------------------------------------------
+    ROW="[\"${PID}\", \"${HEAP_USED_H}\", \"${HEAP_MAX_H}\", \"${HEAP_COMMIT_H}\", \"${YGC}\", \"${YGCT}s\", \"${FGC}\", \"${FGCT}s\", \"${THREAD_COUNT}\", \"${LOADED_CLASSES}\", \"${CPU_PCT}%\", \"${UPTIME_SEC}s\"]"
+
+    if [[ -n "$TABLE_ROWS" ]]; then
+        TABLE_ROWS="${TABLE_ROWS}, ${ROW}"
+    else
+        TABLE_ROWS="${ROW}"
+    fi
+
+    # -- Accumulate totals -------------------------------------------------
+    TOTAL_HEAP_USED=$((TOTAL_HEAP_USED + HEAP_USED_B))
+    TOTAL_YGC=$((TOTAL_YGC + YGC))
+    TOTAL_FGC=$((TOTAL_FGC + FGC))
+    TOTAL_GCT=$(awk "BEGIN {printf \"%.3f\", $TOTAL_GCT + $GCT}")
+
+    # -- Per-JVM detail fields (included for single-JVM convenience) -------
+    FIELD_ENTRIES="${FIELD_ENTRIES}
+    {\"name\": \"jvm_${PID}_heap_used\", \"value\": {\"Bytes\": ${HEAP_USED_B}}, \"unit\": null, \"description\": \"Heap used (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_heap_max\", \"value\": {\"Bytes\": ${HEAP_MAX_B}}, \"unit\": null, \"description\": \"Heap max (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_heap_committed\", \"value\": {\"Bytes\": ${HEAP_COMMIT_B}}, \"unit\": null, \"description\": \"Heap committed (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_gc_young_count\", \"value\": {\"Integer\": ${YGC}}, \"unit\": \"count\", \"description\": \"Young GC count (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_gc_young_time\", \"value\": {\"Duration\": ${YGCT}}, \"unit\": \"s\", \"description\": \"Young GC time (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_gc_full_count\", \"value\": {\"Integer\": ${FGC}}, \"unit\": \"count\", \"description\": \"Full GC count (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_gc_full_time\", \"value\": {\"Duration\": ${FGCT}}, \"unit\": \"s\", \"description\": \"Full GC time (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_threads\", \"value\": {\"Integer\": ${THREAD_COUNT}}, \"unit\": \"count\", \"description\": \"Thread count (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_classes_loaded\", \"value\": {\"Integer\": ${LOADED_CLASSES}}, \"unit\": \"count\", \"description\": \"Loaded classes (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_cpu_percent\", \"value\": {\"Float\": ${CPU_PCT}}, \"unit\": \"%\", \"description\": \"Process CPU usage (PID ${PID})\"},
+    {\"name\": \"jvm_${PID}_uptime\", \"value\": {\"Duration\": ${UPTIME_SEC}}, \"unit\": \"s\", \"description\": \"JVM uptime (PID ${PID})\"},"
+
+done
+
+# Remove trailing comma from FIELD_ENTRIES
+FIELD_ENTRIES=$(echo "$FIELD_ENTRIES" | sed '$ s/,$//')
+
+# ---------------------------------------------------------------------------
+# Build the header row for the table
+# ---------------------------------------------------------------------------
+HEADER='["PID", "HeapUsed", "HeapMax", "HeapCommit", "YGC", "YGCT", "FGC", "FGCT", "Threads", "Classes", "CPU%", "Uptime"]'
+
+# ---------------------------------------------------------------------------
+# Output ProcEntry JSON
+# ---------------------------------------------------------------------------
+cat <<EOF
+{
+  "source": "jvm (${JVM_COUNT} process$([ "$JVM_COUNT" -ne 1 ] && echo "es"))",
+  "fields": [
+    {"name": "jvm_count", "value": {"Integer": ${JVM_COUNT}}, "unit": null, "description": "Number of running JVM processes"},
+    {"name": "total_heap_used", "value": {"Bytes": ${TOTAL_HEAP_USED}}, "unit": null, "description": "Total heap used across all JVMs"},
+    {"name": "total_young_gc", "value": {"Integer": ${TOTAL_YGC}}, "unit": "count", "description": "Total young generation GC events across all JVMs"},
+    {"name": "total_full_gc", "value": {"Integer": ${TOTAL_FGC}}, "unit": "count", "description": "Total full GC events across all JVMs"},
+    {"name": "total_gc_time", "value": {"Duration": ${TOTAL_GCT}}, "unit": "s", "description": "Total GC time across all JVMs"},
+    {"name": "jvm_table", "value": {"Table": [${HEADER}, ${TABLE_ROWS}]}, "unit": null, "description": "Per-JVM metrics overview"},
+    ${FIELD_ENTRIES}
+  ]
+}
+EOF

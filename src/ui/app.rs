@@ -1,8 +1,9 @@
 use crate::alert::{self, AlertEvent, AlertRule};
 use crate::i18n::Locale;
 use crate::proc::{diff_snapshots, DiffItem, FieldValue, Snapshot};
+use std::collections::BTreeMap;
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 #[derive(PartialEq)]
 pub enum Focus {
@@ -94,6 +95,18 @@ pub struct App {
     pub alert_rules: Vec<AlertRule>,
     /// Currently active (firing) alerts
     pub active_alerts: Vec<AlertEvent>,
+
+    // Multi-host support
+    /// Labels for each monitored host (e.g. "local", "ssh:host1", "docker:web")
+    pub host_labels: Vec<String>,
+    /// Receiver channels for each host (None for local)
+    pub host_receivers: Vec<Option<mpsc::Receiver<Snapshot>>>,
+    /// Current snapshot per host
+    pub host_snapshots: Vec<Snapshot>,
+    /// Snapshot history per host (ring buffers)
+    pub host_snapshot_histories: Vec<Vec<Snapshot>>,
+    /// Which host tab is currently displayed
+    pub active_host: usize,
 }
 
 impl App {
@@ -137,6 +150,11 @@ impl App {
             diff_target_index: None,
             alert_rules: Vec::new(),
             active_alerts: Vec::new(),
+            host_labels: Vec::new(),
+            host_receivers: Vec::new(),
+            host_snapshots: Vec::new(),
+            host_snapshot_histories: Vec::new(),
+            active_host: 0,
         })
     }
 
@@ -183,6 +201,11 @@ impl App {
             diff_target_index: None,
             alert_rules: Vec::new(),
             active_alerts: Vec::new(),
+            host_labels: Vec::new(),
+            host_receivers: Vec::new(),
+            host_snapshots: Vec::new(),
+            host_snapshot_histories: Vec::new(),
+            active_host: 0,
         })
     }
 
@@ -232,11 +255,106 @@ impl App {
             diff_target_index: None,
             alert_rules: Vec::new(),
             active_alerts: Vec::new(),
+            host_labels: Vec::new(),
+            host_receivers: Vec::new(),
+            host_snapshots: Vec::new(),
+            host_snapshot_histories: Vec::new(),
+            active_host: 0,
         })
     }
 
+    /// Initialize multi-host monitoring. Call after creating the App.
+    /// `hosts` is a list of (label, receiver) pairs. The App's own current/remote_rx
+    /// becomes host index 0 (local or the single remote that was used to construct App).
+    pub fn init_multi_host(&mut self, hosts: Vec<(String, Option<mpsc::Receiver<Snapshot>>)>) {
+        if hosts.is_empty() {
+            return;
+        }
+        // Store the current App state as host 0
+        let mut labels = Vec::with_capacity(hosts.len() + 1);
+        let mut receivers = Vec::with_capacity(hosts.len() + 1);
+        let mut snapshots = Vec::with_capacity(hosts.len() + 1);
+        let mut histories = Vec::with_capacity(hosts.len() + 1);
+
+        // Host 0: whatever the App was initialized with
+        let host0_label = self.remote_host.clone().unwrap_or_else(|| "local".to_string());
+        labels.push(host0_label);
+        receivers.push(self.remote_rx.take());
+        snapshots.push(self.current.clone());
+        histories.push(self.snapshots.clone());
+
+        // Additional hosts
+        for (label, rx) in hosts {
+            labels.push(label);
+            // Try to get an initial snapshot from the receiver
+            if let Some(ref receiver) = rx {
+                if let Ok(snap) = receiver.try_recv() {
+                    snapshots.push(snap);
+                } else {
+                    snapshots.push(Snapshot { timestamp: SystemTime::now(), entries: BTreeMap::new() });
+                }
+            } else {
+                snapshots.push(Snapshot { timestamp: SystemTime::now(), entries: BTreeMap::new() });
+            }
+            receivers.push(rx);
+            histories.push(Vec::new());
+        }
+
+        self.host_labels = labels;
+        self.host_receivers = receivers;
+        self.host_snapshots = snapshots;
+        self.host_snapshot_histories = histories;
+        self.active_host = 0;
+    }
+
+    /// Switch to a different host tab. Returns true if switched.
+    pub fn switch_host(&mut self, index: usize) -> bool {
+        if self.host_labels.is_empty() || index >= self.host_labels.len() || index == self.active_host {
+            return false;
+        }
+
+        // Save current host state
+        self.host_snapshots[self.active_host] = self.current.clone();
+        self.host_snapshot_histories[self.active_host] = self.snapshots.clone();
+
+        // Load new host state
+        self.active_host = index;
+        self.current = self.host_snapshots[index].clone();
+        self.snapshots = self.host_snapshot_histories[index].clone();
+        self.source_keys = self.current.entries.keys().cloned().collect();
+
+        // Reset view state for new host
+        self.selected_source = 0;
+        self.selected_field = 0;
+        self.sidebar_scroll = 0;
+        self.field_scroll = 0;
+        self.table_scroll = 0;
+        self.diff_target_index = None;
+        self.diffs.clear();
+        self.filtered_keys = None;
+        self.search_query.clear();
+        self.searching = false;
+
+        // Update remote_host for status bar display
+        let label = &self.host_labels[index];
+        self.remote_host = if label == "local" { None } else { Some(label.clone()) };
+
+        true
+    }
+
+    /// Returns true if multi-host mode is active (more than 1 host).
+    pub fn is_multi_host(&self) -> bool {
+        self.host_labels.len() > 1
+    }
+
     pub fn refresh(&mut self) -> anyhow::Result<()> {
-        let new_snapshot = if let Some(ref rx) = self.remote_rx {
+        // In multi-host mode, use the active host's receiver
+        let active_rx = if self.is_multi_host() {
+            self.host_receivers.get(self.active_host).and_then(|r| r.as_ref())
+        } else {
+            self.remote_rx.as_ref()
+        };
+        let new_snapshot = if let Some(rx) = active_rx {
             // Remote mode: drain channel and use the latest snapshot
             let mut latest = None;
             while let Ok(snap) = rx.try_recv() {
@@ -293,6 +411,36 @@ impl App {
             &self.alert_rules,
             &prev_firing,
         );
+
+        // Multi-host: keep the active host snapshot in sync
+        if self.is_multi_host() {
+            self.host_snapshots[self.active_host] = self.current.clone();
+            self.host_snapshot_histories[self.active_host] = self.snapshots.clone();
+        }
+
+        // Multi-host: drain snapshots from non-active hosts so channels don't fill up
+        if self.is_multi_host() {
+            for i in 0..self.host_receivers.len() {
+                if i == self.active_host {
+                    continue;
+                }
+                if let Some(ref rx) = self.host_receivers[i] {
+                    let mut latest = None;
+                    while let Ok(snap) = rx.try_recv() {
+                        latest = Some(snap);
+                    }
+                    if let Some(snap) = latest {
+                        // Push old snapshot into history
+                        let old = self.host_snapshots[i].clone();
+                        self.host_snapshots[i] = snap;
+                        self.host_snapshot_histories[i].push(old);
+                        if self.host_snapshot_histories[i].len() > 60 {
+                            self.host_snapshot_histories[i].remove(0);
+                        }
+                    }
+                }
+            }
+        }
 
         self.last_refresh = Instant::now();
         Ok(())

@@ -7,6 +7,7 @@ pub enum Category {
     Network,
     Storage,
     Process,
+    Hardware,
 }
 
 impl Category {
@@ -17,6 +18,7 @@ impl Category {
             Category::Network,
             Category::Storage,
             Category::Process,
+            Category::Hardware,
         ]
     }
 
@@ -27,6 +29,7 @@ impl Category {
             Category::Network => "NET",
             Category::Storage => "DSK",
             Category::Process => "PRC",
+            Category::Hardware => "HW",
         }
     }
 
@@ -42,6 +45,8 @@ impl Category {
             (Category::Storage, Locale::Ja) => "ストレージ",
             (Category::Process, Locale::En) => "Process",
             (Category::Process, Locale::Ja) => "プロセス",
+            (Category::Hardware, Locale::En) => "Hardware",
+            (Category::Hardware, Locale::Ja) => "ハードウェア",
         }
     }
 
@@ -64,9 +69,106 @@ impl Category {
                 "diskstats", "df", "mounts", "partitions", "pressure", "locks",
             ],
             Category::Process => &["processes", "file-nr", "stat"],
+            Category::Hardware => &["thermal", "cpuinfo"],
         }
     }
 }
+
+// =============================================================================
+// Learning Paths — guided sequences through categories
+// =============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LearningPath {
+    /// Start here: understand the big picture of Linux resource monitoring.
+    Beginner,
+    /// Deep-dive into performance bottleneck diagnosis across subsystems.
+    PerformanceDiagnosis,
+    /// Server health and capacity planning workflows.
+    ServerHealth,
+}
+
+impl LearningPath {
+    pub fn all() -> &'static [LearningPath] {
+        &[
+            LearningPath::Beginner,
+            LearningPath::PerformanceDiagnosis,
+            LearningPath::ServerHealth,
+        ]
+    }
+
+    pub fn name(&self, locale: Locale) -> &'static str {
+        match (self, locale) {
+            (LearningPath::Beginner, Locale::En) => "Beginner: System Basics",
+            (LearningPath::Beginner, Locale::Ja) => "初級：システムの基礎",
+            (LearningPath::PerformanceDiagnosis, Locale::En) => "Performance Diagnosis",
+            (LearningPath::PerformanceDiagnosis, Locale::Ja) => "パフォーマンス診断",
+            (LearningPath::ServerHealth, Locale::En) => "Server Health & Capacity",
+            (LearningPath::ServerHealth, Locale::Ja) => "サーバー健全性と容量計画",
+        }
+    }
+
+    pub fn description(&self, locale: Locale) -> &'static str {
+        match (self, locale) {
+            (LearningPath::Beginner, Locale::En) => "\
+Start with Memory to understand caching and MemAvailable, then move to \
+CPU/Load for utilization vs demand, then Storage and Process basics. \
+Finish with Network and Hardware for a complete picture.",
+            (LearningPath::Beginner, Locale::Ja) => "\
+まずメモリでキャッシュとMemAvailableを理解し、次にCPU/負荷で使用率と\
+需要の違いを学び、ストレージとプロセスの基礎に進みます。最後にネットワーク\
+とハードウェアで全体像を完成させます。",
+            (LearningPath::PerformanceDiagnosis, Locale::En) => "\
+Learn to trace slowness from symptoms to root cause: CPU load and \
+pressure, then I/O saturation in Storage, memory pressure and swap \
+storms, process contention, and thermal throttling in Hardware.",
+            (LearningPath::PerformanceDiagnosis, Locale::Ja) => "\
+症状から根本原因まで遅延を追跡する方法を学びます：CPU負荷と圧力、\
+ストレージのI/O飽和、メモリ圧力とスワップストーム、プロセス競合、\
+ハードウェアのサーマルスロットリング。",
+            (LearningPath::ServerHealth, Locale::En) => "\
+Focus on capacity indicators: disk space trends in Storage, memory \
+headroom, file descriptor limits in Process, NIC saturation in \
+Network, and thermal envelope in Hardware.",
+            (LearningPath::ServerHealth, Locale::Ja) => "\
+容量指標に注目：ストレージのディスク容量推移、メモリの余裕、プロセスの\
+ファイルディスクリプタ上限、ネットワークのNIC飽和度、ハードウェアの\
+熱的余裕。",
+        }
+    }
+
+    /// Returns the ordered sequence of categories for this learning path.
+    pub fn categories(&self) -> &'static [Category] {
+        match self {
+            LearningPath::Beginner => &[
+                Category::Memory,
+                Category::CpuLoad,
+                Category::Storage,
+                Category::Process,
+                Category::Network,
+                Category::Hardware,
+            ],
+            LearningPath::PerformanceDiagnosis => &[
+                Category::CpuLoad,
+                Category::Storage,
+                Category::Memory,
+                Category::Process,
+                Category::Hardware,
+            ],
+            LearningPath::ServerHealth => &[
+                Category::Storage,
+                Category::Memory,
+                Category::Process,
+                Category::Network,
+                Category::Hardware,
+            ],
+        }
+    }
+}
+
+// =============================================================================
+// Category educational content
+// =============================================================================
 
 pub struct CategoryContent {
     pub overview: &'static str,
@@ -569,31 +671,554 @@ traceroute でロスの発生箇所を特定。",
         },
 
         // =====================================================================
-        // STORAGE / PROCESS — Placeholder (Phase 2)
+        // STORAGE — English
         // =====================================================================
         (Category::Storage, Locale::En) => CategoryContent {
-            overview: "Storage category content is planned for Phase 2.",
-            story: "Storage cross-source narrative coming soon.",
-            diagnostic_flow: "Storage diagnostic flow coming soon.",
-            common_issues: "Storage common issues coming soon.",
+            overview: "\
+Disk I/O is one of the most common bottlenecks in modern systems. \
+Unlike CPU and memory which operate in nanoseconds, storage devices \
+operate in microseconds (SSDs) to milliseconds (HDDs). Linux tracks \
+disk activity through diskstats (per-device I/O counters), df (filesystem \
+space usage), mounts (mounted filesystems and their options), partitions \
+(block device layout), and pressure (PSI for I/O stalls). Understanding \
+these together reveals whether your storage is the bottleneck and why.",
+
+            story: "\
+\"Why is my disk slow?\" — The Storage Story\n\
+\n\
+Start at diskstats. Each block device shows reads_completed, \
+writes_completed, read_sectors, write_sectors, and critically: \
+io_in_progress and weighted_io_ms. If io_in_progress is consistently \
+above 0, the device has a queue of pending I/O requests. The \
+weighted_io_ms counter accumulates time-weighted I/O operations — \
+dividing this by total operations gives average I/O latency.\n\
+\n\
+Next check df for filesystem space usage. A filesystem above 90% full \
+can degrade performance significantly: the filesystem driver must search \
+harder for free blocks, and fragmentation increases. At 100%, writes \
+fail entirely and applications crash. The available space (not just \
+used) matters because ext4 reserves 5% for root by default.\n\
+\n\
+Check mounts for filesystem types and mount options. A filesystem \
+mounted without noatime generates extra write I/O for every read \
+(updating access timestamps). Write-heavy workloads on ext4 should \
+check if data=journal mode is causing double-writes. The filesystem \
+type itself matters: ext4, xfs, and btrfs have very different \
+performance characteristics.\n\
+\n\
+Finally, pressure (PSI) for I/O gives a direct answer: if \
+io_some_avg10 > 0, tasks are currently stalling because they are \
+waiting for disk I/O. If io_full_avg10 > 0, the entire system is \
+stalled on I/O — nothing useful is happening while waiting for disk.",
+
+            diagnostic_flow: "\
+Step 1: Check pressure → io_some_avg10\n\
+  If 0 → I/O is not currently a bottleneck. Stop here.\n\
+  If > 0 → Tasks are stalling on I/O. Continue to Step 2.\n\
+\n\
+Step 2: Check diskstats → io_in_progress, weighted_io_ms\n\
+  If io_in_progress consistently > 0 → Device has I/O queue.\n\
+  Calculate avg latency = weighted_io_ms / total_ops.\n\
+  If latency > 20ms on SSD → Device is struggling. Continue to Step 3.\n\
+  If latency > 100ms on HDD → Expected for spinning disk under load.\n\
+\n\
+Step 3: Check df → filesystem usage percentage\n\
+  If > 95% → Nearly full. Free space urgently. This causes slowdowns.\n\
+  If > 90% → Getting tight. Plan cleanup or expansion.\n\
+  If < 90% → Space is not the issue. Continue to Step 4.\n\
+\n\
+Step 4: Check mounts → mount options and filesystem type\n\
+  If noatime missing → Add noatime to reduce write amplification.\n\
+  If data=journal on ext4 → Consider data=ordered for better write throughput.\n\
+  If using HDD → Consider migrating to SSD for latency-sensitive workloads.\n\
+\n\
+Step 5: Check diskstats → read vs write ratio\n\
+  If reads dominate → Check if page cache (meminfo Cached) is too small.\n\
+  If writes dominate → Check for write-heavy applications or logging.",
+
+            common_issues: "\
+Disk Full: df shows 100% usage or 0 available. Applications fail with \
+\"No space left on device.\" Find large files with du, check for deleted \
+files held open by processes (lsof), and clean up logs. Remember ext4 \
+reserves 5% for root — tune with tune2fs -m if needed.\n\
+\n\
+I/O Saturation: diskstats shows io_in_progress consistently > 0 and \
+io_some_avg10 > 0 in pressure. The device cannot keep up with demand. \
+Solutions: upgrade to faster storage (HDD to SSD), spread I/O across \
+multiple devices (RAID or separate mount points), or reduce I/O demand \
+(add RAM for better page cache, batch writes).\n\
+\n\
+Filesystem Corruption: Unexpected reboots or hardware failures can \
+leave filesystems in an inconsistent state. Symptoms: I/O errors in \
+dmesg, files or directories inaccessible. Run fsck on unmounted \
+filesystems. For critical data, always use journaling filesystems \
+(ext4, xfs) which recover automatically from most crashes.\n\
+\n\
+Slow Writes (Write Amplification): Writes are slower than expected. \
+Common causes: missing noatime mount option (every read triggers a \
+write), journaling overhead (data=journal doubles write volume), \
+filesystem nearly full (fragmentation), or SSD nearing end of life \
+(check SMART attributes via smartctl).",
         },
+
+        // =====================================================================
+        // STORAGE — Japanese
+        // =====================================================================
         (Category::Storage, Locale::Ja) => CategoryContent {
-            overview: "ストレージカテゴリのコンテンツはフェーズ2で追加予定です。",
-            story: "ストレージのソース横断ナラティブは準備中です。",
-            diagnostic_flow: "ストレージの診断フローは準備中です。",
-            common_issues: "ストレージのよくある問題は準備中です。",
+            overview: "\
+ディスクI/Oは現代のシステムで最も一般的なボトルネックの一つです。\
+ナノ秒単位で動作するCPUやメモリと異なり、ストレージデバイスは\
+マイクロ秒（SSD）からミリ秒（HDD）単位で動作します。Linuxは\
+diskstats（デバイスごとのI/Oカウンター）、df（ファイルシステムの\
+容量使用状況）、mounts（マウントされたファイルシステムとオプション）、\
+partitions（ブロックデバイスのレイアウト）、pressure（I/Oストールの\
+PSI）を通じてディスク活動を追跡します。これらを組み合わせて理解する\
+ことで、ストレージがボトルネックかどうか、そしてその理由が明らかになります。",
+
+            story: "\
+「なぜディスクが遅い？」 — ストレージのストーリー\n\
+\n\
+まず diskstats を確認します。各ブロックデバイスは reads_completed、\
+writes_completed、read_sectors、write_sectors、そして重要な \
+io_in_progress と weighted_io_ms を表示します。io_in_progress が\
+常に0より大きければ、デバイスには保留中のI/Oリクエストのキューがあります。\
+weighted_io_ms カウンターは時間加重I/O操作を蓄積します — これを\
+総操作数で割ると平均I/Oレイテンシが得られます。\n\
+\n\
+次に df でファイルシステムの容量使用状況を確認します。90%以上使用中の\
+ファイルシステムは性能が大幅に低下します：ファイルシステムドライバが\
+空きブロックの検索に苦労し、断片化が増加します。100%で書き込みが完全に\
+失敗し、アプリケーションがクラッシュします。利用可能な容量（使用量だけ\
+でなく）が重要です。ext4はデフォルトで5%をrootに予約しているためです。\n\
+\n\
+mounts でファイルシステムの種類とマウントオプションを確認します。\
+noatime なしでマウントされたファイルシステムは、すべての読み取りで\
+余分な書き込みI/O（アクセスタイムスタンプの更新）が発生します。\
+ext4での書き込み負荷が高いワークロードでは、data=journal モードが\
+二重書き込みを引き起こしていないか確認してください。ファイルシステムの\
+種類自体が重要です：ext4、xfs、btrfsは非常に異なる性能特性を持ちます。\n\
+\n\
+最後に、I/Oの pressure（PSI）が直接的な答えを与えます：\
+io_some_avg10 > 0 なら、タスクがディスクI/O待ちで停滞しています。\
+io_full_avg10 > 0 なら、システム全体がI/Oで停滞しています — \
+ディスク待ちの間、有用な処理は何も行われていません。",
+
+            diagnostic_flow: "\
+ステップ1: pressure → io_some_avg10 を確認\n\
+  0 → I/Oは現在ボトルネックではない。ここで終了。\n\
+  > 0 → タスクがI/O待ちで停滞中。ステップ2へ。\n\
+\n\
+ステップ2: diskstats → io_in_progress, weighted_io_ms を確認\n\
+  io_in_progress が常に > 0 → デバイスにI/Oキューあり。\n\
+  平均レイテンシ = weighted_io_ms / 総操作数 を計算。\n\
+  SSDでレイテンシ > 20ms → デバイスが苦しんでいる。ステップ3へ。\n\
+  HDDでレイテンシ > 100ms → 負荷下の回転ディスクでは想定内。\n\
+\n\
+ステップ3: df → ファイルシステム使用率を確認\n\
+  > 95% → ほぼ満杯。緊急に空き容量を確保。速度低下の原因。\n\
+  > 90% → 逼迫中。クリーンアップまたは拡張を計画。\n\
+  < 90% → 容量は問題ではない。ステップ4へ。\n\
+\n\
+ステップ4: mounts → マウントオプションとファイルシステムタイプを確認\n\
+  noatime がない → noatime を追加して書き込み増幅を削減。\n\
+  ext4で data=journal → 書き込みスループット向上のため data=ordered を検討。\n\
+  HDD使用中 → レイテンシ重視のワークロードにはSSDへの移行を検討。\n\
+\n\
+ステップ5: diskstats → 読み取りと書き込みの比率を確認\n\
+  読み取りが優勢 → ページキャッシュ（meminfo の Cached）が小さすぎないか確認。\n\
+  書き込みが優勢 → 書き込み負荷の高いアプリやログ出力を確認。",
+
+            common_issues: "\
+ディスク満杯: df が使用率100%または利用可能0を表示。アプリケーションが\
+「No space left on device」で失敗。du で大きなファイルを探し、プロセスが\
+保持している削除済みファイルを確認（lsof）、ログをクリーンアップ。ext4は\
+5%をrootに予約していることを忘れずに — 必要に応じて tune2fs -m で調整。\n\
+\n\
+I/O飽和: diskstats の io_in_progress が常に > 0、pressure の \
+io_some_avg10 > 0。デバイスが需要に追いつけない。対処法：より高速な\
+ストレージへのアップグレード（HDDからSSD）、複数デバイスへのI/O分散\
+（RAIDまたは別マウントポイント）、またはI/O需要の削減（ページキャッシュ\
+改善のためRAM追加、書き込みのバッチ処理）。\n\
+\n\
+ファイルシステム破損: 予期しない再起動やハードウェア障害により\
+ファイルシステムが不整合な状態になることがあります。症状：dmesgでの\
+I/Oエラー、ファイルやディレクトリへのアクセス不能。アンマウントした\
+ファイルシステムでfsckを実行。重要なデータには常にジャーナリング\
+ファイルシステム（ext4、xfs）を使用 — ほとんどのクラッシュから\
+自動的に回復します。\n\
+\n\
+遅い書き込み（書き込み増幅）: 書き込みが予想より遅い。一般的な原因：\
+noatime マウントオプションの欠如（すべての読み取りが書き込みを誘発）、\
+ジャーナリングのオーバーヘッド（data=journal が書き込み量を倍増）、\
+ファイルシステムがほぼ満杯（断片化）、またはSSDの寿命末期（smartctl で\
+SMART属性を確認）。",
         },
+
+        // =====================================================================
+        // PROCESS — English
+        // =====================================================================
         (Category::Process, Locale::En) => CategoryContent {
-            overview: "Process category content is planned for Phase 2.",
-            story: "Process cross-source narrative coming soon.",
-            diagnostic_flow: "Process diagnostic flow coming soon.",
-            common_issues: "Process common issues coming soon.",
+            overview: "\
+Every program running on Linux is a process. Processes have states \
+(Running, Sleeping, Zombie, Stopped), consume resources (CPU, memory, \
+file descriptors), and are organized in a parent-child tree rooted at \
+PID 1. The kernel tracks process creation (fork), termination, context \
+switches, and resource limits. Understanding the process lifecycle and \
+common failure modes is essential for diagnosing system overload, \
+resource leaks, and application failures.",
+
+            story: "\
+\"Too many processes\" — The Process Story\n\
+\n\
+Start at processes (the /proc-level summary). The total number of \
+running processes and threads tells you system-wide concurrency. \
+Compare to ulimits and system maximums — if the count is near the \
+kernel.pid_max limit, new processes cannot be created and fork() \
+calls fail with EAGAIN.\n\
+\n\
+Next, check stat for system-wide counters. processes_forks shows the \
+cumulative number of fork() calls since boot — if this is increasing \
+rapidly (thousands per second), something is spawning processes at an \
+alarming rate. context_switches counts how often the CPU switches \
+between tasks. High context switches (hundreds of thousands per second) \
+indicate too many competing threads or very short-lived processes.\n\
+\n\
+Then check file-nr (file descriptor usage). The three numbers show: \
+allocated file handles, free file handles (usually 0 on modern \
+kernels), and the system maximum. If allocated approaches the maximum, \
+processes will fail to open files, sockets, or pipes with \"Too many \
+open files.\" Each leaked file descriptor brings the system closer to \
+this limit.\n\
+\n\
+Look for zombie processes (state Z in the process table). Zombies are \
+finished processes whose parent has not called wait() to collect their \
+exit status. A few zombies are harmless, but hundreds indicate a \
+buggy parent process. Zombies consume a PID slot and a small amount \
+of kernel memory — in extreme cases they can exhaust the PID space.",
+
+            diagnostic_flow: "\
+Step 1: Check processes → total count\n\
+  Compare to kernel.pid_max (default 32768 or 4194304).\n\
+  If near limit → PID exhaustion imminent. Continue to Step 2.\n\
+  If well below → Process count is OK. Skip to Step 3.\n\
+\n\
+Step 2: Check stat → processes_forks rate\n\
+  If forks/sec > 1000 → Fork storm or runaway process spawning.\n\
+  Identify the parent process creating children rapidly.\n\
+  If normal → Process count grew slowly. Check for zombies.\n\
+\n\
+Step 3: Check processes → zombie count\n\
+  If zombies > 10 → Parent process not reaping children.\n\
+  Identify the parent (PPID) and fix or restart it.\n\
+  If zombies = 0 → No zombie issue. Continue to Step 4.\n\
+\n\
+Step 4: Check file-nr → allocated vs maximum\n\
+  If allocated > 80% of max → File descriptor pressure.\n\
+  Find processes with many open FDs (ls /proc/PID/fd | wc -l).\n\
+  If normal → FD usage is healthy. Continue to Step 5.\n\
+\n\
+Step 5: Check stat → context_switches rate\n\
+  If > 500k/sec with degraded performance → Too many threads.\n\
+  Reduce concurrency or increase CPU resources.",
+
+            common_issues: "\
+Fork Bombs: A process recursively spawns copies of itself, consuming \
+all available PIDs within seconds. stat shows processes_forks exploding. \
+The system becomes unresponsive as the kernel spends all time creating \
+and scheduling processes. Prevention: set ulimit -u (max user processes) \
+to a reasonable value. Recovery: if you can get a shell, kill the parent \
+process tree.\n\
+\n\
+Zombie Accumulation: Hundreds of zombie (Z state) processes appear. \
+The parent process is not calling wait()/waitpid() to reap child \
+exit statuses. Zombies do not consume CPU or memory but do consume PID \
+slots. Fix the parent application. As a workaround, killing the parent \
+causes zombies to be reparented to init, which reaps them.\n\
+\n\
+File Descriptor Leaks: file-nr allocated count grows over time. An \
+application opens files, sockets, or pipes but never closes them. \
+Eventually the process hits its per-process limit (ulimit -n, default \
+1024) or the system hits the global limit (file-nr max). Symptoms: \
+\"Too many open files\" errors. Find the leaking process and fix the \
+application code.\n\
+\n\
+OOM Kills: When the system runs out of memory, the OOM killer selects \
+processes to terminate based on their memory usage (oom_score). Check \
+dmesg for \"Out of memory: Killed process\" messages. The killed process \
+may restart and get killed again in a loop. Fix by reducing memory \
+usage, adding RAM, or tuning oom_score_adj to protect critical processes.",
         },
+
+        // =====================================================================
+        // PROCESS — Japanese
+        // =====================================================================
         (Category::Process, Locale::Ja) => CategoryContent {
-            overview: "プロセスカテゴリのコンテンツはフェーズ2で追加予定です。",
-            story: "プロセスのソース横断ナラティブは準備中です。",
-            diagnostic_flow: "プロセスの診断フローは準備中です。",
-            common_issues: "プロセスのよくある問題は準備中です。",
+            overview: "\
+Linuxで実行されるすべてのプログラムはプロセスです。プロセスには状態\
+（実行中、スリープ、ゾンビ、停止）があり、リソース（CPU、メモリ、\
+ファイルディスクリプタ）を消費し、PID 1を根とする親子ツリーに\
+組織化されています。カーネルはプロセスの生成（fork）、終了、\
+コンテキストスイッチ、リソース制限を追跡します。プロセスのライフ\
+サイクルと一般的な障害モードを理解することは、システム過負荷、\
+リソースリーク、アプリケーション障害の診断に不可欠です。",
+
+            story: "\
+「プロセスが多すぎる」 — プロセスのストーリー\n\
+\n\
+まず processes（/procレベルの要約）を確認します。実行中のプロセスと\
+スレッドの総数がシステム全体の並行性を示します。ulimits やシステムの\
+最大値と比較 — カウントが kernel.pid_max の上限に近い場合、新しい\
+プロセスを作成できず、fork() 呼び出しが EAGAIN で失敗します。\n\
+\n\
+次に stat でシステム全体のカウンターを確認します。processes_forks は\
+ブート以降の累計 fork() 呼び出し数を示します — これが急速に増加\
+（毎秒数千回）している場合、何かが驚くべき速度でプロセスを生成して\
+います。context_switches はCPUがタスク間で切り替わった回数です。\
+高いコンテキストスイッチ（毎秒数十万回）は、競合するスレッドが多すぎるか、\
+非常に短命なプロセスを示します。\n\
+\n\
+次に file-nr（ファイルディスクリプタの使用状況）を確認します。3つの\
+数値は：割り当て済みファイルハンドル数、空きファイルハンドル数（現代の\
+カーネルでは通常0）、システム最大値です。割り当て済みが最大値に近づくと、\
+プロセスはファイル、ソケット、パイプを開けなくなり「Too many open files」\
+で失敗します。リークされたファイルディスクリプタの一つ一つがシステムを\
+この上限に近づけます。\n\
+\n\
+ゾンビプロセス（プロセステーブルで状態Z）を探します。ゾンビは終了した\
+プロセスで、親が wait() を呼んで終了ステータスを回収していないものです。\
+少数のゾンビは無害ですが、数百のゾンビはバグのある親プロセスを示します。\
+ゾンビはPIDスロットと少量のカーネルメモリを消費します — 極端な場合、\
+PID空間を枯渇させることがあります。",
+
+            diagnostic_flow: "\
+ステップ1: processes → 総数を確認\n\
+  kernel.pid_max（デフォルト 32768 または 4194304）と比較。\n\
+  上限に近い → PID枯渇が差し迫っている。ステップ2へ。\n\
+  十分下回る → プロセス数は問題なし。ステップ3へスキップ。\n\
+\n\
+ステップ2: stat → processes_forks のレートを確認\n\
+  forks/秒 > 1000 → フォークストームまたは暴走プロセス生成。\n\
+  子プロセスを急速に生成している親プロセスを特定。\n\
+  正常 → プロセス数はゆっくり増加。ゾンビを確認。\n\
+\n\
+ステップ3: processes → ゾンビ数を確認\n\
+  ゾンビ > 10 → 親プロセスが子を回収していない。\n\
+  親（PPID）を特定し、修正または再起動。\n\
+  ゾンビ = 0 → ゾンビの問題なし。ステップ4へ。\n\
+\n\
+ステップ4: file-nr → 割り当て済み vs 最大値を確認\n\
+  割り当て済み > 最大値の80% → ファイルディスクリプタ圧力。\n\
+  多くのFDを開いているプロセスを特定（ls /proc/PID/fd | wc -l）。\n\
+  正常 → FD使用量は健全。ステップ5へ。\n\
+\n\
+ステップ5: stat → context_switches のレートを確認\n\
+  > 50万/秒で性能低下 → スレッドが多すぎる。\n\
+  並行度の削減またはCPUリソースの追加。",
+
+            common_issues: "\
+フォーク爆弾: プロセスが再帰的に自身のコピーを生成し、数秒で利用可能な\
+全PIDを消費。stat の processes_forks が爆発的に増加。カーネルがプロセスの\
+作成とスケジューリングに全時間を費やし、システムが応答不能になる。\
+予防策：ulimit -u（ユーザーあたりの最大プロセス数）を適切な値に設定。\
+回復：シェルが取得できれば、親プロセスツリーをkill。\n\
+\n\
+ゾンビの蓄積: 数百のゾンビ（Z状態）プロセスが出現。親プロセスが \
+wait()/waitpid() を呼んで子の終了ステータスを回収していない。ゾンビは\
+CPUやメモリは消費しないがPIDスロットを消費。親アプリケーションを修正。\
+回避策として親をkillすると、ゾンビはinitに再ペアレントされ回収される。\n\
+\n\
+ファイルディスクリプタリーク: file-nr の割り当て済み数が時間とともに増加。\
+アプリケーションがファイル、ソケット、パイプを開くが閉じない。最終的に\
+プロセスがプロセスごとの上限（ulimit -n、デフォルト1024）またはシステムが\
+グローバル上限（file-nr max）に到達。症状：「Too many open files」エラー。\
+リークしているプロセスを見つけてアプリケーションコードを修正。\n\
+\n\
+OOM Kill: システムがメモリ不足になると、OOM killerがメモリ使用量\
+（oom_score）に基づいてプロセスを選択して終了。dmesg で「Out of memory: \
+Killed process」メッセージを確認。killされたプロセスが再起動してまた\
+killされるループに陥ることがある。対処法：メモリ使用量の削減、RAMの追加、\
+または oom_score_adj の調整で重要なプロセスを保護。",
+        },
+
+        // =====================================================================
+        // HARDWARE — English
+        // =====================================================================
+        (Category::Hardware, Locale::En) => CategoryContent {
+            overview: "\
+Hardware monitoring covers CPU temperature, frequency scaling, and \
+thermal throttling. Modern CPUs dynamically adjust their clock frequency \
+based on workload demand and thermal conditions. When temperatures \
+exceed safe thresholds, the kernel throttles CPU frequency to prevent \
+damage — trading performance for safety. Monitoring thermal zones and \
+CPU frequency together reveals whether your system is performing \
+optimally or silently degraded by heat.",
+
+            story: "\
+\"Why is my server throttling?\" — The Hardware Story\n\
+\n\
+Start at thermal zone data. Each thermal zone reports a temperature \
+in millidegrees Celsius (divide by 1000 for human-readable values). \
+Zone types include x86_pkg_temp (CPU package), acpitz (ACPI thermal), \
+and others depending on hardware. Compare current temperatures to the \
+trip points defined for each zone: passive trip points trigger frequency \
+throttling, critical trip points trigger emergency shutdown.\n\
+\n\
+Next, check cpuinfo for current CPU frequency. Each core reports its \
+clock speed in MHz. Compare to the maximum frequency the CPU supports. \
+If the current frequency is well below maximum during a CPU-intensive \
+workload, the CPU is being throttled. The frequency governor \
+(performance, powersave, ondemand, schedutil) controls how aggressively \
+the CPU scales frequency.\n\
+\n\
+The connection between thermal and frequency is direct: as temperature \
+rises toward the passive trip point, the kernel reduces maximum allowed \
+frequency. This creates a feedback loop — lower frequency means less \
+heat generation, stabilizing temperature at the cost of throughput. \
+On well-cooled systems this never triggers. On systems with inadequate \
+cooling, it can silently cut performance by 50% or more.\n\
+\n\
+In virtual machines and containers, thermal data may not be available \
+(the hypervisor manages hardware). If thermal zones are empty, \
+performance issues are more likely caused by CPU steal time or \
+resource limits than by thermal throttling.",
+
+            diagnostic_flow: "\
+Step 1: Check thermal zones → current temperature\n\
+  If < 70C → Temperature is normal. Skip to Step 3.\n\
+  If 70-85C → Warm but usually acceptable. Continue to Step 2.\n\
+  If > 85C → Hot. Likely throttling. Continue to Step 2.\n\
+\n\
+Step 2: Check thermal zones → trip points\n\
+  Compare current temp to passive trip point.\n\
+  If current >= passive → CPU is being frequency-throttled.\n\
+  If current >= critical → System at risk of emergency shutdown.\n\
+\n\
+Step 3: Check cpuinfo → current frequency vs max frequency\n\
+  If current ~= max during load → No throttling. CPU is fine.\n\
+  If current << max during load → Throttling active. Check thermals.\n\
+  If governor = powersave → Frequency intentionally limited.\n\
+\n\
+Step 4: Investigate cooling\n\
+  If physical server → Check fans, airflow, thermal paste, dust.\n\
+  If VM → Thermal data may be unavailable; check steal time instead.\n\
+  If laptop → Ensure vents are not blocked, consider a cooling pad.\n\
+\n\
+Step 5: Check for sustained throttling pattern\n\
+  If throttling only under peak load → May be acceptable.\n\
+  If throttling at idle → Cooling system is failing. Urgent action needed.",
+
+            common_issues: "\
+Overheating: Thermal zone temperature exceeds 85C consistently. CPU \
+frequency drops well below maximum. Causes: failed or degraded fans, \
+blocked airflow, dust accumulation in heatsinks, or ambient temperature \
+too high (server room AC failure). Monitor temperature trends over time \
+to distinguish transient spikes from sustained overheating.\n\
+\n\
+Broken or Degraded Fans: Temperature rises gradually over weeks or \
+months as fans wear out or accumulate dust. Performance degrades \
+silently as thermal throttling kicks in. Regular physical inspection \
+and cleaning prevents this. For servers, IPMI/BMC fan speed sensors \
+provide early warning.\n\
+\n\
+Thermal Paste Degradation: Over 3-5 years, thermal paste between CPU \
+and heatsink dries out, increasing thermal resistance. Symptoms: higher \
+temperatures than when the system was new, despite same workload and \
+ambient conditions. Solution: clean and reapply quality thermal paste.\n\
+\n\
+Frequency Governor Misconfiguration: CPU is stuck at low frequency \
+even when temperature is cool. The governor is set to \"powersave\" \
+instead of \"ondemand\" or \"schedutil.\" Check \
+/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor. For servers, \
+\"performance\" governor gives consistent throughput at the cost of \
+higher power consumption.",
+        },
+
+        // =====================================================================
+        // HARDWARE — Japanese
+        // =====================================================================
+        (Category::Hardware, Locale::Ja) => CategoryContent {
+            overview: "\
+ハードウェアモニタリングは、CPU温度、周波数スケーリング、サーマル\
+スロットリングをカバーします。現代のCPUはワークロードの需要と熱条件に\
+基づいてクロック周波数を動的に調整します。温度が安全な閾値を超えると、\
+カーネルは損傷を防ぐためにCPU周波数を抑制します — 性能を犠牲にして\
+安全性を確保します。サーマルゾーンとCPU周波数を合わせて監視することで、\
+システムが最適に動作しているか、熱によって静かに性能低下しているかが\
+明らかになります。",
+
+            story: "\
+「なぜサーバーがスロットリングしている？」 — ハードウェアのストーリー\n\
+\n\
+まずサーマルゾーンデータを確認します。各サーマルゾーンはミリ度セルシウスで\
+温度を報告します（人間が読める値にするには1000で割る）。ゾーンタイプには \
+x86_pkg_temp（CPUパッケージ）、acpitz（ACPIサーマル）などがあり、\
+ハードウェアに依存します。現在の温度を各ゾーンに定義されたトリップポイントと\
+比較：パッシブトリップポイントは周波数スロットリングを発動し、クリティカル\
+トリップポイントは緊急シャットダウンを発動します。\n\
+\n\
+次に cpuinfo で現在のCPU周波数を確認します。各コアがクロック速度をMHzで\
+報告します。CPUがサポートする最大周波数と比較してください。CPU集約型の\
+ワークロード中に現在の周波数が最大値を大きく下回っていれば、CPUは\
+スロットリングされています。周波数ガバナー（performance、powersave、\
+ondemand、schedutil）がCPUの周波数スケーリングの積極性を制御します。\n\
+\n\
+サーマルと周波数の関係は直接的です：温度がパッシブトリップポイントに\
+向かって上昇すると、カーネルは許容最大周波数を下げます。これが\
+フィードバックループを作ります — 低い周波数は発熱を減らし、スループットの\
+犠牲で温度を安定させます。冷却が十分なシステムではこれは発動しません。\
+冷却が不十分なシステムでは、性能が静かに50%以上低下することがあります。\n\
+\n\
+仮想マシンやコンテナでは、サーマルデータが利用できない場合があります\
+（ハイパーバイザがハードウェアを管理）。サーマルゾーンが空の場合、性能の\
+問題はサーマルスロットリングよりCPUスチールタイムやリソース制限が原因の\
+可能性が高いです。",
+
+            diagnostic_flow: "\
+ステップ1: サーマルゾーン → 現在の温度を確認\n\
+  < 70C → 温度は正常。ステップ3へスキップ。\n\
+  70-85C → 暖かいが通常は許容範囲。ステップ2へ。\n\
+  > 85C → 高温。スロットリングの可能性大。ステップ2へ。\n\
+\n\
+ステップ2: サーマルゾーン → トリップポイントを確認\n\
+  現在の温度をパッシブトリップポイントと比較。\n\
+  現在 >= パッシブ → CPUが周波数スロットリング中。\n\
+  現在 >= クリティカル → システムが緊急シャットダウンの危険あり。\n\
+\n\
+ステップ3: cpuinfo → 現在の周波数 vs 最大周波数を確認\n\
+  負荷時に現在 ~= 最大 → スロットリングなし。CPUは正常。\n\
+  負荷時に現在 << 最大 → スロットリングが有効。サーマルを確認。\n\
+  ガバナー = powersave → 意図的に周波数を制限中。\n\
+\n\
+ステップ4: 冷却を調査\n\
+  物理サーバー → ファン、エアフロー、サーマルペースト、ほこりを確認。\n\
+  VM → サーマルデータが利用できない場合あり。スチールタイムを確認。\n\
+  ノートPC → 通気口がふさがっていないか確認、冷却パッドを検討。\n\
+\n\
+ステップ5: 持続的なスロットリングパターンを確認\n\
+  ピーク負荷時のみスロットリング → 許容できる場合あり。\n\
+  アイドル時にスロットリング → 冷却システムが故障中。緊急対応が必要。",
+
+            common_issues: "\
+オーバーヒート: サーマルゾーンの温度が常に85Cを超過。CPU周波数が最大値を\
+大きく下回る。原因：故障または劣化したファン、ふさがったエアフロー、\
+ヒートシンクのほこり蓄積、または周囲温度が高すぎる（サーバールームの\
+空調故障）。一時的なスパイクと持続的なオーバーヒートを区別するため、\
+温度推移を経時的に監視。\n\
+\n\
+故障または劣化したファン: ファンが摩耗したりほこりが溜まると、数週間から\
+数ヶ月かけて温度が徐々に上昇。サーマルスロットリングが作動し、性能が\
+静かに低下。定期的な物理的点検と清掃で予防可能。サーバーでは \
+IPMI/BMC のファン速度センサーが早期警告を提供。\n\
+\n\
+サーマルペーストの劣化: 3-5年でCPUとヒートシンク間のサーマルペーストが\
+乾燥し、熱抵抗が増加。症状：同じワークロードと環境条件にもかかわらず、\
+新品時より高い温度。対処法：品質の良いサーマルペーストで清掃・再塗布。\n\
+\n\
+周波数ガバナーの設定ミス: 温度が低いにもかかわらずCPUが低周波数に固定。\
+ガバナーが「ondemand」や「schedutil」ではなく「powersave」に設定されている。\
+/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor を確認。サーバー\
+では「performance」ガバナーが電力消費の増加と引き換えに一貫したスループット\
+を提供。",
         },
     }
 }

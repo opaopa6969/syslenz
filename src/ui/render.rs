@@ -45,23 +45,32 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             (content_lines + 3).clamp(10, max_help_height)
         }
     };
-    let outer_constraints = if help_height > 0 {
-        vec![
-            Constraint::Min(10),
-            Constraint::Length(help_height),
-            Constraint::Length(3),
-        ]
-    } else {
-        vec![
-            Constraint::Min(10),
-            Constraint::Length(3),
-        ]
-    };
+    let show_tab_bar = app.is_multi_host();
+    let mut outer_constraints = Vec::new();
+    if show_tab_bar {
+        outer_constraints.push(Constraint::Length(1)); // tab bar
+    }
+    outer_constraints.push(Constraint::Min(10)); // main content
+    if help_height > 0 {
+        outer_constraints.push(Constraint::Length(help_height));
+    }
+    outer_constraints.push(Constraint::Length(3)); // status bar
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(outer_constraints)
         .split(f.area());
+
+    // Determine chunk indices based on what's shown
+    let tab_bar_chunk = if show_tab_bar { Some(0) } else { None };
+    let main_chunk_idx = if show_tab_bar { 1 } else { 0 };
+    let help_chunk_idx = if help_height > 0 { main_chunk_idx + 1 } else { 0 };
+    let status_chunk_idx = if help_height > 0 { help_chunk_idx + 1 } else { main_chunk_idx + 1 };
+
+    // Draw tab bar if multi-host
+    if let Some(tab_idx) = tab_bar_chunk {
+        draw_host_tab_bar(f, app, chunks[tab_idx]);
+    }
 
     // Build the ViewData layer — pre-computed data for the current view.
     let view_data = app.build_view_data();
@@ -69,12 +78,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Dashboard and Welcome are full-width (no sidebar)
     let is_fullwidth = matches!(app.view, View::Dashboard | View::Welcome | View::Diagnostics | View::CategoryGuide);
 
+    let main_area = chunks[main_chunk_idx];
+
     if is_fullwidth {
         match view_data {
-            ViewData::Dashboard(ref data) => draw_dashboard(f, data, chunks[0]),
-            ViewData::Welcome(_) => draw_welcome(f, app, chunks[0]),
-            ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app.locale, chunks[0]),
-            ViewData::CategoryGuide(_) => draw_category_guide(f, app, chunks[0]),
+            ViewData::Dashboard(ref data) => draw_dashboard(f, data, main_area),
+            ViewData::Welcome(_) => draw_welcome(f, app, main_area),
+            ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app.locale, main_area),
+            ViewData::CategoryGuide(_) => draw_category_guide(f, app, main_area),
             _ => {}
         }
     } else {
@@ -84,7 +95,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 Constraint::Length(22), // sidebar
                 Constraint::Min(40),   // content
             ])
-            .split(chunks[0]);
+            .split(main_area);
 
         draw_sidebar(f, app, main_chunks[0]);
 
@@ -119,11 +130,32 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     if app.help_level != super::app::HelpLevel::Off {
-        draw_help_panel(f, app, chunks[1]);
-        draw_status_bar(f, app, chunks[2]);
+        draw_help_panel(f, app, chunks[help_chunk_idx]);
+        draw_status_bar(f, app, chunks[status_chunk_idx]);
     } else {
-        draw_status_bar(f, app, chunks[1]);
+        draw_status_bar(f, app, chunks[status_chunk_idx]);
     }
+}
+
+fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans = Vec::new();
+    for (i, label) in app.host_labels.iter().enumerate() {
+        let fkey = format!("F{}", i + 1);
+        if i == app.active_host {
+            spans.push(Span::styled(
+                format!(" [{}:{}] ", fkey, label),
+                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!(" [{}:{}] ", fkey, label),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+    let line = Line::from(spans);
+    let p = Paragraph::new(line);
+    f.render_widget(p, area);
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {

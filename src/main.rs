@@ -148,26 +148,29 @@ fn main() -> Result<()> {
     let start_classic = args.iter().any(|a| a == "--classic")
         || cfg.general.default_view == "classic";
 
-    // --ssh <user@host>
-    let ssh_host = if let Some(pos) = args.iter().position(|a| a == "--ssh") {
-        Some(args.get(pos + 1).expect("--ssh requires a host argument").clone())
-    } else {
-        None
-    };
+    // --ssh <user@host> (supports multiple)
+    let ssh_hosts: Vec<String> = args.iter().enumerate()
+        .filter(|(_, a)| *a == "--ssh")
+        .filter_map(|(i, _)| args.get(i + 1).cloned())
+        .collect();
 
-    // --docker <container_name>
-    let docker_container = if let Some(pos) = args.iter().position(|a| a == "--docker") {
-        Some(args.get(pos + 1).expect("--docker requires a container name").clone())
-    } else {
-        None
-    };
+    // --docker <container_name> (supports multiple)
+    let docker_containers: Vec<String> = args.iter().enumerate()
+        .filter(|(_, a)| *a == "--docker")
+        .filter_map(|(i, _)| args.get(i + 1).cloned())
+        .collect();
 
-    // --connect <host:port> (connect to syslenz --serve)
-    let connect_addr = if let Some(pos) = args.iter().position(|a| a == "--connect") {
-        Some(args.get(pos + 1).expect("--connect requires address (host:port)").clone())
-    } else {
-        None
-    };
+    // --connect <host:port> (supports multiple)
+    let connect_addrs: Vec<String> = args.iter().enumerate()
+        .filter(|(_, a)| *a == "--connect")
+        .filter_map(|(i, _)| args.get(i + 1).cloned())
+        .collect();
+
+    // For backward compatibility, extract first of each for single-host mode
+    let ssh_host = ssh_hosts.first().cloned();
+    let docker_container = docker_containers.first().cloned();
+    let connect_addr = connect_addrs.first().cloned();
+
 
     // --import <file.json>
     let imported_snapshot = if let Some(pos) = args.iter().position(|a| a == "--import") {
@@ -193,7 +196,35 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let alert_rules = cfg.alert;
-    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, alert_rules);
+    // Build list of extra remote hosts (beyond the primary one used to construct the App).
+    // The primary is determined by run(): first ssh_host, then docker_container, then connect_addr.
+    // All remaining hosts go into extra_hosts.
+    let mut extra_hosts: Vec<(String, String)> = Vec::new(); // (label, type:target)
+    let mut skip_first_ssh = ssh_host.is_some();
+    let mut skip_first_docker = docker_container.is_some() && ssh_host.is_none();
+    let mut skip_first_connect = connect_addr.is_some() && ssh_host.is_none() && docker_container.is_none();
+    for h in &ssh_hosts {
+        if skip_first_ssh {
+            skip_first_ssh = false;
+            continue;
+        }
+        extra_hosts.push((format!("ssh:{}", h), format!("ssh:{}", h)));
+    }
+    for c in &docker_containers {
+        if skip_first_docker {
+            skip_first_docker = false;
+            continue;
+        }
+        extra_hosts.push((format!("docker:{}", c), format!("docker:{}", c)));
+    }
+    for a in &connect_addrs {
+        if skip_first_connect {
+            skip_first_connect = false;
+            continue;
+        }
+        extra_hosts.push((format!("tcp:{}", a), format!("tcp:{}", a)));
+    }
+    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, alert_rules, extra_hosts);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -214,16 +245,17 @@ fn run(
     locale: i18n::Locale,
     start_classic: bool,
     alert_rules: Vec<alert::AlertRule>,
+    extra_hosts: Vec<(String, String)>,
 ) -> Result<()> {
-    let mut app = if let Some(host) = ssh_host {
-        let rx = remote::stream_remote(&host, 1000)?;
-        App::from_remote(&host, rx)?
-    } else if let Some(container) = docker_container {
-        let rx = remote::stream_docker(&container, 1000)?;
+    let mut app = if let Some(ref host) = ssh_host {
+        let rx = remote::stream_remote(host, 1000)?;
+        App::from_remote(host, rx)?
+    } else if let Some(ref container) = docker_container {
+        let rx = remote::stream_docker(container, 1000)?;
         let label = format!("docker:{}", container);
         App::from_remote(&label, rx)?
-    } else if let Some(addr) = connect_addr {
-        let rx = remote::stream_tcp(&addr, 1000)?;
+    } else if let Some(ref addr) = connect_addr {
+        let rx = remote::stream_tcp(addr, 1000)?;
         let label = format!("tcp:{}", addr);
         App::from_remote(&label, rx)?
     } else if let Some(snapshots) = imported {
@@ -236,6 +268,27 @@ fn run(
     if start_classic {
         app.view = ui::app::View::Overview;
         app.focus = ui::app::Focus::Sidebar;
+    }
+
+    // Set up multi-host if there are extra hosts
+    if !extra_hosts.is_empty() {
+        let mut additional: Vec<(String, Option<std::sync::mpsc::Receiver<proc::Snapshot>>)> = Vec::new();
+        for (label, target) in &extra_hosts {
+            let rx = if target.starts_with("ssh:") {
+                let host = &target[4..];
+                Some(remote::stream_remote(host, 1000)?)
+            } else if target.starts_with("docker:") {
+                let container = &target[7..];
+                Some(remote::stream_docker(container, 1000)?)
+            } else if target.starts_with("tcp:") {
+                let addr = &target[4..];
+                Some(remote::stream_tcp(addr, 1000)?)
+            } else {
+                None
+            };
+            additional.push((label.clone(), rx));
+        }
+        app.init_multi_host(additional);
     }
 
     while app.running {
@@ -379,6 +432,10 @@ fn run(
                                 ui::app::Focus::Sidebar
                             };
                         }
+                    }
+                    // Multi-host tab switching: F1-F9
+                    KeyCode::F(n @ 1..=9) if app.is_multi_host() => {
+                        app.switch_host((n as usize) - 1);
                     }
                     _ => {}
                 }
