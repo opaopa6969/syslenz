@@ -69,21 +69,31 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_sidebar(f, app, main_chunks[0]);
 
         match app.view {
-            View::Overview | View::Detail => draw_detail(f, app, main_chunks[1]),
+            View::Overview | View::Detail | View::Graph => {
+                // Check if selected field is numeric — auto-show graph
+                let has_numeric_field = app.current_entry_fields()
+                    .and_then(|fields| fields.get(app.selected_field))
+                    .is_some_and(|f| matches!(f.value,
+                        FieldValue::Bytes(_) | FieldValue::Integer(_) |
+                        FieldValue::Float(_) | FieldValue::Duration(_)));
+
+                if has_numeric_field && app.snapshots.len() >= 2 {
+                    // Split: detail on top, auto-graph on bottom
+                    let content_split = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Percentage(60),
+                            Constraint::Percentage(40),
+                        ])
+                        .split(main_chunks[1]);
+                    draw_detail(f, app, content_split[0]);
+                    draw_auto_graph(f, app, content_split[1]);
+                } else {
+                    draw_detail(f, app, main_chunks[1]);
+                }
+            }
             View::Diff => draw_diff(f, app, main_chunks[1]),
             View::TableView => draw_table_view(f, app, main_chunks[1]),
-            View::Graph => {
-                // Split: detail on top, graph on bottom
-                let content_split = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(50),
-                    ])
-                    .split(main_chunks[1]);
-                draw_detail(f, app, content_split[0]);
-                graph::draw_graph(f, app, content_split[1]);
-            }
             _ => {}
         }
     }
@@ -773,6 +783,79 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().fg(Color::Green));
         f.render_widget(mem_sparkline, graph_chunks[1]);
     }
+}
+
+fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
+    let source_key = app.current_source_name();
+    let field_name = app.current_entry_fields()
+        .and_then(|fields| fields.get(app.selected_field))
+        .map(|f| f.name.clone())
+        .unwrap_or_default();
+
+    // Collect values from history
+    let mut values: Vec<f64> = Vec::new();
+    for snap in &app.snapshots {
+        if let Some(entry) = snap.entries.get(source_key) {
+            if let Some(field) = entry.fields.iter().find(|f| f.name == field_name) {
+                if let Some(v) = match &field.value {
+                    FieldValue::Bytes(b) => Some(*b as f64),
+                    FieldValue::Integer(i) => Some(*i as f64),
+                    FieldValue::Float(f) => Some(*f),
+                    FieldValue::Duration(d) => Some(*d),
+                    _ => None,
+                } {
+                    values.push(v);
+                }
+            }
+        }
+    }
+    // Current
+    if let Some(entry) = app.current.entries.get(source_key) {
+        if let Some(field) = entry.fields.iter().find(|f| f.name == field_name) {
+            if let Some(v) = match &field.value {
+                FieldValue::Bytes(b) => Some(*b as f64),
+                FieldValue::Integer(i) => Some(*i as f64),
+                FieldValue::Float(f) => Some(*f),
+                FieldValue::Duration(d) => Some(*d),
+                _ => None,
+            } {
+                values.push(v);
+            }
+        }
+    }
+
+    if values.is_empty() {
+        let p = Paragraph::new(" Collecting data...")
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(p, area);
+        return;
+    }
+
+    let min_v = values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_v = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let cur_v = *values.last().unwrap();
+    let range = max_v - min_v;
+
+    let sparkline_data: Vec<u64> = if range < f64::EPSILON {
+        vec![50; values.len()]
+    } else {
+        values.iter().map(|v| ((v - min_v) / range * 100.0) as u64).collect()
+    };
+
+    let title = format!(" {} ▸ min:{} max:{} cur:{} ({}) ",
+        field_name,
+        format_bytes_short(min_v as u64),
+        format_bytes_short(max_v as u64),
+        format_bytes_short(cur_v as u64),
+        values.len(),
+    );
+
+    let sparkline = ratatui::widgets::Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(title)
+            .border_style(Style::default().fg(Color::DarkGray)))
+        .data(&sparkline_data)
+        .style(Style::default().fg(Color::Cyan));
+    f.render_widget(sparkline, area);
 }
 
 fn make_bar(pct: u64, width: usize) -> String {
