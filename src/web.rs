@@ -1110,11 +1110,24 @@ document.addEventListener('keydown', (e) => {{
   // Global keys
   if (key === '/') {{ e.preventDefault(); S.searching = true; searchBox.focus(); return; }}
   if (key === 'D') {{ e.preventDefault(); S.setView('dashboard'); return; }}
-  if (key === 'O') {{ e.preventDefault(); S.setView('detail'); return; }}
+  if (key === 'O') {{ e.preventDefault(); S.setView('classic'); return; }}
+  if (key === 'W') {{ e.preventDefault(); S.setView('welcome'); return; }}
   if (key === 'X') {{ e.preventDefault(); S.setView('diagnostics'); return; }}
+  if (key === 'C') {{ e.preventDefault(); S.setView('category'); return; }}
   if (key === '?') {{ e.preventDefault(); S.cycleHelp(); return; }}
   if (key === 'L') {{ e.preventDefault(); S.toggleLang(); return; }}
   if (key === 'd') {{ e.preventDefault(); S.setView('diff'); return; }}
+  if (key === 'e') {{
+    e.preventDefault();
+    const json = JSON.stringify(S.snapshot, null, 2);
+    const blob = new Blob([json], {{type: 'application/json'}});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'syslenz_snapshot.json'; a.click();
+    URL.revokeObjectURL(url);
+    toast(S.t('exported'));
+    return;
+  }}
   if (key === 'a') {{ e.preventDefault(); S.autoRefresh = !S.autoRefresh; toast(S.autoRefresh ? 'Auto ON' : 'Auto OFF'); return; }}
   if (key === 'c') {{
     e.preventDefault();

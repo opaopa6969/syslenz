@@ -178,7 +178,11 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
 
             // Show drill-in indicator for table fields
             let name_display = if matches!(field.value, FieldValue::Table(_)) {
-                format!("{} [+]", field.name)
+                if app.locale == crate::i18n::Locale::Ja {
+                    format!("{} [Enter で展開]", field.name)
+                } else {
+                    format!("{} [Enter to expand]", field.name)
+                }
             } else {
                 field.name.clone()
             };
