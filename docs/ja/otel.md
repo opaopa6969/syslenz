@@ -5,9 +5,10 @@ lang: ja
 
 # OpenTelemetry 統合
 
+[🇬🇧 English](../en/otel.md)
+
 [<- 前: キーバインド](keybindings.md) | [Index](index.md) | [次: データソース ->](sources.md)
 
-[🇬🇧 English](../en/otel.md)
 
 ## 目次
 
@@ -35,12 +36,18 @@ cargo build --release --features otel
 
 ```bash
 # デフォルトエンドポイント (http://localhost:4317) に5秒間隔でエクスポート
+
+[🇬🇧 English](../en/otel.md)
 syslenz --otel
 
 # カスタムエンドポイント
+
+[🇬🇧 English](../en/otel.md)
 syslenz --otel http://otel-collector.example.com:4317
 
 # カスタム間隔 (10秒)
+
+[🇬🇧 English](../en/otel.md)
 syslenz --otel http://localhost:4317 --interval 10
 ```
 

@@ -5,9 +5,10 @@ lang: en
 
 # Classic Mode
 
+[🇯🇵 日本語版](../ja/classic-mode.md)
+
 [<- Prev: Dashboard](dashboard.md) | [Index](index.md) | [Next: Diagnostics ->](diagnostics.md)
 
-[🇯🇵 日本語版](../ja/classic-mode.md)
 
 ## Table of Contents
 

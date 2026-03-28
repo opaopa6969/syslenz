@@ -5,9 +5,10 @@ lang: ja
 
 # はじめに
 
+[🇬🇧 English](../en/getting-started.md)
+
 [<- 前: Index](index.md) | [Index](index.md) | [次: ダッシュボード ->](dashboard.md)
 
-[🇬🇧 English](../en/getting-started.md)
 
 ## 目次
 
@@ -43,15 +44,23 @@ syslenz には3つのオプションコンパイル時機能があります:
 
 ```bash
 # Web UI (バイナリサイズ約3MB増加、tokio + axum が必要)
+
+[🇬🇧 English](../en/getting-started.md)
 cargo build --release --features web
 
 # OpenTelemetry メトリクスエクスポート (tokio + OTLP クレートが必要)
+
+[🇬🇧 English](../en/getting-started.md)
 cargo build --release --features otel
 
 # X11 フローティングウィジェット
+
+[🇬🇧 English](../en/getting-started.md)
 cargo build --release --features x11widget
 
 # 全機能
+
+[🇬🇧 English](../en/getting-started.md)
 cargo build --release --features "web,otel,x11widget"
 ```
 
@@ -59,9 +68,13 @@ cargo build --release --features "web,otel,x11widget"
 
 ```bash
 # 対話的に実行
+
+[🇬🇧 English](../en/getting-started.md)
 docker run --rm -it --pid=host --privileged syslenz/syslenz
 
 # スナップショットをエクスポート
+
+[🇬🇧 English](../en/getting-started.md)
 docker run --rm --pid=host --privileged syslenz/syslenz --export /dev/stdout > snapshot.json
 ```
 
@@ -71,12 +84,18 @@ docker run --rm --pid=host --privileged syslenz/syslenz --export /dev/stdout > s
 
 ```bash
 # Docker Compose でビルド・実行 (TCPサーバーモード)
+
+[🇬🇧 English](../en/getting-started.md)
 docker compose up -d
 syslenz --connect localhost:9100
 
 # Web UI プロファイル
+
+[🇬🇧 English](../en/getting-started.md)
 docker compose --profile web up -d
 # http://localhost:3000 を開く
+
+[🇬🇧 English](../en/getting-started.md)
 ```
 
 Web UI をワンステップでビルド・起動する便利スクリプト `run-web.sh` も提供されています:
@@ -201,33 +220,53 @@ syslenz には複数レベルの組み込みヘルプシステムがあります
 
 ```bash
 # 基本的な対話的使用
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz
 
 # スナップショットのエクスポート
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --export snapshot.json
 
 # 60スナップショットを1秒間隔でキャプチャ
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --export-series ./data --interval 1 --count 60
 
 # リモートサーバーの監視
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --ssh admin@192.168.1.100
 
 # Dockerコンテナの監視
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --docker my-app-container
 
 # コンテナ内でTCPサーバーを起動
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --serve 0.0.0.0:9100
 
 # リモートTCPサーバーに接続
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --connect 192.168.1.100:9100
 
 # Web UIをポート8080で起動
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --web 8080
 
 # OTLPコレクターにメトリクスをエクスポート
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --otel http://otel-collector:4317 --interval 10
 
 # 日本語インターフェース
+
+[🇬🇧 English](../en/getting-started.md)
 syslenz --lang ja
 ```
 

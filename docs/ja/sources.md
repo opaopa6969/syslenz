@@ -5,9 +5,10 @@ lang: ja
 
 # データソースリファレンス
 
+[🇬🇧 English](../en/sources.md)
+
 [<- 前: OpenTelemetry](otel.md) | [Index](index.md)
 
-[🇬🇧 English](../en/sources.md)
 
 ## 目次
 

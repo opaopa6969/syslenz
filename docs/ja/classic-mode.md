@@ -5,9 +5,10 @@ lang: ja
 
 # クラシックモード
 
+[🇬🇧 English](../en/classic-mode.md)
+
 [<- 前: ダッシュボード](dashboard.md) | [Index](index.md) | [次: 自動診断 ->](diagnostics.md)
 
-[🇬🇧 English](../en/classic-mode.md)
 
 ## 目次
 

@@ -5,9 +5,10 @@ lang: en
 
 # Plugin System
 
+[🇯🇵 日本語版](../ja/plugins.md)
+
 [<- Prev: Web UI](web-ui.md) | [Index](index.md) | [Next: Configuration ->](config.md)
 
-[🇯🇵 日本語版](../ja/plugins.md)
 
 ## Table of Contents
 
@@ -218,12 +219,16 @@ A shell plugin that collects Docker container resource usage:
 #!/bin/bash
 # syslenz plugin: Docker container stats summary
 
+[🇯🇵 日本語版](../ja/plugins.md)
+
 if ! command -v docker &>/dev/null; then
     echo '{"source":"/custom/docker-stats","fields":[{"name":"status","value":{"Text":"docker not found"},"unit":null,"description":"Plugin status"}]}'
     exit 0
 fi
 
 # Get container stats (no-stream for single snapshot)
+
+[🇯🇵 日本語版](../ja/plugins.md)
 stats=$(docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}' 2>/dev/null)
 
 if [ -z "$stats" ]; then
@@ -232,6 +237,8 @@ if [ -z "$stats" ]; then
 fi
 
 # Build table rows
+
+[🇯🇵 日本語版](../ja/plugins.md)
 rows="["
 first=true
 while IFS=$'\t' read -r name cpu mem net; do
@@ -292,12 +299,18 @@ Plugins run in parallel with the main `/proc` parsing. Failed plugins are silent
 
 ```bash
 # Run the plugin directly
+
+[🇯🇵 日本語版](../ja/plugins.md)
 ~/.config/syslenz/plugins/my-plugin
 
 # Validate JSON
+
+[🇯🇵 日本語版](../ja/plugins.md)
 ~/.config/syslenz/plugins/my-plugin | python3 -m json.tool
 
 # Check exit code
+
+[🇯🇵 日本語版](../ja/plugins.md)
 ~/.config/syslenz/plugins/my-plugin; echo "Exit: $?"
 ```
 
@@ -306,6 +319,8 @@ Plugins run in parallel with the main `/proc` parsing. Failed plugins are silent
 ```bash
 ls -la ~/.config/syslenz/plugins/
 # Ensure +x is set on your plugin
+
+[🇯🇵 日本語版](../ja/plugins.md)
 ```
 
 ### Check syslenz stderr
@@ -315,6 +330,8 @@ Run syslenz in a terminal and watch stderr for plugin errors:
 ```bash
 syslenz 2>/tmp/syslenz-errors.log
 # After quitting:
+
+[🇯🇵 日本語版](../ja/plugins.md)
 cat /tmp/syslenz-errors.log
 ```
 

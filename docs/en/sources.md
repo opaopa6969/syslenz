@@ -5,9 +5,10 @@ lang: en
 
 # Data Sources Reference
 
+[🇯🇵 日本語版](../ja/sources.md)
+
 [<- Prev: OpenTelemetry](otel.md) | [Index](index.md)
 
-[🇯🇵 日本語版](../ja/sources.md)
 
 ## Table of Contents
 

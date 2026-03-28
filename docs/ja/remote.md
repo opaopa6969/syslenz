@@ -5,9 +5,10 @@ lang: ja
 
 # リモート監視
 
+[🇬🇧 English](../en/remote.md)
+
 [<- 前: 教育機能](education.md) | [Index](index.md) | [次: Web UI ->](web-ui.md)
 
-[🇬🇧 English](../en/remote.md)
 
 ## 目次
 
@@ -92,6 +93,8 @@ syslenz --docker container_name
 ```dockerfile
 FROM ubuntu:24.04
 # ... アプリのセットアップ ...
+
+[🇬🇧 English](../en/remote.md)
 COPY --from=syslenz/syslenz:latest /usr/local/bin/syslenz /usr/local/bin/syslenz
 ```
 
@@ -166,12 +169,18 @@ syslenz --connect your-docker-host:9100
 
 ```bash
 # ターミナル1
+
+[🇬🇧 English](../en/remote.md)
 syslenz --ssh web-server-1
 
 # ターミナル2
+
+[🇬🇧 English](../en/remote.md)
 syslenz --ssh web-server-2
 
 # ターミナル3
+
+[🇬🇧 English](../en/remote.md)
 syslenz --connect db-server:9100
 ```
 

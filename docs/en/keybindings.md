@@ -5,9 +5,10 @@ lang: en
 
 # Keybinding Reference
 
+[🇯🇵 日本語版](../ja/keybindings.md)
+
 [<- Prev: Configuration](config.md) | [Index](index.md) | [Next: OpenTelemetry ->](otel.md)
 
-[🇯🇵 日本語版](../ja/keybindings.md)
 
 ## Table of Contents
 

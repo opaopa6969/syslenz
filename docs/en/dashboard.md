@@ -5,9 +5,10 @@ lang: en
 
 # Dashboard View
 
+[🇯🇵 日本語版](../ja/dashboard.md)
+
 [<- Prev: Getting Started](getting-started.md) | [Index](index.md) | [Next: Classic Mode ->](classic-mode.md)
 
-[🇯🇵 日本語版](../ja/dashboard.md)
 
 ## Table of Contents
 

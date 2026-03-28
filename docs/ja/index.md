@@ -7,6 +7,7 @@ lang: ja
 
 [🇬🇧 English](../en/index.md)
 
+
 > **Wireshark for /proc** -- 構造化されたスキーマ駆動型システム情報ビューア
 
 syslenz は Linux の `/proc`、`/sys`、ネットワーク設定ファイルを型付きの構造化データにパースし、差分表示、時系列グラフ、自動診断、教育ガイド、JSON エクスポート/インポート機能を備えた高速 TUI で表示します。深夜3時の本番障害対応でも、Linux の仕組みの学習でも、syslenz はシステムに対する即座の構造化されたインサイトを提供します。
@@ -31,12 +32,18 @@ cargo install --path .
 
 ```bash
 # Web UI サポート
+
+[🇬🇧 English](../en/index.md)
 cargo install --path . --features web
 
 # OpenTelemetry エクスポート
+
+[🇬🇧 English](../en/index.md)
 cargo install --path . --features otel
 
 # 全機能
+
+[🇬🇧 English](../en/index.md)
 cargo install --path . --features "web,otel,x11widget"
 ```
 

@@ -5,9 +5,10 @@ lang: ja
 
 # プラグインシステム
 
+[🇬🇧 English](../en/plugins.md)
+
 [<- 前: Web UI](web-ui.md) | [Index](index.md) | [次: 設定 ->](config.md)
 
-[🇬🇧 English](../en/plugins.md)
 
 ## 目次
 
@@ -217,12 +218,16 @@ Dockerコンテナのリソース使用量を収集するシェルプラグイ�
 #!/bin/bash
 # syslenz プラグイン: Dockerコンテナ統計サマリー
 
+[🇬🇧 English](../en/plugins.md)
+
 if ! command -v docker &>/dev/null; then
     echo '{"source":"/custom/docker-stats","fields":[{"name":"status","value":{"Text":"docker が見つかりません"},"unit":null,"description":"プラグインステータス"}]}'
     exit 0
 fi
 
 # コンテナ統計を取得 (no-stream で単一スナップショット)
+
+[🇬🇧 English](../en/plugins.md)
 stats=$(docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}' 2>/dev/null)
 
 if [ -z "$stats" ]; then
@@ -231,6 +236,8 @@ if [ -z "$stats" ]; then
 fi
 
 # テーブル行を構築
+
+[🇬🇧 English](../en/plugins.md)
 rows="["
 first=true
 while IFS=$'\t' read -r name cpu mem net; do
@@ -291,12 +298,18 @@ syslenz が起動時（および各リフレッシュ時）に行うこと:
 
 ```bash
 # プラグインを直接実行
+
+[🇬🇧 English](../en/plugins.md)
 ~/.config/syslenz/plugins/my-plugin
 
 # JSONを検証
+
+[🇬🇧 English](../en/plugins.md)
 ~/.config/syslenz/plugins/my-plugin | python3 -m json.tool
 
 # 終了コードを確認
+
+[🇬🇧 English](../en/plugins.md)
 ~/.config/syslenz/plugins/my-plugin; echo "Exit: $?"
 ```
 
@@ -305,6 +318,8 @@ syslenz が起動時（および各リフレッシュ時）に行うこと:
 ```bash
 ls -la ~/.config/syslenz/plugins/
 # プラグインに +x が設定されていることを確認
+
+[🇬🇧 English](../en/plugins.md)
 ```
 
 ### syslenzのstderrを確認
@@ -314,6 +329,8 @@ ls -la ~/.config/syslenz/plugins/
 ```bash
 syslenz 2>/tmp/syslenz-errors.log
 # 終了後:
+
+[🇬🇧 English](../en/plugins.md)
 cat /tmp/syslenz-errors.log
 ```
 

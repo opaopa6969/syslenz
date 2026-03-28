@@ -5,9 +5,10 @@ lang: en
 
 # Auto-Diagnostics
 
+[🇯🇵 日本語版](../ja/diagnostics.md)
+
 [<- Prev: Classic Mode](classic-mode.md) | [Index](index.md) | [Next: Education ->](education.md)
 
-[🇯🇵 日本語版](../ja/diagnostics.md)
 
 ## Table of Contents
 

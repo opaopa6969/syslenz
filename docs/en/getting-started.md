@@ -5,9 +5,10 @@ lang: en
 
 # Getting Started
 
+[🇯🇵 日本語版](../ja/getting-started.md)
+
 [<- Prev: Index](index.md) | [Index](index.md) | [Next: Dashboard ->](dashboard.md)
 
-[🇯🇵 日本語版](../ja/getting-started.md)
 
 ## Table of Contents
 
@@ -43,15 +44,23 @@ syslenz has three optional compile-time features:
 
 ```bash
 # Web UI (adds ~3 MB to binary, requires tokio + axum)
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 cargo build --release --features web
 
 # OpenTelemetry metrics export (requires tokio + OTLP crate)
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 cargo build --release --features otel
 
 # X11 floating widget
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 cargo build --release --features x11widget
 
 # Everything
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 cargo build --release --features "web,otel,x11widget"
 ```
 
@@ -59,9 +68,13 @@ cargo build --release --features "web,otel,x11widget"
 
 ```bash
 # Run interactively
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 docker run --rm -it --pid=host --privileged syslenz/syslenz
 
 # Export a snapshot
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 docker run --rm --pid=host --privileged syslenz/syslenz --export /dev/stdout > snapshot.json
 ```
 
@@ -71,12 +84,18 @@ The repository includes a `Dockerfile` for building a minimal container image an
 
 ```bash
 # Build and run with Docker Compose (TCP server mode)
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 docker compose up -d
 syslenz --connect localhost:9100
 
 # Web UI profile
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 docker compose --profile web up -d
 # Open http://localhost:3000
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 ```
 
 A convenience script `run-web.sh` is also provided to build and launch the Web UI in one step:
@@ -201,33 +220,53 @@ When help is active, a panel appears at the bottom of the screen showing context
 
 ```bash
 # Basic interactive use
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz
 
 # Export a snapshot
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --export snapshot.json
 
 # Capture 60 snapshots, 1 per second
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --export-series ./data --interval 1 --count 60
 
 # Monitor a remote server
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --ssh admin@192.168.1.100
 
 # Monitor a Docker container
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --docker my-app-container
 
 # Start a TCP server inside a container
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --serve 0.0.0.0:9100
 
 # Connect to a remote TCP server
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --connect 192.168.1.100:9100
 
 # Start the web UI on port 8080
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --web 8080
 
 # Export metrics to an OTLP collector
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --otel http://otel-collector:4317 --interval 10
 
 # Japanese interface
+
+[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --lang ja
 ```
 

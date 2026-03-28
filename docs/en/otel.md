@@ -5,9 +5,10 @@ lang: en
 
 # OpenTelemetry Integration
 
+[🇯🇵 日本語版](../ja/otel.md)
+
 [<- Prev: Keybindings](keybindings.md) | [Index](index.md) | [Next: Data Sources ->](sources.md)
 
-[🇯🇵 日本語版](../ja/otel.md)
 
 ## Table of Contents
 
@@ -35,12 +36,18 @@ cargo build --release --features otel
 
 ```bash
 # Export to default endpoint (http://localhost:4317) every 5 seconds
+
+[🇯🇵 日本語版](../ja/otel.md)
 syslenz --otel
 
 # Custom endpoint
+
+[🇯🇵 日本語版](../ja/otel.md)
 syslenz --otel http://otel-collector.example.com:4317
 
 # Custom interval (10 seconds)
+
+[🇯🇵 日本語版](../ja/otel.md)
 syslenz --otel http://localhost:4317 --interval 10
 ```
 

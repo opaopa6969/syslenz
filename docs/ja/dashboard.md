@@ -5,9 +5,10 @@ lang: ja
 
 # ダッシュボード表示
 
+[🇬🇧 English](../en/dashboard.md)
+
 [<- 前: はじめに](getting-started.md) | [Index](index.md) | [次: クラシックモード ->](classic-mode.md)
 
-[🇬🇧 English](../en/dashboard.md)
 
 ## 目次
 

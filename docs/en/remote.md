@@ -5,9 +5,10 @@ lang: en
 
 # Remote Monitoring
 
+[🇯🇵 日本語版](../ja/remote.md)
+
 [<- Prev: Education](education.md) | [Index](index.md) | [Next: Web UI ->](web-ui.md)
 
-[🇯🇵 日本語版](../ja/remote.md)
 
 ## Table of Contents
 
@@ -92,6 +93,8 @@ syslenz --docker container_name
 ```dockerfile
 FROM ubuntu:24.04
 # ... your app setup ...
+
+[🇯🇵 日本語版](../ja/remote.md)
 COPY --from=syslenz/syslenz:latest /usr/local/bin/syslenz /usr/local/bin/syslenz
 ```
 
@@ -166,12 +169,18 @@ You can run multiple syslenz instances with different remote targets. While sysl
 
 ```bash
 # Terminal 1
+
+[🇯🇵 日本語版](../ja/remote.md)
 syslenz --ssh web-server-1
 
 # Terminal 2
+
+[🇯🇵 日本語版](../ja/remote.md)
 syslenz --ssh web-server-2
 
 # Terminal 3
+
+[🇯🇵 日本語版](../ja/remote.md)
 syslenz --connect db-server:9100
 ```
 

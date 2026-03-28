@@ -5,9 +5,10 @@ lang: ja
 
 # Web UI
 
+[🇬🇧 English](../en/web-ui.md)
+
 [<- 前: リモート監視](remote.md) | [Index](index.md) | [次: プラグイン ->](plugins.md)
 
-[🇬🇧 English](../en/web-ui.md)
 
 ## 目次
 
@@ -45,12 +46,18 @@ cargo build --release --features web
 
 ```bash
 # デフォルトポート (3000)
+
+[🇬🇧 English](../en/web-ui.md)
 syslenz --web
 
 # カスタムポート
+
+[🇬🇧 English](../en/web-ui.md)
 syslenz --web 8080
 
 # 日本語ロケール
+
+[🇬🇧 English](../en/web-ui.md)
 syslenz --web 8080 --lang ja
 ```
 

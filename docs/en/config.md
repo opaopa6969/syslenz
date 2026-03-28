@@ -5,9 +5,10 @@ lang: en
 
 # Configuration Reference
 
+[🇯🇵 日本語版](../ja/config.md)
+
 [<- Prev: Plugins](plugins.md) | [Index](index.md) | [Next: Keybindings ->](keybindings.md)
 
-[🇯🇵 日本語版](../ja/config.md)
 
 ## Table of Contents
 
@@ -133,34 +134,54 @@ hosts = [
 
 ```toml
 # syslenz configuration
+
+[🇯🇵 日本語版](../ja/config.md)
 # Location: ~/.config/syslenz/config.toml
+
+[🇯🇵 日本語版](../ja/config.md)
 
 [general]
 # Interface language: "en" or "ja"
+
+[🇯🇵 日本語版](../ja/config.md)
 lang = "en"
 
 # Auto-refresh interval (milliseconds)
+
+[🇯🇵 日本語版](../ja/config.md)
 interval_ms = 1000
 
 # Starting view: "dashboard" or "classic"
+
+[🇯🇵 日本語版](../ja/config.md)
 default_view = "dashboard"
 
 # Number of snapshots to keep for graphs
+
+[🇯🇵 日本語版](../ja/config.md)
 history_size = 60
 
 [otel]
 # OTLP gRPC endpoint
+
+[🇯🇵 日本語版](../ja/config.md)
 endpoint = "http://otel-collector.local:4317"
 
 # Metric push interval (seconds)
+
+[🇯🇵 日本語版](../ja/config.md)
 interval_secs = 10
 
 [web]
 # Web UI port
+
+[🇯🇵 日本語版](../ja/config.md)
 port = 8080
 
 [ssh]
 # Pre-configured remote hosts
+
+[🇯🇵 日本語版](../ja/config.md)
 hosts = [
     "admin@prod-web-01",
     "admin@prod-web-02",

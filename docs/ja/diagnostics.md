@@ -5,9 +5,10 @@ lang: ja
 
 # 自動診断
 
+[🇬🇧 English](../en/diagnostics.md)
+
 [<- 前: クラシックモード](classic-mode.md) | [Index](index.md) | [次: 教育機能 ->](education.md)
 
-[🇬🇧 English](../en/diagnostics.md)
 
 ## 目次
 

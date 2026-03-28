@@ -7,6 +7,7 @@ lang: en
 
 [🇯🇵 日本語版](../ja/index.md)
 
+
 > **Wireshark for /proc** -- a structured, schema-driven system information viewer
 
 syslenz parses every `/proc`, `/sys`, and network configuration file on Linux into typed, structured data and presents it in a fast TUI with diffing, time-series graphs, auto-diagnostics, educational guides, and JSON export/import. Whether you are debugging a production incident at 3 AM or learning how Linux works, syslenz gives you immediate, structured insight into your system.
@@ -31,12 +32,18 @@ cargo install --path .
 
 ```bash
 # Web UI support
+
+[🇯🇵 日本語版](../ja/index.md)
 cargo install --path . --features web
 
 # OpenTelemetry export
+
+[🇯🇵 日本語版](../ja/index.md)
 cargo install --path . --features otel
 
 # All features
+
+[🇯🇵 日本語版](../ja/index.md)
 cargo install --path . --features "web,otel,x11widget"
 ```
 

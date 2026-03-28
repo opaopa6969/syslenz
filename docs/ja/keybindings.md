@@ -5,9 +5,10 @@ lang: ja
 
 # キーバインドリファレンス
 
+[🇬🇧 English](../en/keybindings.md)
+
 [<- 前: 設定](config.md) | [Index](index.md) | [次: OpenTelemetry ->](otel.md)
 
-[🇬🇧 English](../en/keybindings.md)
 
 ## 目次
 

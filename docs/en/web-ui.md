@@ -5,9 +5,10 @@ lang: en
 
 # Web UI
 
+[🇯🇵 日本語版](../ja/web-ui.md)
+
 [<- Prev: Remote Monitoring](remote.md) | [Index](index.md) | [Next: Plugins ->](plugins.md)
 
-[🇯🇵 日本語版](../ja/web-ui.md)
 
 ## Table of Contents
 
@@ -45,12 +46,18 @@ cargo build --release --features web
 
 ```bash
 # Default port (3000)
+
+[🇯🇵 日本語版](../ja/web-ui.md)
 syslenz --web
 
 # Custom port
+
+[🇯🇵 日本語版](../ja/web-ui.md)
 syslenz --web 8080
 
 # With Japanese locale
+
+[🇯🇵 日本語版](../ja/web-ui.md)
 syslenz --web 8080 --lang ja
 ```
 

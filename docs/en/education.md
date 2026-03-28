@@ -5,9 +5,10 @@ lang: en
 
 # Education: Category Guides and Help Levels
 
+[🇯🇵 日本語版](../ja/education.md)
+
 [<- Prev: Diagnostics](diagnostics.md) | [Index](index.md) | [Next: Remote Monitoring ->](remote.md)
 
-[🇯🇵 日本語版](../ja/education.md)
 
 ## Table of Contents
 

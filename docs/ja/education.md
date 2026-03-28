@@ -5,9 +5,10 @@ lang: ja
 
 # 教育機能: カテゴリガイドとヘルプレベル
 
+[🇬🇧 English](../en/education.md)
+
 [<- 前: 自動診断](diagnostics.md) | [Index](index.md) | [次: リモート監視 ->](remote.md)
 
-[🇬🇧 English](../en/education.md)
 
 ## 目次
 
