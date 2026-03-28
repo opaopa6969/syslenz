@@ -513,7 +513,7 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(5),  // CPU stat (bar graphs)
             Constraint::Length(9),  // net/dev
             Constraint::Length(3),  // disk + temp + fd
-            Constraint::Min(1),    // padding
+            Constraint::Min(4),    // sparkline graphs
         ])
         .split(area);
 
@@ -696,6 +696,72 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: Rect) {
             .title(if l == crate::i18n::Locale::Ja { " ディスク / 温度 / FD " } else { " Disk / Temp / FD " })
             .border_style(sec4_style));
     f.render_widget(p, sections[4]);
+
+    // Section 5: Sparkline graphs (load + memory history)
+    if sections.len() > 5 && sections[5].height >= 4 {
+        let graph_area = sections[5];
+        let graph_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ])
+            .split(graph_area);
+
+        // Load history sparkline
+        let load_data: Vec<u64> = app.snapshots.iter()
+            .chain(std::iter::once(&app.current))
+            .filter_map(|snap| {
+                snap.entries.get("loadavg")
+                    .and_then(|e| e.fields.iter().find(|f| f.name == "load_1min"))
+                    .and_then(|f| match f.value {
+                        FieldValue::Float(v) => Some((v * 100.0) as u64),
+                        _ => None,
+                    })
+            })
+            .collect();
+
+        let load_title = if l == crate::i18n::Locale::Ja {
+            format!(" 負荷 ({}件) ", load_data.len())
+        } else {
+            format!(" Load ({} pts) ", load_data.len())
+        };
+        let load_sparkline = ratatui::widgets::Sparkline::default()
+            .block(Block::default().borders(Borders::ALL).title(load_title)
+                .border_style(Style::default().fg(Color::DarkGray)))
+            .data(&load_data)
+            .style(Style::default().fg(Color::Yellow));
+        f.render_widget(load_sparkline, graph_chunks[0]);
+
+        // Memory usage % history sparkline
+        let mem_data: Vec<u64> = app.snapshots.iter()
+            .chain(std::iter::once(&app.current))
+            .filter_map(|snap| {
+                let total = snap.entries.get("meminfo")
+                    .and_then(|e| e.fields.iter().find(|f| f.name == "MemTotal"))
+                    .and_then(|f| match f.value { FieldValue::Bytes(v) => Some(v), _ => None })
+                    .unwrap_or(1);
+                let avail = snap.entries.get("meminfo")
+                    .and_then(|e| e.fields.iter().find(|f| f.name == "MemAvailable"))
+                    .and_then(|f| match f.value { FieldValue::Bytes(v) => Some(v), _ => None })
+                    .unwrap_or(0);
+                let used_pct = if total > 0 { ((total - avail) as f64 / total as f64 * 100.0) as u64 } else { 0 };
+                Some(used_pct)
+            })
+            .collect();
+
+        let mem_title = if l == crate::i18n::Locale::Ja {
+            format!(" メモリ使用率 ({}件) ", mem_data.len())
+        } else {
+            format!(" Memory % ({} pts) ", mem_data.len())
+        };
+        let mem_sparkline = ratatui::widgets::Sparkline::default()
+            .block(Block::default().borders(Borders::ALL).title(mem_title)
+                .border_style(Style::default().fg(Color::DarkGray)))
+            .data(&mem_data)
+            .style(Style::default().fg(Color::Green));
+        f.render_widget(mem_sparkline, graph_chunks[1]);
+    }
 }
 
 fn make_bar(pct: u64, width: usize) -> String {
