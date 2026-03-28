@@ -1,0 +1,46 @@
+[package]
+name = "syslenz"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+description = "Wireshark for /proc — explore Linux system information as structured, typed data"
+repository = "https://github.com/opaopa6969/syslenz"
+homepage = "https://github.com/opaopa6969/syslenz"
+keywords = ["linux", "proc", "tui", "system-monitor", "sysadmin"]
+categories = ["command-line-utilities", "os::linux-apis"]
+
+[features]
+default = []
+otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tokio"]
+web = ["axum", "tokio", "tower-http", "tokio-stream"]
+x11widget = ["x11rb"]
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+anyhow = "1"
+libc = "0.2"
+
+# OpenTelemetry (optional)
+opentelemetry = { version = "0.28", optional = true }
+opentelemetry_sdk = { version = "0.28", optional = true, features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", optional = true, features = ["grpc-tonic", "metrics"] }
+
+# Async runtime (shared by otel + web)
+tokio = { version = "1", optional = true, features = ["full"] }
+
+# Web UI (optional)
+axum = { version = "0.8", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["cors"] }
+
+# Tokio stream utilities (for web SSE)
+tokio-stream = { version = "0.1", optional = true, features = ["sync"] }
+
+# X11 widget (optional)
+x11rb = { version = "0.13", optional = true, features = ["allow-unsafe-code"] }
+
+[dev-dependencies]
+tempfile = "3"

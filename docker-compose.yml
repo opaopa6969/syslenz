@@ -1,0 +1,33 @@
+# syslenz Docker Compose
+#
+# Start server:
+#   docker compose up -d
+#
+# Connect from host:
+#   syslenz --connect localhost:9100
+#
+# Web UI (if built with --features web):
+#   docker compose --profile web up -d
+#   open http://localhost:3000
+
+services:
+  syslenz:
+    build: .
+    ports:
+      - "9100:9100"
+    pid: "host"        # Access host /proc
+    read_only: true
+    command: ["--serve", "0.0.0.0:9100"]
+
+  syslenz-web:
+    build:
+      context: .
+      args:
+        FEATURES: web
+    ports:
+      - "3000:3000"
+    pid: "host"
+    read_only: true
+    command: ["--web", "3000"]
+    profiles:
+      - web
