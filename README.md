@@ -2,7 +2,11 @@
 
 > Wireshark for Linux — explore /proc, /sys, and network as structured, typed data.
 
-![demo](docs/assets/demo.gif)
+### TUI
+![TUI demo](docs/assets/demo.gif)
+
+### Web UI
+![Web UI demo](docs/assets/web-demo.gif)
 
 **Zero config. One binary. Full JSON export.**
 
