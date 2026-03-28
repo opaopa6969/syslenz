@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: ja
 ---
 
@@ -22,7 +22,7 @@ lang: ja
 
 ## 概要
 
-syslenz は全ての数値システムメトリクスを OpenTelemetry Protocol (OTLP) 互換の任意のバックエンドにエクスポートできます。設定可能な間隔でスナップショットをキャプチャし、gRPC経由でゲージメトリクスをプッシュするヘッドレスデーモン（TUIなし）として動作します。
+syslenz は全数値メトリクスを OpenTelemetry Protocol (OTLP) 対応の任意のバックエンドにエクスポートできます。設定した間隔でスナップショットをキャプチャし、gRPC経由でゲージメトリクスをプッシュするヘッドレスデーモン（TUIなし）として動作します。
 
 OTEL機能はコンパイル時のオプトインが必要です:
 
@@ -67,12 +67,12 @@ Rebuild with: cargo build --features otel
 
 ## エクスポートされるメトリクス
 
-syslenz は全データソースの**全ての数値フィールド**をOTLPゲージメトリクスとしてエクスポートします:
+syslenz は全データソースの**全数値フィールド**をOTLPゲージメトリクスとしてエクスポートします:
 
-- 全ての `Bytes` フィールド（`f64` としてエクスポート）
-- 全ての `Integer` フィールド（`f64` としてエクスポート）
-- 全ての `Float` フィールド
-- 全ての `Duration` フィールド（秒単位、`f64` として）
+- 全 `Bytes` フィールド（`f64` としてエクスポート）
+- 全 `Integer` フィールド（`f64` としてエクスポート）
+- 全 `Float` フィールド
+- 全 `Duration` フィールド（秒単位、`f64`）
 
 非数値フィールド（`Text`、`Table`）はスキップされます。
 
@@ -86,7 +86,7 @@ syslenz は全データソースの**全ての数値フィールド**をOTLPゲ�
 - プレッシャー (cpu_some_avg10, memory_some_avg10, io_some_avg10 等)
 - サーマル (max_temp, ゾーンごとの温度)
 - ファイルディスクリプタ (allocated_fds, max_fds, fd_usage_pct)
-- その他55以上のソースからの全て
+- その他55以上のソースから全て
 
 ## メトリクス命名規則
 
@@ -108,11 +108,11 @@ syslenz.<source>.<field_name>
 | `df` | `root_use_pct` | `syslenz.df.root_use_pct` |
 | `thermal` | `max_temp` | `syslenz.thermal.max_temp` |
 
-全メトリクスはOTLPゲージ（カウンターやヒストグラムではない）としてエクスポートされます。スナップショット値は時点の状態を表すためです。
+全メトリクスはOTLPゲージ（カウンターやヒストグラムではない）としてエクスポートされます。スナップショット値はその時点の状態を表すためです。
 
 ## Docker Compose と Prometheus + Grafana
 
-syslenz をメトリクスソースとして使用する完全な監視スタック:
+syslenz をメトリクスソースとした完全な監視スタック:
 
 ```yaml
 version: "3.8"
@@ -213,19 +213,19 @@ scrape_configs:
 | 型 | 全てゲージ | ゲージ + カウンター |
 | セットアップ | 単一バイナリ | 単一バイナリ |
 | カスタムソース | プラグインシステム | カスタムコレクター |
-| 構造化データ | スキーマ駆動型 | 生のfloat値 |
+| 構造化データ | スキーマ駆動 | 生のfloat値 |
 | TUI | あり（同じバイナリ） | なし |
 | 教育コンテンツ | 組み込み | なし |
 
-**syslenz OTELを使うべき場合:**
-- 対話的な監視にすでにsyslenzを使用しており、同じデータをダッシュボードにも欲しい
-- OTLP対応バックエンド（Datadog、Honeycomb、Grafana Cloudなど）を使用している
+**syslenz OTELが向いている場合:**
+- 対話的な監視にすでに syslenz を使っており、同じデータをダッシュボードにも欲しい
+- OTLP対応バックエンド（Datadog、Honeycomb、Grafana Cloudなど）を使っている
 - カスタムメトリクス用のプラグインシステムが欲しい
 
-**node_exporterを使うべき場合:**
-- 明確に定義された型（カウンター vs ゲージ）の本番向け堅牢なメトリクスが欲しい
+**node_exporterが向いている場合:**
+- 型が明確に定義された（カウンター vs ゲージ）本番向けの堅牢なメトリクスが欲しい
 - 特定のコレクター（systemd、textfile、NTP）が必要
-- 純粋なPrometheusエコシステム内にいる
+- 純粋なPrometheusエコシステムを使っている
 
 ## 設定
 
@@ -237,7 +237,7 @@ endpoint = "http://otel-collector:4317"
 interval_secs = 10
 ```
 
-CLIフラグは設定値を上書きします。詳細は[設定リファレンス](config.md)を参照してください。
+CLIフラグは設定値より優先されます。詳細は[設定リファレンス](config.md)を参照してください。
 
 ---
 

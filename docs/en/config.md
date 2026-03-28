@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -19,6 +19,7 @@ lang: en
   - [otel](#otel)
   - [web](#web)
   - [ssh](#ssh)
+  - [alert](#alert-v110)
 - [Complete Example](#complete-example)
 - [Minimal Example](#minimal-example)
 
@@ -129,6 +130,54 @@ hosts = [
 
 **Notes:**
 - This field is reserved for future multi-host monitoring support. Currently, use `--ssh` CLI flag for single-host monitoring.
+
+### `[[alert]]` (v1.1.0)
+
+As of v1.1.0, you can define custom alert rules using TOML array-of-tables syntax. Each `[[alert]]` entry specifies a data source, a field name, a comparison operator, and a threshold value. When the condition is met, syslenz highlights the alert in multiple places:
+
+- **Status bar** -- an alert summary (e.g., `ALERT: 2 active`) appears in the status bar
+- **Sidebar coloring** -- sources with active alerts are colored to stand out
+- **Field markers** -- individual fields that triggered an alert are marked in the detail view
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `source` | String | Yes | Data source name (e.g., `"meminfo"`, `"loadavg"`) |
+| `field` | String | Yes | Field name within the source (e.g., `"MemAvailable"`, `"load1"`) |
+| `op` | String | Yes | Comparison operator: `">"`, `">="`, `"<"`, `"<="`, `"=="`, `"!="` |
+| `value` | Float | Yes | Threshold value to compare against |
+| `label` | String | No | Optional human-readable label for the alert |
+
+```toml
+# Alert when available memory drops below 500 MB (in kB)
+[[alert]]
+source = "meminfo"
+field = "MemAvailable"
+op = "<"
+value = 512000.0
+label = "Low memory"
+
+# Alert when 1-minute load exceeds 8
+[[alert]]
+source = "loadavg"
+field = "load1"
+op = ">"
+value = 8.0
+label = "High load"
+
+# Alert when root disk usage exceeds 90%
+[[alert]]
+source = "df"
+field = "use_percent"
+op = ">"
+value = 90.0
+label = "Disk almost full"
+```
+
+**Notes:**
+- Alert rules are evaluated on every snapshot refresh
+- Multiple alerts can fire simultaneously; all active alerts are shown in the status bar
+- Alerts integrate with the existing diagnostics engine but are user-configurable, allowing you to set thresholds appropriate for your environment
+- Field values are compared as floating-point numbers; text fields cannot be used with alerts
 
 ## Complete Example
 

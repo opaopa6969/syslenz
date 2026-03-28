@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -89,6 +89,18 @@ The Web UI serves a single-page application with a dashboard similar to the TUI:
 - **Process summary** with state counts
 
 The page auto-updates every second via Server-Sent Events (SSE) -- no manual refresh needed.
+
+### ViewData Unified UI (v1.1.0)
+
+As of v1.1.0, the TUI and Web UI render from the same `ViewData` structure. This means the data you see in the browser is identical to what you see in the terminal -- same fields, same formatting, same diagnostics output. This unified approach ensures consistency and eliminates discrepancies between the two interfaces.
+
+### Web UI Improvements (v1.1.0)
+
+v1.1.0 introduces several Web UI enhancements:
+
+- **Auto-graph for numeric fields** -- numeric values in the web dashboard automatically render inline graphs showing recent history, similar to the TUI sparkline feature
+- **PgUp/PgDn keyboard navigation** -- the web interface now supports `PageUp` and `PageDown` keys for scrolling through long field lists and tables, matching TUI behavior
+- **Category Guide from server** -- the educational Category Guide content (Memory, CPU, Network, Storage, Process stories) is now served directly from the backend via the `/api/view?view=category` endpoint, making the full learning experience available in the browser
 
 ## Real-Time Streaming
 

@@ -1,7 +1,7 @@
 /target
-/DGE
 node_modules/
 package.json
 package-lock.json
 tests/videos/
 *:Zone.Identifier
+design-materials/intake/

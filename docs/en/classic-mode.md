@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -15,9 +15,13 @@ lang: en
 - [Overview](#overview)
 - [Sidebar Navigation](#sidebar-navigation)
 - [Detail View](#detail-view)
+  - [\[Enter to expand\] Indicator (v1.1.0)](#enter-to-expand-indicator-v110)
+  - [Auto-Sparkline (v1.1.0)](#auto-sparkline-v110)
 - [Table Drill-In](#table-drill-in)
 - [Search](#search)
+  - [Visible Search Bar (v1.1.0)](#visible-search-bar-v110)
 - [Diff View](#diff-view)
+  - [Time-Travel Diff (v1.1.0)](#time-travel-diff-v110)
 - [Graph View](#graph-view)
 - [Export and Copy](#export-and-copy)
 
@@ -75,6 +79,14 @@ syslenz parses every value into one of six typed variants:
 | **Duration** | Days, hours, minutes, seconds | `3d 14h 22m` |
 | **Table** | Row count indicator | `[256 rows]` |
 
+### [Enter to expand] Indicator (v1.1.0)
+
+As of v1.1.0, fields with a Table type display an `[Enter to expand]` indicator next to the row count. This makes it immediately obvious to new users that they can drill into table data, improving discoverability without requiring knowledge of keybindings.
+
+### Auto-Sparkline (v1.1.0)
+
+As of v1.1.0, numeric fields (Bytes, Integer, Float) in the Detail view automatically display a small sparkline graph (`▁▂▃▅▇`) below the current value. The sparkline shows the recent history of that field from the ring buffer, giving you an instant visual trend without needing to open the full Graph view. This works for any numeric field and updates in real time when auto-refresh is enabled.
+
 ## Table Drill-In
 
 When a field has a Table type (e.g., `net/tcp` connections, `processes` list, `mounts` entries), press `Enter` to open the table view. This shows the data in a scrollable table with columns.
@@ -102,6 +114,10 @@ Search filters the sidebar source list. For example, typing `net` shows only sou
 
 After applying a search, the sidebar shows only matching sources. Press `Esc` or clear the search to restore the full list.
 
+### Visible Search Bar (v1.1.0)
+
+As of v1.1.0, pressing `/` displays a visible search input with a blinking cursor in the status bar at the bottom of the screen. This makes it immediately clear that search mode is active and shows your typed query in real time as you filter the source list.
+
 ## Diff View
 
 Press `d` to enter Diff view. This compares the current snapshot with the previous one and highlights changes:
@@ -116,7 +132,15 @@ Diff view is essential for understanding system dynamics: which counters are inc
 |-----|--------|
 | `j` / `k` | Scroll through diff entries |
 | `PageUp` / `PageDown` | Scroll by page |
+| `[` | Compare with an older snapshot (time-travel back) |
+| `]` | Compare with a newer snapshot (time-travel forward) |
 | `Backspace` | Return to previous view |
+
+### Time-Travel Diff (v1.1.0)
+
+As of v1.1.0, Diff view supports **time-travel**: press `[` to step back to an older snapshot pair or `]` to step forward to a newer one. A **T-N indicator** is displayed in the status bar (e.g., `T-3` means you are comparing the snapshot from 3 refreshes ago with the one before it). This lets you review historical changes without leaving the TUI, which is invaluable for post-incident analysis when you want to pinpoint exactly when a value changed.
+
+When you reach the oldest available snapshot pair, `[` has no further effect; likewise `]` stops at the most recent pair.
 
 **Tip:** Enable auto-refresh (`a`) and switch to diff view to watch your system change in real time. This is particularly useful for monitoring `vmstat` counters, `net/dev` traffic, and `diskstats` I/O.
 

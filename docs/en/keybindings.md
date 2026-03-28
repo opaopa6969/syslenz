@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -105,6 +105,8 @@ These keys work in all views.
 | `j` / `k` | Scroll diff entries down / up |
 | Arrow Down / Up | Scroll diff entries down / up |
 | `PageUp` / `PageDown` | Scroll by page |
+| `[` | Time-travel back: compare with an older snapshot pair (T-N indicator) |
+| `]` | Time-travel forward: compare with a newer snapshot pair |
 | `Backspace` | Return to previous view |
 
 ## Graph View Keys

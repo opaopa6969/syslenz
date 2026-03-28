@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -15,6 +15,8 @@ lang: en
 - [Overview](#overview)
 - [Dashboard Sections](#dashboard-sections)
 - [Section Navigation](#section-navigation)
+- [AA Bar Graphs (v1.1.0)](#aa-bar-graphs-v110)
+- [Sparkline Graphs (v1.1.0)](#sparkline-graphs-v110)
 - [Understanding Each Metric](#understanding-each-metric)
 - [Drilling Into Details](#drilling-into-details)
 - [Customization](#customization)
@@ -52,6 +54,29 @@ In the Dashboard view:
 | `D` | Return to Dashboard from any view |
 
 The currently selected section is highlighted. Pressing `Enter` switches to Classic mode with the corresponding data source pre-selected.
+
+## AA Bar Graphs (v1.1.0)
+
+As of v1.1.0, the Dashboard displays **ASCII-art bar graphs** for RAM, Swap, and CPU utilization. Each metric shows a proportional bar using block characters:
+
+```
+RAM  [████████████░░░░░░░░] 62%
+Swap [██░░░░░░░░░░░░░░░░░░]  8%
+CPU  [██████░░░░░░░░░░░░░░] 31%
+```
+
+The filled blocks (`█`) represent the used portion and the empty blocks (`░`) represent the free portion. This gives you an instant visual sense of resource pressure without reading numbers.
+
+## Sparkline Graphs (v1.1.0)
+
+As of v1.1.0, the Dashboard includes **sparkline graphs** for load average and memory history. These use Unicode sparkline characters (`▁▂▃▄▅▆▇█`) to show the trend of the last N snapshots (controlled by `history_size` in config) directly inline:
+
+```
+Load 1m: 2.41  ▁▂▃▃▄▅▅▆▇▇█▇▆▅▄▃▃▂▂▁
+MemUsed: 62%   ▅▅▅▅▆▆▆▆▅▅▅▆▆▇▇▆▆▅▅▅
+```
+
+Sparklines update in real time when auto-refresh is enabled, providing a compact time-series visualization without leaving the Dashboard.
 
 ## Understanding Each Metric
 

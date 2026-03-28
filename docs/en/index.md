@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -73,6 +73,19 @@ Download the latest release from the [GitHub Releases](https://github.com/opaopa
 - **OpenTelemetry export** -- push all numeric metrics to any OTLP-compatible backend
 - **Bilingual** -- full English and Japanese support (switch with `L` key or `--lang`)
 - **Keyboard-driven TUI** -- sidebar navigation, drill-in, search, copy to clipboard
+
+## What's New in v1.1.0
+
+- **Time-travel diff** -- use `[` and `]` keys in Diff view to compare with older or newer snapshots, with a T-N indicator showing which snapshot pair you are viewing
+- **Alert system** -- define custom `[[alert]]` rules in config.toml to monitor field thresholds; alerts appear in the status bar, color the sidebar, and mark individual fields
+- **AA bar graphs in Dashboard** -- RAM, Swap, and CPU sections now display ASCII-art bar graphs (`████░░░░`) for instant visual resource utilization
+- **Sparkline graphs in Dashboard** -- load average and memory history are visualized with sparkline characters (`▁▂▃▄▅▆▇█`) directly in the dashboard
+- **Auto-sparkline in Detail view** -- numeric fields in Classic mode automatically display a sparkline graph below the value, showing recent history at a glance
+- **Visible search bar** -- pressing `/` now shows a search input with a visible cursor in the status bar, making it clear that search mode is active
+- **[Enter to expand] indicator** -- table-type fields in the detail view now display an `[Enter to expand]` hint, making discoverability easier for new users
+- **ViewData unified UI** -- the TUI and Web UI now render from the same `ViewData` structure, ensuring identical data presentation across both interfaces
+- **Web UI improvements** -- auto-graph rendering for numeric fields, PgUp/PgDn keyboard navigation, and Category Guide served directly from the server
+- **i18n expansion** -- internationalization coverage has grown to 390 out of 600 fields with translated descriptions
 
 ## Document Index
 

@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -20,6 +20,7 @@ lang: en
 - [Network Story](#network-story)
 - [Storage Story](#storage-story)
 - [Process Story](#process-story)
+- [Internationalization Coverage (v1.1.0)](#internationalization-coverage-v110)
 - [Learning Paths](#learning-paths)
 
 ## Overview
@@ -152,6 +153,18 @@ The Process guide covers process states, resource consumption, and file descript
 - Zombie processes indicate parents not calling `wait()`
 - D-state processes are stuck in I/O and cannot be killed
 - `file-nr` tracks system-wide file descriptor usage
+
+## Internationalization Coverage (v1.1.0)
+
+As of v1.1.0, syslenz's bilingual field descriptions have been expanded to cover **390 out of 600 fields** (65%). This means the majority of field names, units, and human-readable descriptions are now available in both English and Japanese. The remaining fields fall back to English descriptions when Japanese is selected.
+
+Coverage by subsystem:
+- Memory, CPU, Load, Swap: near-complete coverage
+- Network (TCP, UDP, dev, sockstat, SNMP): substantial coverage
+- Disk, Processes, Thermal: substantial coverage
+- Less common sources (buddyinfo, pagetypeinfo, schedstat): partial coverage
+
+Press `L` to switch languages at runtime and see translated descriptions for covered fields.
 
 ## Learning Paths
 

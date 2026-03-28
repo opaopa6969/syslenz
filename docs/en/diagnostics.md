@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: en
 ---
 
@@ -28,6 +28,7 @@ lang: en
   - [File Descriptors](#file-descriptors)
   - [DNS](#dns)
   - [Conntrack](#conntrack)
+- [User-Defined Alerts (v1.1.0)](#user-defined-alerts-v110)
 - [Copying Diagnostics](#copying-diagnostics)
 
 ## Overview
@@ -243,6 +244,18 @@ Three resources are checked:
 **What it checks:** Monitors the Linux connection tracking table usage. When the table is full, new connections are dropped. This commonly affects firewalls, NAT gateways, and load balancers.
 
 **Suggestion:** Increase `sysctl net.nf_conntrack_max` or add NOTRACK rules for high-traffic flows.
+
+## User-Defined Alerts (v1.1.0)
+
+As of v1.1.0, syslenz supports user-defined alert rules configured via `[[alert]]` entries in `config.toml`. Alerts complement the built-in diagnostics engine by letting you set custom thresholds tailored to your environment.
+
+When an alert fires:
+
+- The **status bar** displays an alert count (e.g., `ALERT: 2 active`)
+- The **sidebar** colors the source that triggered the alert, drawing your attention immediately
+- Individual **fields** are marked with an alert indicator in the detail view
+
+Alerts and built-in diagnostics work together -- diagnostics provide general best-practice checks, while alerts let you define precise thresholds for your specific workloads. See the [Configuration Reference](config.md#alert-v110) for the full `[[alert]]` syntax.
 
 ## Copying Diagnostics
 

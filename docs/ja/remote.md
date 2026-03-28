@@ -1,5 +1,5 @@
 ---
-version: v1.0.0
+version: v1.1.0
 lang: ja
 ---
 
@@ -21,15 +21,15 @@ lang: ja
 
 ## 概要
 
-syslenz は3つのリモート監視方法をサポートしています:
+syslenz は3つのリモート監視方法に対応しています:
 
 | 方法 | フラグ | ユースケース |
 |------|--------|------------|
-| SSH | `--ssh user@host` | SSHアクセスのあるリモートサーバーを監視 |
-| Docker | `--docker container` | `docker exec` 経由でコンテナを監視 |
+| SSH | `--ssh user@host` | SSHアクセスできるリモートサーバーの監視 |
+| Docker | `--docker container` | `docker exec` 経由でのコンテナ監視 |
 | TCP | `--serve` / `--connect` | SSHのないコンテナ用の軽量エージェント |
 
-3つの方法全てが、リモートターゲットでsyslenzを実行し、JSONスナップショットをローカルTUIにストリーミングして動作します。ローカルTUIはリモートシステムのデータを完全なインタラクティビティ（ダッシュボード、クラシック、自動診断など）で表示します。
+いずれもリモート側で syslenz を実行し、JSONスナップショットをローカルTUIにストリーミングする仕組みです。ローカルTUIはリモートシステムのデータを、ダッシュボード、クラシック、自動診断などフル機能で表示します。
 
 ## SSHモード
 
@@ -37,7 +37,7 @@ syslenz は3つのリモート監視方法をサポートしています:
 syslenz --ssh user@host
 ```
 
-**動作の仕組み:**
+**仕組み:**
 1. syslenz が `ssh -T -o BatchMode=yes -o ConnectTimeout=10 user@host syslenz --export -` を起動
 2. リモートの syslenz がスナップショットをキャプチャし、JSONをstdoutに出力
 3. ローカルの syslenz がJSONをデシリアライズしてTUIに表示
@@ -45,12 +45,12 @@ syslenz --ssh user@host
 
 **要件:**
 - リモートホストに syslenz がインストールされ、`PATH` に含まれていること
-- SSH鍵認証が設定されていること（BatchModeはパスワードプロンプトを無効化）
-- リモートホストに到達可能であること
+- SSH鍵認証が設定されていること（BatchModeではパスワードプロンプトが無効）
+- リモートホストに到達できること
 
 **特徴:**
-- ローカルのSSHエージェントと設定（`~/.ssh/config`）を継承
-- 一時的な障害に耐性: 5回連続のSSH失敗まではサイレントにスキップ、その後諦める
+- ローカルのSSHエージェントと設定（`~/.ssh/config`）を引き継ぐ
+- 一時的な障害に耐性あり: SSH失敗が5回連続するまではスキップし、それを超えると停止
 - TUIタイトルバーにリモートホスト名を表示
 
 **踏み台ホスト経由の例:**
@@ -76,17 +76,17 @@ syslenz --ssh prod-server
 syslenz --docker container_name
 ```
 
-**動作の仕組み:**
+**仕組み:**
 1. syslenz が `docker exec container_name syslenz --export -` を起動
 2. コンテナ内の syslenz がコンテナの `/proc` からスナップショットをキャプチャ
-3. JSONがローカルTUIにストリーミング
+3. JSONがローカルTUIにストリーミングされる
 
 **要件:**
 - コンテナ内に syslenz がインストールされていること
 - ローカルの `PATH` に `docker` があること
 - コンテナが実行中であること
 
-**注意:** スナップショットはコンテナから見た `/proc` を反映し、ホストとは異なる場合があります。ホストPID名前空間（`--pid=host`）のコンテナはホストレベルのデータを参照します。
+**注意:** スナップショットはコンテナから見た `/proc` を反映するため、ホストとは異なる場合があります。ホストPID名前空間（`--pid=host`）のコンテナはホストレベルのデータを参照します。
 
 **Dockerfileへのsyslenz追加例:**
 
@@ -100,7 +100,7 @@ COPY --from=syslenz/syslenz:latest /usr/local/bin/syslenz /usr/local/bin/syslenz
 
 ## TCPサーバー/クライアントモード
 
-SSHが利用できない環境（最小コンテナ、Kubernetesポッドなど）のために、syslenzには軽量TCPプロトコルが含まれています。
+SSHが使えない環境（最小コンテナ、Kubernetesポッドなど）向けに、syslenzには軽量TCPプロトコルがあります。
 
 ### サーバー側
 
@@ -110,9 +110,9 @@ syslenz --serve [bind_addr]
 
 デフォルトバインドアドレス: `0.0.0.0:9100`
 
-サーバーはTCP接続をリッスンします。クライアントが `SNAPSHOT\n` を送信すると、サーバーはスナップショットをキャプチャし、JSONとしてシリアライズして返送します。1接続につき1リクエスト（シンプルプロトコル）。
+サーバーはTCP接続をリッスンし、クライアントから `SNAPSHOT\n` を受信するとスナップショットをキャプチャしてJSONで返します。1接続につき1リクエストのシンプルなプロトコルです。
 
-サーバーは同一スレッドで1接続ずつ処理するため、非常に軽量です（ランタイム依存関係なし、非同期処理なし）。
+サーバーは同一スレッドで1接続ずつ処理するため、非常に軽量です（ランタイム依存なし、非同期処理なし）。
 
 ### クライアント側
 
@@ -120,7 +120,7 @@ syslenz --serve [bind_addr]
 syslenz --connect host:port
 ```
 
-クライアントは毎秒TCPサーバーに接続し、`SNAPSHOT\n` を送信、JSONレスポンスを読み取り、ローカルTUIに表示します。
+クライアントは毎秒TCPサーバーに接続して `SNAPSHOT\n` を送信し、JSONレスポンスを読み取ってローカルTUIに表示します。
 
 **例:**
 
@@ -165,7 +165,7 @@ syslenz --connect your-docker-host:9100
 
 ### 複数ホストの監視
 
-異なるリモートターゲットに対して複数のsyslenzインスタンスを実行できます。syslenzにはマルチホストビューはありませんが、複数のターミナルペインを使用できます:
+異なるリモート対象に対して複数の syslenz インスタンスを実行できます。マルチホストビューはありませんが、複数のターミナルペインを使えます:
 
 ```bash
 # ターミナル1
@@ -190,7 +190,7 @@ syslenz --connect db-server:9100
 
 リモートホストに syslenz がインストールされていないか、PATHに含まれていません。
 
-**修正:** リモートホストにsyslenzをインストール:
+**対処:** リモートホストに syslenz をインストール:
 
 ```bash
 ssh user@host 'curl -L https://github.com/opaopa6969/syslenz/releases/latest/download/syslenz-linux-amd64 -o /usr/local/bin/syslenz && chmod +x /usr/local/bin/syslenz'
@@ -200,7 +200,7 @@ ssh user@host 'curl -L https://github.com/opaopa6969/syslenz/releases/latest/dow
 
 SSH鍵認証が設定されていません。
 
-**修正:** SSH鍵認証を設定:
+**対処:** SSH鍵認証を設定:
 
 ```bash
 ssh-keygen -t ed25519  # 鍵がない場合
@@ -211,7 +211,7 @@ ssh-copy-id user@host
 
 リモートホストに到達できないか、ファイアウォールがSSHをブロックしています。
 
-**修正:** 手動で接続をテスト:
+**対処:** 手動で接続をテスト:
 
 ```bash
 ssh -o ConnectTimeout=10 user@host echo ok
@@ -221,7 +221,7 @@ ssh -o ConnectTimeout=10 user@host echo ok
 
 コンテナ名が間違っているか、コンテナが実行されていません。
 
-**修正:** 実行中のコンテナを確認:
+**対処:** 実行中のコンテナを確認:
 
 ```bash
 docker ps --format '{{.Names}}'
@@ -229,9 +229,9 @@ docker ps --format '{{.Names}}'
 
 ### Docker: コンテナ内で "syslenz not found"
 
-コンテナイメージにsyslenzがインストールされていません。
+コンテナイメージに syslenz がインストールされていません。
 
-**修正:** Dockerfileにsyslenzを追加するか、実行時にインストール:
+**対処:** Dockerfileに syslenz を追加するか、実行時にインストール:
 
 ```bash
 docker exec container_name sh -c 'curl -L <release-url> -o /usr/local/bin/syslenz && chmod +x /usr/local/bin/syslenz'
@@ -239,9 +239,9 @@ docker exec container_name sh -c 'curl -L <release-url> -o /usr/local/bin/syslen
 
 ### TCP: "Connection refused"
 
-syslenzサーバーが実行されていない、ポートが間違っている、またはファイアウォールが接続をブロックしています。
+syslenz サーバーが起動していない、ポートが間違っている、またはファイアウォールがブロックしています。
 
-**修正:** サーバーがリッスンしていることを確認:
+**対処:** サーバーがリッスンしていることを確認:
 
 ```bash
 ss -tlnp | grep 9100
@@ -249,9 +249,9 @@ ss -tlnp | grep 9100
 
 ### リモートストリームが5回の失敗後に停止
 
-3つのリモート方法全てに5回連続失敗のリトライ制限があります。5回失敗後、ストリームは停止し、TUIは最後に受信したスナップショットで凍結します。
+3つのリモート方法全てに5回連続失敗のリトライ上限があります。5回失敗後、ストリームは停止し、TUIは最後に受信したスナップショットのまま止まります。
 
-**修正:** ネットワーク接続を確認、リモートのsyslenzプロセスを再起動、またはローカルのsyslenzを再起動。
+**対処:** ネットワーク接続を確認し、リモートの syslenz プロセスを再起動するか、ローカルの syslenz を再起動してください。
 
 ---
 
