@@ -49,6 +49,12 @@ syslenz --otel http://otel-collector.example.com:4317
 
 # Custom interval (10 seconds)
 syslenz --otel http://localhost:4317 --interval 10
+
+# Japanese metric descriptions
+syslenz --otel --lang ja
+
+# Core metrics only with Japanese descriptions
+syslenz --otel --otel-level core --lang ja
 ```
 
 The `--otel` flag runs syslenz in headless mode (no TUI). It captures a full system snapshot at each interval and pushes all numeric fields as OTLP gauge metrics via gRPC.
@@ -56,24 +62,60 @@ The `--otel` flag runs syslenz in headless mode (no TUI). It captures a full sys
 Output on startup:
 
 ```
-syslenz: OTEL export to http://localhost:4317 (interval: 5s)
+syslenz: OTEL export to http://localhost:4317 (interval: 5s, level: full, locale: EN)
 Press Ctrl+C to stop.
 ```
 
 ### What gets exported
 
-Every numeric field from every data source is exported as an OTLP gauge:
+Every numeric field from every data source is exported as an OTLP gauge with rich metadata:
 
-| Field Type | Exported As | Example |
-|------------|-------------|---------|
-| `Bytes` | `f64` | MemTotal, MemAvailable, rx_bytes |
-| `Integer` | `f64` | context_switches, processes_total |
-| `Float` | `f64` | load1, cpu_user_pct |
-| `Duration` | `f64` (seconds) | uptime |
+| Field Type | Exported As | Unit | Example |
+|------------|-------------|------|---------|
+| `Bytes` | `f64` | `By` | MemTotal, MemAvailable, rx_bytes |
+| `Integer` | `f64` | (from field) | context_switches, processes_total |
+| `Float` | `f64` | (from field) | load1, cpu_user_pct |
+| `Duration` | `f64` | `s` | uptime |
 
 Non-numeric fields (`Text`, `Table`) are skipped.
 
 On a typical Linux system with 50+ sources, this produces several hundred metrics covering memory, CPU, load, network interfaces, disk I/O, pressure stall info, thermal zones, file descriptors, and more.
+
+### Resource attributes
+
+Each metric export includes OTEL resource attributes for host identification:
+
+| Attribute | Source | Example |
+|-----------|--------|---------|
+| `service.name` | hardcoded | `syslenz` |
+| `service.version` | Cargo.toml | `1.3.0` |
+| `host.name` | `/proc/sys/kernel/hostname` | `web-server-01` |
+| `os.type` | `/proc/sys/kernel/ostype` | `Linux` |
+| `os.version` | `/proc/sys/kernel/osrelease` | `6.1.0-25-amd64` |
+| `os.description` | `/proc/version` | `Linux version 6.1.0-25-amd64 ...` |
+
+### Metric descriptions (i18n)
+
+Each metric includes a human-readable description from syslenz's i18n system. Use `--lang ja` to export with Japanese descriptions:
+
+```
+# English (default)
+syslenz.meminfo.MemAvailable → "Available memory for new processes"
+
+# Japanese (--lang ja)
+syslenz.meminfo.MemAvailable → "新しいプロセスに使えるメモリ"
+```
+
+### Metric attributes
+
+Each metric data point includes attributes:
+
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `syslenz.source` | The /proc source key | `meminfo`, `net/dev` |
+| `syslenz.metric_type` | Semantic type hint | `gauge` or `counter` |
+
+The `syslenz.metric_type` attribute indicates whether the value is a point-in-time measurement (`gauge`) or a monotonically increasing cumulative value (`counter`). Counter-type metrics (like `context_switches`, `rx_bytes`, `cpu_user`) should have `rate()` or `irate()` applied in dashboards.
 
 ### Metric naming convention
 
@@ -94,7 +136,7 @@ Slashes in source names are replaced with dots:
 | `thermal` | `max_temp` | `syslenz.thermal.max_temp` |
 | `gpu` | `gpu_utilization` | `syslenz.gpu.gpu_utilization` |
 
-All metrics are gauges (not counters or histograms) because each value represents a point-in-time snapshot.
+All metrics use the OTEL gauge instrument because syslenz reads absolute values from /proc (not deltas). For counter-type values, use the `syslenz.metric_type` attribute to identify which metrics need `rate()` in your dashboards.
 
 ---
 

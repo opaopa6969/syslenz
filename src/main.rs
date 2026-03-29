@@ -113,7 +113,11 @@ fn main() -> Result<()> {
             .and_then(|pos| args.get(pos + 1))
             .map(|s| otel::OtelLevel::from_str(s))
             .unwrap_or(otel::OtelLevel::Full);
-        return otel::run_otel_export_with_level(endpoint, interval, level);
+        let locale = args.iter().position(|a| a == "--lang")
+            .and_then(|pos| args.get(pos + 1))
+            .map(|s| i18n::Locale::from_str(s))
+            .unwrap_or(i18n::Locale::En);
+        return otel::run_otel_export_with_level(endpoint, interval, level, locale);
     }
 
     // --web [port]
