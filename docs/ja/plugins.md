@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: ja
 ---
 
@@ -20,6 +20,13 @@ lang: ja
 - [例: Docker統計プラグイン](#例-docker統計プラグイン)
 - [プラグインの検出と実行](#プラグインの検出と実行)
 - [プラグインのデバッグ](#プラグインのデバッグ)
+- [Provider (v1.3.0)](#provider-v130)
+  - [Provider テンプレート](#provider-テンプレート)
+  - [MySQL provider](#mysql-provider)
+  - [PostgreSQL provider](#postgresql-provider)
+  - [Redis provider](#redis-provider)
+  - [nginx provider](#nginx-provider)
+  - [5分で Provider を書く方法](#5分で-provider-を書く方法)
 
 ## 概要
 
@@ -351,6 +358,192 @@ cat /tmp/syslenz-errors.log
 | "plugin timed out" | 5秒超過 | 最適化またはキャッシュ |
 | "failed to parse" | 無効なJSON出力 | JSON出力を手動で検証 |
 | サイドバーのフィールドが空 | JSONスキーマの不一致 | フィールドの型がFieldValueバリアントに合っているか確認 |
+
+## Provider (v1.3.0)
+
+v1.3.0 で Provider システムが導入されました。Provider はプラグインの上位概念で、データベースやミドルウェアなど外部サービスのメトリクスを標準化された方法で収集します。`providers/template/` にテンプレートが用意されており、すぐに自作の Provider を開発できます。
+
+### Provider テンプレート
+
+リポジトリの `providers/template/` ディレクトリに、Provider の雛形が含まれています。このテンプレートをコピーして独自の Provider を作成できます:
+
+```bash
+cp -r providers/template/ providers/my-service/
+cd providers/my-service/
+# provider スクリプトを編集
+vim provider
+chmod +x provider
+```
+
+テンプレートの構造:
+
+```
+providers/template/
+├── provider          # 実行可能スクリプト (ProcEntry JSON を出力)
+├── README.md         # 使い方と設定の説明
+└── install.sh        # プラグインディレクトリへのインストールスクリプト
+```
+
+Provider は通常のプラグインと同じ ProcEntry JSON プロトコルに準拠します。違いは、接続情報を環境変数で受け取る規約と、`providers/` ディレクトリで管理される点です。
+
+### MySQL provider
+
+MySQL/MariaDB のグローバルステータスとプロセスリストを収集します。
+
+**環境変数:**
+
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `MYSQL_HOST` | `127.0.0.1` | 接続先ホスト |
+| `MYSQL_PORT` | `3306` | 接続先ポート |
+| `MYSQL_USER` | `root` | ユーザー名 |
+| `MYSQL_PASSWORD` | (なし) | パスワード |
+
+**収集メトリクス:** Threads_connected, Threads_running, Questions (QPS), Slow_queries, Innodb_buffer_pool_reads, Innodb_buffer_pool_read_requests, Uptime
+
+**使い方:**
+
+```bash
+# 環境変数を設定してインストール
+export MYSQL_HOST=127.0.0.1
+export MYSQL_PASSWORD=secret
+providers/mysql/install.sh
+
+# syslenz を起動すると plugin/mysql として表示される
+syslenz
+```
+
+### PostgreSQL provider
+
+PostgreSQL の接続数、データベースサイズ、キャッシュヒット率を収集します。
+
+**環境変数:**
+
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `PGHOST` | `127.0.0.1` | 接続先ホスト |
+| `PGPORT` | `5432` | 接続先ポート |
+| `PGUSER` | `postgres` | ユーザー名 |
+| `PGPASSWORD` | (なし) | パスワード |
+| `PGDATABASE` | `postgres` | データベース名 |
+
+**収集メトリクス:** active_connections, idle_connections, database_size, cache_hit_ratio, xact_commit, xact_rollback, deadlocks
+
+**使い方:**
+
+```bash
+export PGPASSWORD=secret
+providers/postgresql/install.sh
+syslenz
+```
+
+### Redis provider
+
+Redis のメモリ使用量、接続数、キースペース情報を収集します。
+
+**環境変数:**
+
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `REDIS_HOST` | `127.0.0.1` | 接続先ホスト |
+| `REDIS_PORT` | `6379` | 接続先ポート |
+| `REDIS_PASSWORD` | (なし) | パスワード |
+
+**収集メトリクス:** used_memory, used_memory_rss, connected_clients, blocked_clients, keyspace_hits, keyspace_misses, evicted_keys, instantaneous_ops_per_sec
+
+**使い方:**
+
+```bash
+providers/redis/install.sh
+syslenz
+```
+
+### nginx provider
+
+nginx のスタブステータスモジュールから接続数とリクエスト統計を収集します。
+
+**環境変数:**
+
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `NGINX_STATUS_URL` | `http://127.0.0.1/nginx_status` | stub_status エンドポイントの URL |
+
+**前提条件:** nginx の `ngx_http_stub_status_module` が有効で、ステータスエンドポイントが設定されていること。
+
+**収集メトリクス:** active_connections, accepts, handled, requests, reading, writing, waiting
+
+**使い方:**
+
+```bash
+export NGINX_STATUS_URL=http://localhost:8080/nginx_status
+providers/nginx/install.sh
+syslenz
+```
+
+### 5分で Provider を書く方法
+
+独自の Provider は以下の手順で簡単に作成できます:
+
+**1. テンプレートをコピー**
+
+```bash
+cp -r providers/template/ providers/my-app/
+```
+
+**2. provider スクリプトを編集**
+
+接続情報を環境変数から取得し、外部サービスにクエリを発行して ProcEntry JSON を出力します:
+
+```bash
+#!/bin/bash
+# providers/my-app/provider
+
+HOST="${MY_APP_HOST:-127.0.0.1}"
+PORT="${MY_APP_PORT:-8080}"
+
+# サービスにクエリ
+response=$(curl -s "http://${HOST}:${PORT}/stats" 2>/dev/null)
+if [ $? -ne 0 ]; then
+    echo '{"source":"/custom/my-app","fields":[{"name":"status","value":{"Text":"接続失敗"},"unit":null,"description":"接続状態"}]}'
+    exit 0
+fi
+
+# メトリクスを抽出して ProcEntry JSON を構築
+requests=$(echo "$response" | jq -r '.total_requests // 0')
+errors=$(echo "$response" | jq -r '.total_errors // 0')
+
+cat <<EOF
+{
+  "source": "/custom/my-app",
+  "fields": [
+    {"name": "total_requests", "value": {"Integer": $requests}, "unit": null, "description": "処理済みリクエスト総数"},
+    {"name": "total_errors", "value": {"Integer": $errors}, "unit": null, "description": "エラー総数"}
+  ]
+}
+EOF
+```
+
+**3. install.sh を書く**
+
+```bash
+#!/bin/bash
+PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/syslenz/plugins"
+mkdir -p "$PLUGIN_DIR"
+cp "$(dirname "$0")/provider" "$PLUGIN_DIR/my-app"
+chmod +x "$PLUGIN_DIR/my-app"
+echo "my-app provider をインストールしました"
+```
+
+**4. インストールして確認**
+
+```bash
+chmod +x providers/my-app/provider providers/my-app/install.sh
+providers/my-app/install.sh
+~/.config/syslenz/plugins/my-app | python3 -m json.tool  # JSON を検証
+syslenz  # plugin/my-app として表示される
+```
+
+Provider はプラグインと同じ仕組みで動作するため、既存のプラグインデバッグ手法がそのまま使えます。
 
 ---
 

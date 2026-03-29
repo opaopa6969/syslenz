@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -59,7 +59,7 @@ Download the latest release from the [GitHub Releases](https://github.com/opaopa
 
 ## Feature Highlights
 
-- **55+ data sources** -- `/proc`, `/sys`, network config, thermal, disk, conntrack, DNS, and more
+- **60+ data sources** -- `/proc`, `/sys`, GPU, systemd, network config, thermal, disk, conntrack, DNS, and more
 - **Schema-driven parsing** -- every field has a type (Bytes, Integer, Float, Duration, Text, Table), optional unit, and human-readable description
 - **Dashboard view** -- at-a-glance system health with load, memory, CPU, network, and disk
 - **Auto-diagnostics** -- automatic detection of memory pressure, CPU overload, swap exhaustion, zombie processes, socket leaks, disk full, thermal throttling, FD exhaustion, DNS misconfiguration, and conntrack overflow
@@ -73,6 +73,15 @@ Download the latest release from the [GitHub Releases](https://github.com/opaopa
 - **OpenTelemetry export** -- push all numeric metrics to any OTLP-compatible backend
 - **Bilingual** -- full English and Japanese support (switch with `L` key or `--lang`)
 - **Keyboard-driven TUI** -- sidebar navigation, drill-in, search, copy to clipboard
+
+## What's New in v1.3.0
+
+- **GPU monitoring** -- real-time GPU utilization, memory, temperature, power draw, and per-process GPU usage for NVIDIA (via NVML) and AMD (via sysfs) GPUs; GPU metrics appear in the Dashboard, Classic mode, and are exported via OTLP/Prometheus
+- **systemd integration** -- new data sources for systemd unit status, failed services, and timers; failed service count feeds into the diagnostics engine
+- **Prometheus export** -- new `--prometheus` flag starts a built-in HTTP server exposing a `/metrics` endpoint in standard Prometheus exposition format, eliminating the need for an OTLP collector; works alongside the TUI
+- **Provider ecosystem** -- curated, ready-to-use metric providers for MySQL, PostgreSQL, Redis, and nginx; enable via `[[provider]]` in config.toml or `--provider` CLI flag
+- **14 new diagnostic patterns** -- memory leak detection, swap activity monitoring, OOM kill tracking, network error alerting, recent reboot detection, load trend analysis, high-memory process flagging, orphaned TCP socket detection, IP forwarding check, kernel taint inspection, inode pressure monitoring, context switch rate analysis, conntrack growth rate tracking, and TCP listen port auditing
+- **60+ data sources** -- expanded from 55+ with the addition of GPU, systemd, and inode sources
 
 ## What's New in v1.1.0
 

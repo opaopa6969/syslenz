@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: ja
 ---
 
@@ -18,6 +18,7 @@ lang: ja
 - [メトリクス命名規則](#メトリクス命名規則)
 - [Docker Compose と Prometheus + Grafana](#docker-compose-と-prometheus--grafana)
 - [node_exporterとの比較](#node_exporterとの比較)
+- [Prometheus エクスポート (v1.3.0)](#prometheus-エクスポート-v130)
 - [設定](#設定)
 
 ## 概要
@@ -226,6 +227,99 @@ scrape_configs:
 - 型が明確に定義された（カウンター vs ゲージ）本番向けの堅牢なメトリクスが欲しい
 - 特定のコレクター（systemd、textfile、NTP）が必要
 - 純粋なPrometheusエコシステムを使っている
+
+## Prometheus エクスポート (v1.3.0)
+
+v1.3.0 で、OTLP Collector を経由せずに直接 Prometheus 形式でメトリクスを公開する `--prometheus` フラグが追加されました。syslenz 単体で `/metrics` エンドポイントを提供し、Prometheus から直接スクレイプできます。
+
+### 基本的な使い方
+
+```bash
+# デフォルトアドレス (0.0.0.0:9464) で /metrics を公開
+syslenz --prometheus
+
+# バインドアドレスを指定
+syslenz --prometheus 127.0.0.1:9090
+
+# OTEL と同時に使うことも可能
+syslenz --otel http://localhost:4317 --prometheus
+```
+
+`--prometheus` フラグを指定すると、syslenz は TUI を表示せずにヘッドレスモードで動作し、HTTP サーバーを起動します。内部的には `serve.rs` の METRICS コマンドハンドラがスナップショットから Prometheus text format に変換して応答します。
+
+### /metrics エンドポイント
+
+`http://<bind_addr>/metrics` にアクセスすると、Prometheus text exposition format でメトリクスが返されます:
+
+```
+# HELP syslenz_meminfo_MemAvailable Available memory in bytes
+# TYPE syslenz_meminfo_MemAvailable gauge
+syslenz_meminfo_MemAvailable 8.589934592e+09
+# HELP syslenz_loadavg_load1 1-minute load average
+# TYPE syslenz_loadavg_load1 gauge
+syslenz_loadavg_load1 1.25
+# HELP syslenz_stat_cpu_user CPU user time
+# TYPE syslenz_stat_cpu_user gauge
+syslenz_stat_cpu_user 12345678
+...
+```
+
+全ての数値フィールドが `syslenz_<source>_<field>` の命名規則でゲージとしてエクスポートされます。ソース名のスラッシュはアンダースコアに置換されます（例: `net/dev` -> `syslenz_net_dev_rx_bytes`）。
+
+### Prometheus + Grafana 連携
+
+OTLP Collector なしで、syslenz を直接 Prometheus でスクレイプする構成です:
+
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'syslenz'
+    static_configs:
+      - targets: ['syslenz-host:9464']
+```
+
+Docker Compose の例:
+
+```yaml
+version: "3.8"
+
+services:
+  syslenz:
+    build: .
+    command: ["syslenz", "--prometheus", "0.0.0.0:9464"]
+    pid: host
+    privileged: true
+    ports:
+      - "9464:9464"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+```
+
+この構成では OTLP Collector が不要なため、セットアップが簡潔になります。OTLP 経由の構成と比較して、コンポーネントが1つ少なくて済みます。
+
+### OTLP と Prometheus の使い分け
+
+| 方式 | 向いている場面 |
+|------|-------------|
+| `--otel` (OTLP) | Datadog、Honeycomb 等の OTLP 対応バックエンドに送る場合。複数のテレメトリ信号（メトリクス、トレース、ログ）を統合する場合 |
+| `--prometheus` | Prometheus を直接使う場合。Collector のセットアップを省きたい場合。既存の Prometheus インフラに追加する場合 |
 
 ## 設定
 

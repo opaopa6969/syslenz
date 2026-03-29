@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: ja
 ---
 
@@ -212,6 +212,7 @@ syslenz には複数レベルのヘルプシステムが組み込まれていま
 | `--serve` | `[bind_addr]` | TCPサーバーを起動（デフォルト: `0.0.0.0:9100`） |
 | `--web` | `[port]` | Web UIを起動（デフォルトポート: `3000`、`web`機能が必要） |
 | `--otel` | `[endpoint]` | OTLP経由でメトリクスをエクスポート（デフォルト: `http://localhost:4317`、`otel`機能が必要） |
+| `--prometheus` | `[bind_addr]` | Prometheus 形式で /metrics を公開（デフォルト: `0.0.0.0:9464`） |
 | `--widget` | | X11フローティングウィジェットを起動（`x11widget`機能が必要） |
 | `--lang` | `<en\|ja>` | 言語を設定（設定ファイルより優先） |
 | `--classic` | | ダッシュボードの代わりにクラシックモードで起動 |
@@ -263,6 +264,11 @@ syslenz --web 8080
 
 [🇬🇧 English](../en/getting-started.md)
 syslenz --otel http://otel-collector:4317 --interval 10
+
+# Prometheus メトリクスエンドポイント (v1.3.0)
+
+[🇬🇧 English](../en/getting-started.md)
+syslenz --prometheus 0.0.0.0:9464
 
 # 日本語インターフェース
 

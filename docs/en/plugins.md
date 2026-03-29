@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -20,6 +20,7 @@ lang: en
 - [Example: Docker Stats Plugin](#example-docker-stats-plugin)
 - [Plugin Discovery and Execution](#plugin-discovery-and-execution)
 - [Debugging Plugins](#debugging-plugins)
+- [Provider Ecosystem (v1.3.0)](#provider-ecosystem-v130)
 
 ## Overview
 
@@ -352,6 +353,185 @@ Error messages look like:
 | "plugin timed out" | Plugin takes > 5s | Optimize or cache results |
 | "failed to parse" | Invalid JSON output | Validate JSON output manually |
 | Empty fields in sidebar | JSON schema mismatch | Check field types match FieldValue variants |
+
+## Provider Ecosystem (v1.3.0)
+
+As of v1.3.0, syslenz ships with a **provider** system -- a curated set of ready-to-use plugins for popular services. Providers follow the same plugin protocol but are distributed with syslenz and can be enabled via configuration.
+
+### Enabling a provider
+
+In `~/.config/syslenz/config.toml`:
+
+```toml
+[[provider]]
+name = "mysql"
+enabled = true
+
+[provider.config]
+host = "127.0.0.1"
+port = 3306
+user = "monitor"
+password_env = "MYSQL_MONITOR_PASSWORD"  # read from environment variable
+```
+
+Or enable at runtime:
+
+```bash
+syslenz --provider mysql --provider redis
+```
+
+### Provider template
+
+All providers follow a standard template. To create your own provider, implement the `Provider` trait:
+
+```rust
+pub trait Provider: Send + Sync {
+    /// Unique name for this provider (e.g., "mysql", "redis")
+    fn name(&self) -> &str;
+
+    /// Collect metrics and return a ProcEntry
+    fn collect(&self, config: &ProviderConfig) -> Result<ProcEntry>;
+
+    /// Default configuration values
+    fn default_config(&self) -> ProviderConfig;
+}
+```
+
+Or for script-based providers, place an executable in `~/.config/syslenz/providers/` following the same ProcEntry JSON protocol as plugins.
+
+### Available providers
+
+#### MySQL
+
+Connects to MySQL/MariaDB and collects server status metrics.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| threads_connected | Integer | Current open connections |
+| threads_running | Integer | Currently executing queries |
+| queries_per_sec | Float | Query rate (derived from `Questions`) |
+| slow_queries | Integer | Cumulative slow query count |
+| innodb_buffer_pool_usage | Float | Buffer pool usage percentage |
+| replication_lag | Float | Seconds behind master (if replica) |
+| uptime | Duration | Server uptime |
+
+**Configuration:**
+
+```toml
+[[provider]]
+name = "mysql"
+enabled = true
+
+[provider.config]
+host = "127.0.0.1"
+port = 3306
+user = "monitor"
+password_env = "MYSQL_MONITOR_PASSWORD"
+```
+
+#### PostgreSQL
+
+Connects to PostgreSQL and collects database activity metrics.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| active_connections | Integer | Active connections |
+| idle_connections | Integer | Idle connections |
+| transactions_per_sec | Float | Transaction rate |
+| cache_hit_ratio | Float | Buffer cache hit ratio (0.0-1.0) |
+| dead_tuples | Integer | Dead tuples awaiting VACUUM |
+| database_size | Bytes | Total database size |
+| replication_lag | Float | Replication lag in seconds (if replica) |
+
+**Configuration:**
+
+```toml
+[[provider]]
+name = "postgresql"
+enabled = true
+
+[provider.config]
+host = "127.0.0.1"
+port = 5432
+user = "monitor"
+database = "postgres"
+password_env = "PG_MONITOR_PASSWORD"
+```
+
+#### Redis
+
+Connects to Redis and collects server info metrics.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| connected_clients | Integer | Current client connections |
+| used_memory | Bytes | Memory used by Redis |
+| used_memory_peak | Bytes | Peak memory usage |
+| hit_rate | Float | Keyspace hit rate (0.0-1.0) |
+| ops_per_sec | Float | Commands processed per second |
+| evicted_keys | Integer | Keys evicted due to maxmemory |
+| blocked_clients | Integer | Clients blocked on BLPOP etc. |
+
+**Configuration:**
+
+```toml
+[[provider]]
+name = "redis"
+enabled = true
+
+[provider.config]
+host = "127.0.0.1"
+port = 6379
+password_env = "REDIS_PASSWORD"  # optional
+database = 0
+```
+
+#### nginx
+
+Reads the nginx stub_status module and collects connection metrics.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| active_connections | Integer | Current active connections |
+| accepts | Integer | Total accepted connections |
+| handled | Integer | Total handled connections |
+| requests | Integer | Total requests served |
+| reading | Integer | Connections reading request |
+| writing | Integer | Connections writing response |
+| waiting | Integer | Keep-alive connections waiting |
+
+**Configuration:**
+
+```toml
+[[provider]]
+name = "nginx"
+enabled = true
+
+[provider.config]
+status_url = "http://127.0.0.1:8080/stub_status"
+```
+
+**Note:** Requires the `ngx_http_stub_status_module` to be enabled in your nginx configuration:
+
+```nginx
+location /stub_status {
+    stub_status;
+    allow 127.0.0.1;
+    deny all;
+}
+```
+
+### Provider vs Plugin
+
+| Aspect | Provider | Plugin |
+|--------|----------|--------|
+| Distribution | Ships with syslenz | User-created |
+| Configuration | `config.toml` [[provider]] | Executable in plugins dir |
+| Language | Rust (compiled in) or script | Any executable |
+| Discovery | Enabled via config | Auto-discovered from directory |
+| Metrics | Predefined schema | Arbitrary ProcEntry |
+
+Providers and plugins can coexist. Use providers for common services where a curated metric set is valuable. Use plugins for custom or niche data sources.
 
 ---
 

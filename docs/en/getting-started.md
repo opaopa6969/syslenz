@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -212,6 +212,8 @@ When help is active, a panel appears at the bottom of the screen showing context
 | `--serve` | `[bind_addr]` | Start TCP server (default: `0.0.0.0:9100`) |
 | `--web` | `[port]` | Start Web UI (default port: `3000`, requires `web` feature) |
 | `--otel` | `[endpoint]` | Export metrics via OTLP (default: `http://localhost:4317`, requires `otel` feature) |
+| `--prometheus` | `[port]` | Start Prometheus `/metrics` endpoint (default port: `9101`, requires `otel` feature) |
+| `--provider` | `<name>` | Enable a provider by name (repeatable, e.g. `--provider mysql --provider redis`) |
 | `--widget` | | Start X11 floating widget (requires `x11widget` feature) |
 | `--lang` | `<en\|ja>` | Set language (overrides config) |
 | `--classic` | | Start in Classic mode instead of Dashboard |
@@ -263,6 +265,16 @@ syslenz --web 8080
 
 [🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --otel http://otel-collector:4317 --interval 10
+
+# Prometheus metrics endpoint (v1.3.0)
+
+[🇯🇵 日本語版](../ja/getting-started.md)
+syslenz --prometheus
+
+# Prometheus on custom port with MySQL provider (v1.3.0)
+
+[🇯🇵 日本語版](../ja/getting-started.md)
+syslenz --prometheus 9102 --provider mysql
 
 # Japanese interface
 

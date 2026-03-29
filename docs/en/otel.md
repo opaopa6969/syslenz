@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -18,6 +18,7 @@ lang: en
 - [Metric Naming Convention](#metric-naming-convention)
 - [Docker Compose with Prometheus and Grafana](#docker-compose-with-prometheus-and-grafana)
 - [Comparison with node_exporter](#comparison-with-node_exporter)
+- [Prometheus Export (v1.3.0)](#prometheus-export-v130)
 - [Configuration](#configuration)
 
 ## Overview
@@ -226,6 +227,90 @@ After starting the stack:
 - You want production-hardened metrics with well-defined types (counters vs gauges)
 - You need specific collectors (systemd, textfile, NTP)
 - You are in a pure Prometheus ecosystem
+
+## Prometheus Export (v1.3.0)
+
+As of v1.3.0, syslenz can expose metrics directly in Prometheus format via a built-in HTTP `/metrics` endpoint, without requiring an OpenTelemetry Collector as intermediary.
+
+### Setup
+
+```bash
+# Start Prometheus exporter on default port (9101)
+syslenz --prometheus
+
+# Custom port
+syslenz --prometheus 9102
+
+# Combine with TUI (metrics export runs in background)
+syslenz --prometheus 9101
+```
+
+The `--prometheus` flag starts a lightweight HTTP server alongside the normal TUI (or headless if combined with `--otel`). The server exposes a single endpoint:
+
+```
+GET http://localhost:9101/metrics
+```
+
+### Prometheus scrape configuration
+
+Add syslenz as a scrape target in `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'syslenz'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9101']
+```
+
+### Metric format
+
+Metrics are exported in standard Prometheus exposition format:
+
+```
+# HELP syslenz_meminfo_MemAvailable Memory available to applications in bytes
+# TYPE syslenz_meminfo_MemAvailable gauge
+syslenz_meminfo_MemAvailable 8.589934592e+09
+# HELP syslenz_loadavg_load1 1-minute load average
+# TYPE syslenz_loadavg_load1 gauge
+syslenz_loadavg_load1 2.41
+# HELP syslenz_stat_cpu_user CPU time in user mode
+# TYPE syslenz_stat_cpu_user gauge
+syslenz_stat_cpu_user 123456
+```
+
+The naming convention matches the OTLP export: `syslenz_<source>_<field>`, with slashes replaced by underscores.
+
+### Grafana integration
+
+With Prometheus scraping syslenz directly, you can create Grafana dashboards without any OTLP collector:
+
+1. Add Prometheus as a data source in Grafana (`http://prometheus:9090`)
+2. Use queries like:
+   - `syslenz_meminfo_MemAvailable / syslenz_meminfo_MemTotal` -- memory usage ratio
+   - `syslenz_loadavg_load1 / syslenz_stat_cpu_count` -- load per CPU
+   - `rate(syslenz_stat_context_switches[5m])` -- context switch rate
+   - `syslenz_gpu_gpu_utilization` -- GPU utilization (v1.3.0)
+   - `syslenz_systemd_failed_failed_count` -- failed systemd units (v1.3.0)
+
+### Comparison: --otel vs --prometheus
+
+| Feature | `--otel` | `--prometheus` |
+|---------|----------|----------------|
+| Protocol | Push (OTLP gRPC) | Pull (HTTP scrape) |
+| Requires collector | Yes (OTLP endpoint) | No (built-in server) |
+| Complexity | Higher (collector + backend) | Lower (Prometheus only) |
+| Backend compatibility | Any OTLP backend | Prometheus ecosystem |
+| Runs alongside TUI | No (headless only) | Yes |
+
+**When to use `--prometheus`:**
+- You already have Prometheus and want the simplest setup
+- You want metrics alongside the interactive TUI
+- You do not want to deploy an OTLP collector
+
+**When to use `--otel`:**
+- You use an OTLP-native backend (Datadog, Honeycomb, Grafana Cloud OTLP)
+- You want push-based export (no inbound network access required)
 
 ## Configuration
 

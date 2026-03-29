@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -28,6 +28,20 @@ lang: en
   - [File Descriptors](#file-descriptors)
   - [DNS](#dns)
   - [Conntrack](#conntrack)
+  - [Memory Leak (v1.3.0)](#memory-leak-v130)
+  - [Swap Activity (v1.3.0)](#swap-activity-v130)
+  - [OOM Kills (v1.3.0)](#oom-kills-v130)
+  - [Network Errors (v1.3.0)](#network-errors-v130)
+  - [Recent Reboot (v1.3.0)](#recent-reboot-v130)
+  - [Load Trend (v1.3.0)](#load-trend-v130)
+  - [High-Memory Process (v1.3.0)](#high-memory-process-v130)
+  - [Orphaned TCP (v1.3.0)](#orphaned-tcp-v130)
+  - [IP Forwarding (v1.3.0)](#ip-forwarding-v130)
+  - [Kernel Taint (v1.3.0)](#kernel-taint-v130)
+  - [Inode Pressure (v1.3.0)](#inode-pressure-v130)
+  - [Context Switches (v1.3.0)](#context-switches-v130)
+  - [Conntrack Rate (v1.3.0)](#conntrack-rate-v130)
+  - [TCP Listen Ports (v1.3.0)](#tcp-listen-ports-v130)
 - [User-Defined Alerts (v1.1.0)](#user-defined-alerts-v110)
 - [Copying Diagnostics](#copying-diagnostics)
 
@@ -35,7 +49,7 @@ lang: en
 
 syslenz includes an automatic diagnostics engine that analyzes every snapshot and produces actionable findings. It checks for common system health issues across memory, CPU, network, storage, and more. Findings are sorted by severity so the most critical issues appear first.
 
-The diagnostics engine runs 11 checks against each snapshot and produces findings only when thresholds are exceeded. A healthy system typically shows zero findings.
+The diagnostics engine runs 25 checks against each snapshot and produces findings only when thresholds are exceeded. A healthy system typically shows zero findings.
 
 ## Accessing Diagnostics
 
@@ -244,6 +258,177 @@ Three resources are checked:
 **What it checks:** Monitors the Linux connection tracking table usage. When the table is full, new connections are dropped. This commonly affects firewalls, NAT gateways, and load balancers.
 
 **Suggestion:** Increase `sysctl net.nf_conntrack_max` or add NOTRACK rules for high-traffic flows.
+
+### Memory Leak (v1.3.0)
+
+**Source:** `meminfo` (time-series comparison)
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| MemAvailable decreasing steadily over 10+ snapshots | WARN | Possible memory leak: MemAvailable declining steadily |
+
+**What it checks:** Compares MemAvailable across the snapshot history ring buffer. If MemAvailable has decreased in 10 or more consecutive snapshots, a potential memory leak is flagged.
+
+**Suggestion:** Identify processes with growing RSS using `ps aux --sort=-rss | head`. Consider running `valgrind` or `heaptrack` on suspect processes.
+
+### Swap Activity (v1.3.0)
+
+**Source:** `vmstat`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| pswpin + pswpout delta > 1000 pages/s | WARN | Active swapping detected: N pages/s |
+| pswpin + pswpout delta > 5000 pages/s | CRIT | Heavy swapping: N pages/s |
+
+**What it checks:** Measures the rate of pages swapped in and out between consecutive snapshots. Active swapping degrades performance because disk I/O is orders of magnitude slower than RAM access.
+
+**Suggestion:** Check MemAvailable. Identify high-RSS processes. Consider adding RAM or tuning `vm.swappiness`.
+
+### OOM Kills (v1.3.0)
+
+**Source:** `vmstat`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| oom_kill counter increased since last snapshot | CRIT | OOM Kill detected: N kills since last check |
+
+**What it checks:** Monitors the `oom_kill` counter in `/proc/vmstat`. An increase means the kernel's Out-of-Memory Killer terminated one or more processes to free memory.
+
+**Suggestion:** Check `dmesg | grep -i oom` to identify killed processes. Increase memory or configure `oom_score_adj` for critical services.
+
+### Network Errors (v1.3.0)
+
+**Source:** `net/dev`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| rx_errors + tx_errors delta > 0 on any interface | WARN | Network errors on IFACE: N errors |
+| rx_drops + tx_drops delta > 100 on any interface | WARN | Packet drops on IFACE: N drops |
+
+**What it checks:** Monitors per-interface error and drop counters. Non-zero deltas indicate hardware issues, driver bugs, buffer overflows, or network congestion.
+
+**Suggestion:** Check `ethtool -S IFACE` for detailed NIC statistics. Inspect cable connections and switch port errors.
+
+### Recent Reboot (v1.3.0)
+
+**Source:** `uptime`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| Uptime < 300 seconds (5 minutes) | INFO | System recently rebooted: uptime Xm Xs |
+
+**What it checks:** Flags that the system was recently rebooted, which may indicate a crash, kernel panic, or planned maintenance.
+
+**Suggestion:** Check `last reboot` and `dmesg` for crash indicators. Review `/var/log/kern.log` for panic messages.
+
+### Load Trend (v1.3.0)
+
+**Source:** `loadavg`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| load1 > load5 > load15 and load1 > CPU count | WARN | Load increasing: 1m X > 5m Y > 15m Z |
+
+**What it checks:** Detects a rising load trend by comparing the three load averages. When all three are increasing and the 1-minute average exceeds CPU count, workload is growing and may soon become critical.
+
+**Suggestion:** Identify new or growing workloads with `top`. Check for recently started batch jobs or cron tasks.
+
+### High-Memory Process (v1.3.0)
+
+**Source:** `processes`, `meminfo`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| Any single process RSS > 50% of MemTotal | WARN | Process "NAME" (PID) using X% of total memory |
+
+**What it checks:** Scans the process list for any single process consuming more than half of total physical memory.
+
+**Suggestion:** Verify the process is expected to use that much memory. Check for memory leaks or misconfigured resource limits.
+
+### Orphaned TCP (v1.3.0)
+
+**Source:** `net/sockstat`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| TCP orphan count > 1000 | WARN | N orphaned TCP sockets |
+
+**What it checks:** Monitors the orphan count from `/proc/net/sockstat`. Orphaned sockets are TCP connections with no owning process, consuming kernel memory until they time out.
+
+**Suggestion:** Check for application crashes that leave connections behind. Tune `net.ipv4.tcp_max_orphans` if needed.
+
+### IP Forwarding (v1.3.0)
+
+**Source:** `/proc/sys/net/ipv4/ip_forward`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| ip_forward = 1 on a non-router system | INFO | IP forwarding is enabled |
+
+**What it checks:** Detects that IP forwarding is enabled. On systems not intended to be routers, this may indicate misconfiguration or a security concern.
+
+**Suggestion:** If this system is not a router, NAT gateway, or container host, disable with `sysctl net.ipv4.ip_forward=0`.
+
+### Kernel Taint (v1.3.0)
+
+**Source:** `/proc/sys/kernel/tainted`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| Taint flags != 0 | INFO | Kernel is tainted: flags=X (meanings: ...) |
+
+**What it checks:** Reads the kernel taint bitmask. A tainted kernel has loaded proprietary modules, experienced a machine check exception, or had other events that may make kernel bugs harder to diagnose.
+
+**Suggestion:** Identify taint sources with `cat /proc/sys/kernel/tainted`. Common causes: proprietary GPU drivers (flag 1), out-of-tree modules (flag 4096).
+
+### Inode Pressure (v1.3.0)
+
+**Source:** `df` (inode mode)
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| Inode usage > 90% on any filesystem | CRIT | Inode usage X% on MOUNT -- critically low |
+| Inode usage > 80% on any filesystem | WARN | Inode usage X% on MOUNT -- getting full |
+
+**What it checks:** Monitors inode usage via `df -i`. A filesystem can run out of inodes even with free disk space, preventing new file creation. This commonly affects systems with many small files.
+
+**Suggestion:** Find directories with many files using `find / -xdev -printf '%h\n' | sort | uniq -c | sort -rn | head`. Consider reformatting with more inodes or cleaning up.
+
+### Context Switches (v1.3.0)
+
+**Source:** `stat`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| Context switch rate > 100,000/s per CPU | WARN | High context switch rate: N/s (Xk per CPU) |
+
+**What it checks:** Calculates the per-CPU context switch rate from `/proc/stat`. Extremely high context switching indicates excessive thread contention, too many runnable threads, or a locking problem.
+
+**Suggestion:** Profile the workload with `perf stat` to measure actual context switch overhead. Reduce thread count or fix lock contention.
+
+### Conntrack Rate (v1.3.0)
+
+**Source:** `conntrack`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| Conntrack count increasing > 1000/s | WARN | Conntrack table growing rapidly: +N/s |
+
+**What it checks:** Measures the rate of change in the conntrack table size. A rapidly growing table may indicate a DDoS attack, connection flood, or misconfigured timeout values.
+
+**Suggestion:** Check for SYN floods with `conntrack -S`. Reduce timeouts with `sysctl net.netfilter.nf_conntrack_tcp_timeout_established`. Add NOTRACK rules for trusted high-traffic flows.
+
+### TCP Listen Ports (v1.3.0)
+
+**Source:** `net/tcp`
+
+| Condition | Severity | Title |
+|-----------|----------|-------|
+| LISTEN socket bound to 0.0.0.0 on unexpected port | INFO | N services listening on all interfaces |
+
+**What it checks:** Scans TCP sockets in LISTEN state bound to `0.0.0.0` (all interfaces). Services exposed to all interfaces may be unintentionally accessible from the network.
+
+**Suggestion:** Review listening services with `ss -tlnp`. Bind services to `127.0.0.1` if they only need local access. Use firewall rules to restrict access.
 
 ## User-Defined Alerts (v1.1.0)
 

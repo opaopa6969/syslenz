@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: ja
 ---
 
@@ -22,6 +22,8 @@ lang: ja
 - [プロセス](#プロセス)
 - [ハードウェア](#ハードウェア)
 - [セキュリティとカーネル](#セキュリティとカーネル)
+- [GPU](#gpu)
+- [systemd](#systemd)
 - [プラグイン](#プラグイン)
 
 ## 概要
@@ -453,6 +455,56 @@ syslenz は `/proc`、`/sys`、システム設定ファイル、コマンド出�
 | **読み取り元** | `/proc/ioports` |
 | **主要フィールド** | I/Oポート割り当てのテーブル |
 | **活用場面** | ハードウェアポート割り当ての検査。 |
+
+## GPU
+
+### nvidia-smi (v1.3.0)
+
+| | |
+|---|---|
+| **読み取り元** | `nvidia-smi --query-gpu=...` コマンド出力 |
+| **主要フィールド** | gpu_temp (Float), gpu_util (Float), mem_util (Float), mem_total (Bytes), mem_used (Bytes), mem_free (Bytes), fan_speed (Float), power_draw (Float), power_limit (Float) |
+| **活用場面** | NVIDIA GPU の温度・使用率・VRAM 消費を監視。機械学習ワークロードや GPU レンダリングのボトルネック分析に。 |
+
+`nvidia-smi` がシステムに存在しない場合、このソースは自動的にスキップされます。NVIDIA ドライバがインストールされている環境でのみ利用可能です。
+
+**フィールド詳細:**
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `gpu_temp` | Float | GPU コアの現在温度 (℃) |
+| `gpu_util` | Float | GPU コアの使用率 (%) |
+| `mem_util` | Float | VRAM 帯域幅の使用率 (%) |
+| `mem_total` | Bytes | VRAM 総容量 |
+| `mem_used` | Bytes | VRAM 使用量 |
+| `mem_free` | Bytes | VRAM 空き容量 |
+| `fan_speed` | Float | ファン回転速度 (%) |
+| `power_draw` | Float | 現在の消費電力 (W) |
+| `power_limit` | Float | 電力制限値 (W) |
+
+## systemd
+
+### systemd (v1.3.0)
+
+| | |
+|---|---|
+| **読み取り元** | `systemctl` コマンド出力 |
+| **主要フィールド** | system_state (Text), service_count (Integer), running_count (Integer), failed_count (Integer), failed_services (Table) |
+| **活用場面** | systemd サービスの全体的な健全性を把握。失敗サービスの早期発見や、起動後のサービス状態確認に。 |
+
+systemd が存在しない環境（コンテナ内など）ではこのソースはスキップされます。
+
+**フィールド詳細:**
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `system_state` | Text | systemd 全体の状態 (`running`, `degraded`, `maintenance` 等) |
+| `service_count` | Integer | 登録されたサービスユニットの総数 |
+| `running_count` | Integer | 現在実行中のサービス数 |
+| `failed_count` | Integer | 失敗状態のサービス数 |
+| `failed_services` | Table | 失敗サービスの一覧 (ユニット名、状態、最終変更時刻) |
+
+`system_state` が `degraded` の場合、1つ以上のサービスが失敗しています。`failed_services` テーブルで具体的なユニット名を確認し、`journalctl -u <unit>` でログを調査してください。
 
 ## プラグイン
 

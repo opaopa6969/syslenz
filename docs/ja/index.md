@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: ja
 ---
 
@@ -86,6 +86,15 @@ docker run --rm -it --pid=host --privileged syslenz/syslenz
 - **ViewData 統一 UI** -- TUI と Web UI が同じ ViewData 構造体を共有し、一貫したデータ表示を実現
 - **Web UI 改善** -- 数値フィールドの自動グラフ表示、PgUp/PgDn キーサポート、サーバーからのカテゴリガイド配信
 - **i18n 拡張** -- フィールド翻訳カバレッジが 390/600 に拡大（前バージョンから大幅増）
+
+## v1.3.0 の新機能
+
+- **GPU 監視 (nvidia-smi)** -- NVIDIA GPU の温度、使用率、VRAM、ファン速度、消費電力をリアルタイムで監視。`nvidia-smi` が存在する環境で自動的に有効化
+- **systemd サービス監視** -- systemd の全体状態、実行中/失敗サービス数、失敗サービスの一覧を表示。`degraded` 状態を即座に把握
+- **Prometheus エクスポート (`--prometheus`)** -- OTLP Collector なしで `/metrics` エンドポイントを直接公開。Prometheus から直接スクレイプ可能
+- **診断パターン 10 種追加** -- メモリリーク検出、スワップ活動監視、OOM Kill 検出、TCP 再送/UDP エラー、最近の再起動通知、負荷スパイク/回復、高メモリプロセス警告、孤立 TCP ソケット、IP 転送検出、カーネル汚染チェック
+- **Provider システム** -- データベースやミドルウェア向けの標準化された Provider テンプレート。MySQL、PostgreSQL、Redis、nginx の公式 Provider を同梱
+- **ダッシュボード GPU セクション** -- NVIDIA GPU が利用可能な環境で、GPU 温度・使用率・VRAM をダッシュボードに表示
 
 ## ドキュメント一覧
 

@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -40,6 +40,7 @@ The dashboard is divided into sections, each displaying a key subsystem:
 | **Network** | `net/dev` | Per-interface RX/TX bytes, packets, errors, drops |
 | **Disk** | `df`, `diskstats` | Root filesystem usage, disk I/O stats |
 | **Processes** | `processes`, `stat` | Total count, running, sleeping, zombie, D-state |
+| **GPU** (v1.3.0) | `gpu` | GPU utilization, memory usage, temperature, power draw (shown only when a GPU is detected) |
 | **Uptime** | `uptime` | System uptime in human-readable format |
 
 ## Section Navigation
@@ -140,6 +141,19 @@ Root filesystem usage and I/O statistics:
 - **Reads/Writes**: I/O operations completed
 
 Usage above 80% warrants attention; above 90% is critical.
+
+### GPU (v1.3.0)
+
+When a GPU is detected (NVIDIA or AMD), the Dashboard displays a GPU section with:
+
+- **Utilization %**: Percentage of GPU compute capacity in use
+- **Memory**: GPU VRAM used vs total
+- **Temperature**: Current GPU temperature
+- **Power**: Current power draw in watts
+
+The GPU section includes an AA bar graph for utilization and memory, matching the style of the RAM/CPU bars. On multi-GPU systems, each GPU is shown separately.
+
+If no GPU is detected, the GPU section is hidden automatically.
 
 ## Drilling Into Details
 

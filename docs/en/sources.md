@@ -1,5 +1,5 @@
 ---
-version: v1.1.0
+version: v1.3.0
 lang: en
 ---
 
@@ -22,11 +22,13 @@ lang: en
 - [Process](#process)
 - [Hardware](#hardware)
 - [Security and Kernel](#security-and-kernel)
+- [GPU (v1.3.0)](#gpu-v130)
+- [systemd (v1.3.0)](#systemd-v130)
 - [Plugins](#plugins)
 
 ## Overview
 
-syslenz reads from 55+ data sources organized across `/proc`, `/sys`, system config files, and command outputs. Each source is parsed into structured, typed fields. This page documents every source, what it reads, its key fields, and when to use it.
+syslenz reads from 60+ data sources organized across `/proc`, `/sys`, system config files, and command outputs. Each source is parsed into structured, typed fields. This page documents every source, what it reads, its key fields, and when to use it.
 
 ## Memory
 
@@ -453,6 +455,56 @@ syslenz reads from 55+ data sources organized across `/proc`, `/sys`, system con
 | **Reads** | `/proc/ioports` |
 | **Key fields** | Table with I/O port assignments |
 | **When to use** | Hardware port assignment inspection. |
+
+## GPU (v1.3.0)
+
+### gpu
+
+| | |
+|---|---|
+| **Reads** | NVIDIA: `nvidia-smi` via NVML library; AMD: `/sys/class/drm/card*/device/gpu_busy_percent`, `/sys/class/drm/card*/device/mem_info_vram_used` |
+| **Key fields** | gpu_utilization (Float), gpu_memory_used (Bytes), gpu_memory_total (Bytes), gpu_temperature (Float), gpu_power_draw (Float), gpu_clock_mhz (Float), gpu_fan_speed (Float), gpu_name (Text) |
+| **When to use** | Monitoring GPU-accelerated workloads (ML training, rendering, video encoding). Check gpu_utilization for throughput and gpu_temperature for thermal throttling risk. |
+
+**Notes:**
+- NVIDIA GPUs require the NVIDIA driver and `libnvidia-ml.so` to be present on the system.
+- AMD GPUs are read via sysfs and require no additional libraries.
+- If no GPU is detected, the source is silently omitted.
+- Multi-GPU systems report per-device metrics with a `gpu_index` field.
+
+### gpu/processes
+
+| | |
+|---|---|
+| **Reads** | NVIDIA: NVML process info; AMD: `/sys/class/drm/card*/device/fdinfo/` |
+| **Key fields** | Table with columns: pid, name, gpu_memory_used, gpu_utilization |
+| **When to use** | Identifying which processes are consuming GPU resources. |
+
+## systemd (v1.3.0)
+
+### systemd/units
+
+| | |
+|---|---|
+| **Reads** | `systemctl list-units --type=service --all --no-pager --plain` |
+| **Key fields** | Table with columns: unit, load, active, sub, description |
+| **When to use** | Overview of all systemd service units and their states. Check for failed or inactive services. |
+
+### systemd/failed
+
+| | |
+|---|---|
+| **Reads** | `systemctl list-units --state=failed --no-pager --plain` |
+| **Key fields** | failed_count (Integer), Table with columns: unit, load, active, sub, description |
+| **When to use** | Quickly identify services that have failed and need attention. The diagnostics engine uses this to generate warnings. |
+
+### systemd/timers
+
+| | |
+|---|---|
+| **Reads** | `systemctl list-timers --all --no-pager --plain` |
+| **Key fields** | Table with columns: next, left, last, passed, unit, activates |
+| **When to use** | Check scheduled systemd timers (cron-like jobs) and when they last ran or will next run. |
 
 ## Plugins
 
