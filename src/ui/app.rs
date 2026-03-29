@@ -56,7 +56,7 @@ pub struct HostState {
     pub alert_events: Vec<AlertEvent>,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Focus {
     Sidebar,
     Content,
@@ -90,6 +90,7 @@ impl HelpLevel {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
     Dashboard,
     Welcome,
@@ -161,6 +162,14 @@ pub struct App {
     // === BL-074: Tutorial mode ===
     /// Current tutorial step (0-based). None if not in tutorial mode.
     pub tutorial_step: Option<usize>,
+
+    // === G18-10: Diagnostics → Detail jump navigation ===
+    /// View history stack for back-navigation from diagnostic jumps.
+    pub view_history: Vec<(View, Focus, usize, usize)>,
+    /// Selected diagnostic finding index in Diagnostics view.
+    pub selected_diagnostic: usize,
+    /// When viewing related_metrics picker, which metric is selected.
+    pub selected_related_metric: Option<usize>,
 }
 
 impl App {
@@ -217,6 +226,9 @@ impl App {
             active_host: 0,
             connection_status: ConnectionStatus::Local,
             tutorial_step: None,
+            view_history: Vec::new(),
+            selected_diagnostic: 0,
+            selected_related_metric: None,
         })
     }
 
@@ -278,6 +290,9 @@ impl App {
             active_host: 0,
             connection_status: conn_status,
             tutorial_step: None,
+            view_history: Vec::new(),
+            selected_diagnostic: 0,
+            selected_related_metric: None,
         })
     }
 
@@ -340,6 +355,9 @@ impl App {
             active_host: 0,
             connection_status: ConnectionStatus::Local,
             tutorial_step: None,
+            view_history: Vec::new(),
+            selected_diagnostic: 0,
+            selected_related_metric: None,
         })
     }
 
@@ -606,6 +624,13 @@ impl App {
                 View::CategoryGuide => {
                     self.category_scroll = self.category_scroll.saturating_sub(1);
                 }
+                View::Diagnostics => {
+                    if let Some(ref mut sel) = self.selected_related_metric {
+                        *sel = sel.saturating_sub(1);
+                    } else if self.selected_diagnostic > 0 {
+                        self.selected_diagnostic -= 1;
+                    }
+                }
                 _ => {
                     if self.selected_field > 0 {
                         self.selected_field -= 1;
@@ -639,6 +664,21 @@ impl App {
                         .saturating_sub(self.category_visible_height);
                     if self.category_scroll < max_scroll {
                         self.category_scroll += 1;
+                    }
+                }
+                View::Diagnostics => {
+                    if let Some(ref mut sel) = self.selected_related_metric {
+                        let findings = crate::diagnostics::analyze(&self.current, self.locale);
+                        if let Some(f) = findings.get(self.selected_diagnostic) {
+                            if *sel + 1 < f.related_metrics.len() {
+                                *sel += 1;
+                            }
+                        }
+                    } else {
+                        let count = crate::diagnostics::analyze(&self.current, self.locale).len();
+                        if self.selected_diagnostic + 1 < count {
+                            self.selected_diagnostic += 1;
+                        }
                     }
                 }
                 _ => {
@@ -684,13 +724,69 @@ impl App {
                             self.view = View::TableView;
                         }
                     }
-                    View::TableView | View::Diff | View::Graph | View::Diagnostics | View::CategoryGuide | View::Tutorial => {}
+                    View::Diagnostics => {
+                        let findings = crate::diagnostics::analyze(&self.current, self.locale);
+                        if let Some(finding) = findings.get(self.selected_diagnostic) {
+                            if finding.related_metrics.is_empty() {
+                                // No related metrics to jump to
+                            } else if let Some(sel) = self.selected_related_metric {
+                                // Picker is open, jump to selected metric
+                                if let Some((source, field)) = finding.related_metrics.get(sel) {
+                                    self.jump_to_metric(source, field);
+                                }
+                            } else if finding.related_metrics.len() == 1 {
+                                // Single metric: jump directly
+                                let (source, field) = &finding.related_metrics[0];
+                                self.jump_to_metric(&source.clone(), &field.clone());
+                            } else {
+                                // Multiple metrics: open picker
+                                self.selected_related_metric = Some(0);
+                            }
+                        }
+                    }
+                    View::TableView | View::Diff | View::Graph | View::CategoryGuide | View::Tutorial => {}
                 }
             }
         }
     }
 
+    /// Jump from Diagnostics view to Detail view for a specific source/field.
+    fn jump_to_metric(&mut self, source: &str, field: &str) {
+        if let Some(source_idx) = self.source_keys.iter().position(|k| k == source) {
+            let field_idx = self.current.entries.get(source)
+                .and_then(|entry| entry.fields.iter().position(|f| f.name == field))
+                .unwrap_or(0);
+            // Push current state to history for back-navigation
+            self.view_history.push((
+                View::Diagnostics,
+                Focus::Content,
+                self.selected_source,
+                self.selected_field,
+            ));
+            self.selected_source = source_idx;
+            self.selected_field = field_idx;
+            self.field_scroll = 0;
+            self.selected_related_metric = None;
+            self.focus = Focus::Content;
+            self.view = View::Detail;
+        }
+    }
+
     pub fn go_back(&mut self) {
+        // If related_metrics picker is open, close it first
+        if self.selected_related_metric.is_some() {
+            self.selected_related_metric = None;
+            return;
+        }
+        // If we have a view_history entry, pop it and restore state
+        if let Some((prev_view, prev_focus, prev_source, prev_field)) = self.view_history.pop() {
+            self.view = prev_view;
+            self.focus = prev_focus;
+            self.selected_source = prev_source;
+            self.selected_field = prev_field;
+            self.selected_related_metric = None;
+            return;
+        }
         match self.focus {
             Focus::Content => {
                 match self.view {

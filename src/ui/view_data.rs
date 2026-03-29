@@ -199,6 +199,7 @@ pub struct DiagnosticRow {
     pub title: String,
     pub detail: String,
     pub suggestion: String,
+    pub related_metrics: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1094,6 +1095,7 @@ impl App {
                     title: f.title.clone(),
                     detail: f.detail.clone(),
                     suggestion: f.suggestion.clone(),
+                    related_metrics: f.related_metrics.clone(),
                 }
             })
             .collect();

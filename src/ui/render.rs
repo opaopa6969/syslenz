@@ -84,7 +84,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         match view_data {
             ViewData::Dashboard(ref data) => draw_dashboard(f, data, main_area),
             ViewData::Welcome(ref data) => draw_welcome(f, data, app.locale, main_area),
-            ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app.locale, main_area),
+            ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app, main_area),
             ViewData::CategoryGuide(_) => draw_category_guide(f, app, main_area),
             ViewData::Tutorial(ref data) => draw_tutorial(f, data, main_area),
             _ => {}
@@ -820,10 +820,10 @@ fn section_style(selected: bool) -> Style {
     }
 }
 
-fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, locale: crate::i18n::Locale, area: Rect) {
-    let is_ja = locale == crate::i18n::Locale::Ja;
-
-    let title = format!(" {} (c to copy) ", data.title);
+fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect) {
+    let is_ja = app.locale == crate::i18n::Locale::Ja;
+    let hint = if is_ja { "Enter:ジャンプ  Backspace:戻る  c:コピー" } else { "Enter:jump  Backspace:back  c:copy" };
+    let title = format!(" {} ({}) ", data.title, hint);
 
     if data.findings.is_empty() {
         let msg = if is_ja {
@@ -838,7 +838,19 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, locale: crate::i18n::
         return;
     }
 
-    let rows: Vec<Row> = data.findings.iter().map(|finding| {
+    // If picker is open, split area into table + picker
+    let (table_area, picker_area) = if app.selected_related_metric.is_some() {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(5), Constraint::Length(8)])
+            .split(area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (area, None)
+    };
+
+    let rows: Vec<Row> = data.findings.iter().enumerate().map(|(i, finding)| {
+        let is_selected = i == app.selected_diagnostic;
         let sev_color = view_color_to_color(&finding.severity_color);
         let sev_style = Style::default().fg(sev_color);
         let sev_style = if matches!(finding.severity_color, ViewColor::Red) {
@@ -846,13 +858,20 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, locale: crate::i18n::
         } else {
             sev_style
         };
-        Row::new(vec![
+        let has_metrics = !finding.related_metrics.is_empty();
+        let indicator = if has_metrics { " >" } else { "" };
+        let row = Row::new(vec![
             Cell::from(finding.severity.clone()).style(sev_style),
             Cell::from(finding.source.clone()).style(Style::default().fg(Color::DarkGray)),
-            Cell::from(finding.title.clone()).style(sev_style),
+            Cell::from(format!("{}{}", finding.title, indicator)).style(sev_style),
             Cell::from(finding.detail.clone()),
             Cell::from(finding.suggestion.clone()).style(Style::default().fg(Color::Green)),
-        ]).height(2)
+        ]).height(2);
+        if is_selected {
+            row.style(Style::default().bg(Color::DarkGray))
+        } else {
+            row
+        }
     }).collect();
 
     let header_texts = if is_ja {
@@ -868,14 +887,34 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, locale: crate::i18n::
         Constraint::Length(40),
         Constraint::Min(30),
     ])
-    .block(Block::default().borders(Borders::ALL).title(title))
+    .block(Block::default().borders(Borders::ALL).title(title.clone()))
     .header(
         Row::new(header_texts)
             .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
             .bottom_margin(1),
     );
 
-    f.render_widget(table, area);
+    f.render_widget(table, table_area);
+
+    // Draw related_metrics picker if open
+    if let Some(picker_rect) = picker_area {
+        if let Some(finding) = data.findings.get(app.selected_diagnostic) {
+            let selected_idx = app.selected_related_metric.unwrap_or(0);
+            let picker_title = if is_ja { " 関連メトリクス (Enter:ジャンプ  Backspace:閉じる) " } else { " Related Metrics (Enter:jump  Backspace:close) " };
+            let items: Vec<Row> = finding.related_metrics.iter().enumerate().map(|(i, (src, field))| {
+                let text = format!("{}.{}", src, field);
+                let row = Row::new(vec![Cell::from(text)]);
+                if i == selected_idx {
+                    row.style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray))
+                } else {
+                    row.style(Style::default().fg(Color::White))
+                }
+            }).collect();
+            let picker = Table::new(items, [Constraint::Min(40)])
+                .block(Block::default().borders(Borders::ALL).title(picker_title));
+            f.render_widget(picker, picker_rect);
+        }
+    }
 }
 
 fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
