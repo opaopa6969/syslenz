@@ -1475,6 +1475,29 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 }
             }
         }
+
+        // Learning Breadcrumbs for ExtraDetailed only
+        if matches!(app.help_level, HelpLevel::ExtraDetailed) {
+            let crumbs = crate::education::breadcrumbs(app.locale, source_name, &field_name);
+            if !crumbs.is_empty() {
+                let header = if app.locale == crate::i18n::Locale::Ja {
+                    "  \u{1F4DA} 次に学ぶ:"
+                } else {
+                    "  \u{1F4DA} Learn next:"
+                };
+                lines.push(Line::from(Span::raw("")));
+                lines.push(Line::from(Span::styled(
+                    header,
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                )));
+                for (i, (src, fld, reason)) in crumbs.iter().enumerate() {
+                    lines.push(Line::from(Span::styled(
+                        format!("   {}. {}/{} — {}", i + 1, src, fld, reason),
+                        Style::default().fg(Color::Magenta),
+                    )));
+                }
+            }
+        }
     }
 
     // Store metadata for scroll bounds
