@@ -128,6 +128,7 @@ pub struct WelcomeData {
     pub keybindings: Vec<(String, String)>,
     pub title: String,
     pub footer: String,
+    pub tip: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -810,10 +811,13 @@ impl App {
             ]
         };
 
+        let tip = crate::education::generate_tip(&self.current, l);
+
         WelcomeData {
             keybindings,
             title,
             footer,
+            tip,
         }
     }
 

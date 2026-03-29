@@ -1222,3 +1222,256 @@ IPMI/BMC のファン速度センサーが早期警告を提供。\n\
         },
     }
 }
+
+/// Generate a "Did you know?" tip using live system data.
+/// Returns a localized tip string that incorporates actual values from the snapshot.
+pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String {
+    use crate::proc::FieldValue;
+
+    // Helper to get a numeric field value from snapshot
+    let get_val = |source: &str, field: &str| -> Option<f64> {
+        snapshot.entries.get(source).and_then(|e| {
+            e.fields.iter().find(|f| f.name == field).and_then(|f| match &f.value {
+                FieldValue::Integer(n) => Some(*n as f64),
+                FieldValue::Float(n) => Some(*n),
+                _ => None,
+            })
+        })
+    };
+
+    let get_str = |source: &str, field: &str| -> Option<String> {
+        snapshot.entries.get(source).and_then(|e| {
+            e.fields.iter().find(|f| f.name == field).and_then(|f| match &f.value {
+                FieldValue::Text(s) => Some(s.clone()),
+                _ => None,
+            })
+        })
+    };
+
+    // Build tips dynamically based on available data
+    let mut tips: Vec<String> = Vec::new();
+
+    // Memory tips
+    if let (Some(total), Some(avail)) = (get_val("meminfo", "MemTotal"), get_val("meminfo", "MemAvailable")) {
+        let pct = (avail / total * 100.0) as u64;
+        let total_gb = total / 1024.0 / 1024.0;
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "MemAvailable ({:.1}GB, {}%) は実際に使える空きメモリです。MemFree とは違い、\
+                カーネルキャッシュの回収可能分も含みます。20% 以下になるとパフォーマンスに影響が出始めます。",
+                avail / 1024.0 / 1024.0, pct
+            ));
+            tips.push(format!(
+                "このマシンの総メモリは {:.1}GB。MemTotal はカーネルが予約した分を除いた値なので、\
+                物理メモリより少し小さくなります。",
+                total_gb
+            ));
+        } else {
+            tips.push(format!(
+                "MemAvailable ({:.1}GB, {}%) is the actual usable free memory. Unlike MemFree, \
+                it includes reclaimable kernel caches. Below 20% may impact performance.",
+                avail / 1024.0 / 1024.0, pct
+            ));
+            tips.push(format!(
+                "This machine has {:.1}GB total memory. MemTotal is slightly less than physical RAM \
+                because the kernel reserves some memory before reporting.",
+                total_gb
+            ));
+        }
+    }
+
+    if let (Some(swap_total), Some(swap_free)) = (get_val("meminfo", "SwapTotal"), get_val("meminfo", "SwapFree")) {
+        if swap_total > 0.0 {
+            let swap_used_pct = ((swap_total - swap_free) / swap_total * 100.0) as u64;
+            if locale == Locale::Ja {
+                tips.push(format!(
+                    "スワップ使用率は {}%。スワップが使われること自体は問題ではありませんが、\
+                    頻繁なスワップイン/アウト (vmstat の pswpin/pswpout) はパフォーマンス低下のサインです。",
+                    swap_used_pct
+                ));
+            } else {
+                tips.push(format!(
+                    "Swap usage is at {}%. Swap use alone isn't a problem, but frequent swap in/out \
+                    (vmstat pswpin/pswpout) signals performance degradation.",
+                    swap_used_pct
+                ));
+            }
+        }
+    }
+
+    // CPU / Load tips
+    if let (Some(load1), Some(num_cpus)) = (get_val("loadavg", "load_1min"), get_val("cpuinfo", "cpu_count")) {
+        let threshold = num_cpus;
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "load average ({:.2}) が CPU コア数 ({}) を超えると、プロセスが CPU 待ちに\
+                なっていることを意味します。現在の比率: {:.0}%。",
+                load1, num_cpus as u64, load1 / threshold * 100.0
+            ));
+        } else {
+            tips.push(format!(
+                "When load average ({:.2}) exceeds CPU core count ({}), processes are waiting for CPU. \
+                Current ratio: {:.0}%.",
+                load1, num_cpus as u64, load1 / threshold * 100.0
+            ));
+        }
+    }
+
+    if let Some(procs_running) = get_val("stat", "procs_running") {
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "現在 {} 個のプロセスが実行中 (procs_running)。この数が CPU コア数を\
+                大きく超えている場合、CPU バウンドな負荷がかかっています。",
+                procs_running as u64
+            ));
+        } else {
+            tips.push(format!(
+                "Currently {} processes are running (procs_running). When this significantly exceeds \
+                CPU core count, the system is CPU-bound.",
+                procs_running as u64
+            ));
+        }
+    }
+
+    if let Some(ctxt) = get_val("stat", "ctxt") {
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "コンテキストスイッチ回数 (ctxt) は累計 {:.0} 回。1秒あたりの変化量 (差分ビュー d キー) \
+                が数万回/秒なら正常、数十万回/秒超なら過負荷の可能性。",
+                ctxt
+            ));
+        } else {
+            tips.push(format!(
+                "Context switches (ctxt) total: {:.0}. Use diff view (d key) to see per-second rate. \
+                Tens of thousands/sec is normal; hundreds of thousands may indicate overload.",
+                ctxt
+            ));
+        }
+    }
+
+    // Network tips
+    if let Some(rx) = get_val("net_dev", "rx_bytes_total") {
+        let rx_gb = rx / 1024.0 / 1024.0 / 1024.0;
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "起動以来の総受信データ量: {:.2}GB。差分ビュー (d キー) で1秒あたりの\
+                受信速度を確認できます。net_dev の rx_bytes と tx_bytes を比較すると\
+                トラフィックの方向性がわかります。",
+                rx_gb
+            ));
+        } else {
+            tips.push(format!(
+                "Total received data since boot: {:.2}GB. Use diff view (d key) for per-second rates. \
+                Compare rx_bytes vs tx_bytes in net_dev to understand traffic direction.",
+                rx_gb
+            ));
+        }
+    }
+
+    // Storage tips
+    if let Some(reads) = get_val("diskstats", "read_ios_total") {
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "ディスク読み取り I/O 操作回数: {:.0}。読み取りが多い場合は\
+                ページキャッシュ (meminfo の Cached) を確認 — キャッシュが\
+                効いていれば物理 I/O を減らせます。",
+                reads
+            ));
+        } else {
+            tips.push(format!(
+                "Disk read I/O operations: {:.0}. If reads are high, check page cache \
+                (meminfo Cached) — effective caching reduces physical I/O.",
+                reads
+            ));
+        }
+    }
+
+    // Process tips
+    if let Some(procs_blocked) = get_val("stat", "procs_blocked") {
+        if procs_blocked > 0.0 {
+            if locale == Locale::Ja {
+                tips.push(format!(
+                    "現在 {} 個のプロセスが I/O 待ちでブロック中 (procs_blocked)。\
+                    ディスクやネットワーク I/O のボトルネックを示唆しています。\
+                    diskstats や pressure の io を確認してみてください。",
+                    procs_blocked as u64
+                ));
+            } else {
+                tips.push(format!(
+                    "{} process(es) blocked on I/O (procs_blocked). This suggests disk or network \
+                    I/O bottleneck. Check diskstats and pressure io metrics.",
+                    procs_blocked as u64
+                ));
+            }
+        }
+    }
+
+    // Uptime tip
+    if let Some(uptime) = get_val("uptime", "uptime_seconds") {
+        let days = (uptime / 86400.0) as u64;
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "このマシンは {} 日間稼働中。長期稼働ではメモリリークや\
+                ファイルディスクリプタ枯渇に注意。/proc/slabinfo で\
+                カーネルメモリの増加傾向を確認できます。",
+                days
+            ));
+        } else {
+            tips.push(format!(
+                "This machine has been up for {} days. For long-running systems, watch for memory leaks \
+                and file descriptor exhaustion. Check /proc/slabinfo for kernel memory growth trends.",
+                days
+            ));
+        }
+    }
+
+    // Kernel version tip
+    if let Some(version) = get_str("version", "version_string") {
+        if locale == Locale::Ja {
+            tips.push(format!(
+                "カーネル: {}。カーネルバージョンによって利用可能なメトリクスが\
+                変わります。例えば PSI (Pressure Stall Information) は Linux 4.20+ で導入。",
+                version.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
+            ));
+        } else {
+            tips.push(format!(
+                "Kernel: {}. Available metrics depend on kernel version. For example, \
+                PSI (Pressure Stall Information) was introduced in Linux 4.20+.",
+                version.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
+            ));
+        }
+    }
+
+    // General syslenz tips (static but useful)
+    if locale == Locale::Ja {
+        tips.push("? キーでヘルプレベルを切り替え: OFF → NORMAL → DETAILED → EXTRA。\
+            EXTRA では SEE ALSO リンクやコンテキストヒントが表示されます。".into());
+        tips.push("d キーで差分ビューに切り替え。カウンタ値の1秒あたりの変化量が\
+            一目でわかります。ネットワーク速度やディスク I/O の確認に便利。".into());
+        tips.push("X キーで診断ビュー。システムの問題を自動検出して対処法を提案します。\
+            Enter キーで関連メトリクスに直接ジャンプ可能。".into());
+        tips.push("C キーでカテゴリガイド。メモリ、CPU、ネットワーク等のカテゴリ別に\
+            関連ソースと学習コンテンツをまとめて表示します。".into());
+    } else {
+        tips.push("Press ? to cycle help levels: OFF → NORMAL → DETAILED → EXTRA. \
+            EXTRA shows SEE ALSO links and contextual hints.".into());
+        tips.push("Press d for diff view. See per-second changes for counter values at a glance. \
+            Great for checking network speed and disk I/O rates.".into());
+        tips.push("Press X for diagnostics view. Auto-detects system issues and suggests fixes. \
+            Press Enter to jump directly to related metrics.".into());
+        tips.push("Press C for category guide. View related sources and learning content \
+            organized by category: Memory, CPU, Network, and more.".into());
+    }
+
+    // Select one tip based on a simple hash of timestamp
+    if tips.is_empty() {
+        return String::new();
+    }
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Change tip every 10 minutes
+    let idx = (seed / 600) as usize % tips.len();
+    tips.into_iter().nth(idx).unwrap_or_default()
+}

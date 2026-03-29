@@ -533,6 +533,20 @@ fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale,
             Style::default().fg(Color::Cyan),
         ),
     ]));
+
+    // Did you know? tip
+    if !data.tip.is_empty() {
+        keys_text.push(Line::from(""));
+        keys_text.push(Line::from(vec![
+            Span::styled("  \u{1f4a1} Did you know?  ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ]));
+        // Wrap long tips into multiple lines
+        for line in textwrap_simple(&data.tip, area.width.saturating_sub(6) as usize) {
+            keys_text.push(Line::from(vec![
+                Span::styled(format!("     {}", line), Style::default().fg(Color::White)),
+            ]));
+        }
+    }
     keys_text.push(Line::from(""));
 
     let p = Paragraph::new(keys_text)
@@ -540,6 +554,30 @@ fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale,
             .border_style(Style::default().fg(Color::Cyan)))
         .alignment(ratatui::layout::Alignment::Left);
     f.render_widget(p, area);
+}
+
+/// Simple text wrapping for tips display.
+fn textwrap_simple(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 || text.is_empty() {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current = word.to_string();
+        } else if current.len() + 1 + word.len() > max_width {
+            lines.push(current);
+            current = word.to_string();
+        } else {
+            current.push(' ');
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
 }
 
 fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
