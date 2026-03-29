@@ -5129,6 +5129,417 @@ fn field_desc_ja(source: &str, field: &str) -> Option<(&'static str, &'static st
     })
 }
 
+/// Returns related metrics for a given source+field.
+/// Format: Vec<(source, field, reason)>
+pub fn see_also(locale: Locale, source: &str, field: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+    match locale {
+        Locale::En => see_also_en(source, field),
+        Locale::Ja => see_also_ja(source, field),
+    }
+}
+
+fn see_also_en(source: &str, field: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+    match (source, field) {
+        // meminfo fields
+        ("meminfo", "MemAvailable") => vec![
+            ("meminfo", "MemFree", "Actual free memory"),
+            ("meminfo", "Cached", "Reclaimable cache"),
+            ("meminfo", "SwapFree", "Remaining swap"),
+            ("vmstat", "pgfault", "Page fault frequency"),
+            ("pressure", "memory_some_avg10", "Memory pressure"),
+        ],
+        ("meminfo", "MemFree") => vec![
+            ("meminfo", "MemAvailable", "Effective available memory"),
+            ("meminfo", "Cached", "Reclaimable cache"),
+            ("meminfo", "Buffers", "Buffer cache"),
+            ("vmstat", "pgfault", "Page fault frequency"),
+        ],
+        ("meminfo", "MemTotal") => vec![
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("meminfo", "SwapTotal", "Total swap space"),
+            ("processes", "processes", "Per-process memory usage"),
+        ],
+        ("meminfo", "Cached") => vec![
+            ("meminfo", "MemAvailable", "Available including cache"),
+            ("meminfo", "Dirty", "Pending writes"),
+            ("meminfo", "SReclaimable", "Reclaimable slab"),
+            ("vmstat", "pgfault", "Page fault rate"),
+        ],
+        ("meminfo", "SwapFree") => vec![
+            ("meminfo", "SwapTotal", "Total swap space"),
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("vmstat", "pswpin", "Swap-in pages"),
+            ("vmstat", "pswpout", "Swap-out pages"),
+        ],
+        ("meminfo", "SwapTotal") => vec![
+            ("meminfo", "SwapFree", "Available swap"),
+            ("vmstat", "pswpin", "Swap-in activity"),
+            ("vmstat", "pswpout", "Swap-out activity"),
+        ],
+        ("meminfo", "Dirty") => vec![
+            ("diskstats", "devices", "Disk I/O"),
+            ("pressure", "io_some_avg10", "I/O pressure"),
+            ("meminfo", "Writeback", "Writeback in progress"),
+        ],
+
+        // loadavg
+        ("loadavg", "load1") => vec![
+            ("stat", "cpu_user", "CPU usage"),
+            ("pressure", "cpu_some_avg10", "CPU pressure"),
+            ("stat", "procs_running", "Running process count"),
+            ("loadavg", "load15", "Long-term trend"),
+        ],
+        ("loadavg", "load5") => vec![
+            ("loadavg", "load1", "Short-term load"),
+            ("loadavg", "load15", "Long-term load"),
+            ("stat", "cpu_user", "CPU usage"),
+        ],
+        ("loadavg", "load15") => vec![
+            ("loadavg", "load1", "Short-term trend"),
+            ("stat", "cpu_user", "CPU usage"),
+            ("pressure", "cpu_some_avg10", "CPU pressure"),
+        ],
+
+        // stat
+        ("stat", "cpu_user") => vec![
+            ("stat", "cpu_system", "Kernel CPU time"),
+            ("stat", "cpu_iowait", "I/O wait time"),
+            ("loadavg", "load1", "Load average"),
+            ("pressure", "cpu_some_avg10", "CPU pressure"),
+        ],
+        ("stat", "cpu_iowait") => vec![
+            ("pressure", "io_some_avg10", "I/O pressure"),
+            ("diskstats", "devices", "Disk I/O stats"),
+            ("meminfo", "Dirty", "Pending writes"),
+            ("vmstat", "pgmajfault", "Major page faults"),
+        ],
+        ("stat", "procs_running") => vec![
+            ("loadavg", "load1", "Load average"),
+            ("stat", "cpu_user", "CPU usage"),
+            ("pressure", "cpu_some_avg10", "CPU pressure"),
+        ],
+        ("stat", "cpu_system") => vec![
+            ("stat", "cpu_user", "User CPU time"),
+            ("stat", "ctxt", "Context switches"),
+            ("interrupts", "interrupt_total", "Hardware interrupts"),
+        ],
+
+        // net/tcp
+        ("net/tcp", "connections") => vec![
+            ("net/sockstat", "TCP_tw", "TIME_WAIT count"),
+            ("net/snmp", "Tcp_RetransSegs", "Retransmissions"),
+            ("ss", "tcp_orphaned", "Orphaned sockets"),
+            ("file-nr", "fd_usage_pct", "FD usage"),
+        ],
+
+        // processes
+        ("processes", "processes") => vec![
+            ("stat", "procs_running", "Running count"),
+            ("loadavg", "load1", "Load average"),
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("vmstat", "oom_kill", "OOM kill count"),
+        ],
+
+        // pressure
+        ("pressure", "cpu_some_avg10") => vec![
+            ("loadavg", "load1", "Load average"),
+            ("stat", "cpu_user", "CPU user time"),
+            ("stat", "procs_running", "Running processes"),
+        ],
+        ("pressure", "memory_some_avg10") => vec![
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("vmstat", "pswpout", "Swap-out activity"),
+            ("vmstat", "pgmajfault", "Major page faults"),
+            ("vmstat", "oom_kill", "OOM kill count"),
+        ],
+        ("pressure", "io_some_avg10") => vec![
+            ("diskstats", "devices", "Disk I/O"),
+            ("stat", "cpu_iowait", "I/O wait CPU"),
+            ("meminfo", "Dirty", "Pending writes"),
+        ],
+
+        // df
+        ("df", "root_use_pct") => vec![
+            ("diskstats", "devices", "Disk I/O"),
+            ("pressure", "io_some_avg10", "I/O pressure"),
+            ("meminfo", "Dirty", "Pending write pages"),
+        ],
+
+        // vmstat
+        ("vmstat", "pgfault") => vec![
+            ("vmstat", "pgmajfault", "Major page faults"),
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("pressure", "memory_some_avg10", "Memory pressure"),
+        ],
+        ("vmstat", "pgmajfault") => vec![
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("vmstat", "pswpin", "Swap-in"),
+            ("pressure", "memory_some_avg10", "Memory pressure"),
+        ],
+        ("vmstat", "pswpin") => vec![
+            ("vmstat", "pswpout", "Swap-out"),
+            ("meminfo", "SwapFree", "Available swap"),
+            ("meminfo", "MemAvailable", "Available memory"),
+        ],
+        ("vmstat", "pswpout") => vec![
+            ("vmstat", "pswpin", "Swap-in"),
+            ("meminfo", "SwapFree", "Available swap"),
+            ("pressure", "memory_some_avg10", "Memory pressure"),
+        ],
+        ("vmstat", "oom_kill") => vec![
+            ("meminfo", "MemAvailable", "Available memory"),
+            ("meminfo", "SwapFree", "Available swap"),
+            ("vmstat", "pswpout", "Swap-out activity"),
+            ("processes", "processes", "Process list"),
+        ],
+
+        // thermal
+        ("thermal", "max_temp") => vec![
+            ("stat", "cpu_user", "CPU usage"),
+            ("loadavg", "load1", "Load average"),
+            ("pressure", "cpu_some_avg10", "CPU pressure"),
+        ],
+
+        // file-nr
+        ("file-nr", "fd_usage_pct") => vec![
+            ("net/tcp", "connections", "TCP connections"),
+            ("processes", "processes", "Process list"),
+            ("net/sockstat", "TCP_tw", "TIME_WAIT sockets"),
+        ],
+
+        // net/sockstat
+        ("net/sockstat", "TCP_tw") => vec![
+            ("net/tcp", "connections", "TCP connections"),
+            ("net/snmp", "Tcp_RetransSegs", "Retransmissions"),
+            ("ss", "tcp_orphaned", "Orphaned sockets"),
+        ],
+
+        // net/snmp
+        ("net/snmp", "Tcp_RetransSegs") => vec![
+            ("net/tcp", "connections", "TCP connections"),
+            ("net/snmp", "Tcp_OutSegs", "TCP segments sent"),
+            ("net/dev", "tx_bytes", "Network TX"),
+        ],
+
+        // ss
+        ("ss", "tcp_orphaned") => vec![
+            ("net/tcp", "connections", "TCP connections"),
+            ("file-nr", "fd_usage_pct", "FD usage"),
+            ("net/sockstat", "TCP_tw", "TIME_WAIT count"),
+        ],
+
+        // diskstats
+        ("diskstats", "devices") => vec![
+            ("df", "root_use_pct", "Disk usage"),
+            ("pressure", "io_some_avg10", "I/O pressure"),
+            ("stat", "cpu_iowait", "I/O wait CPU"),
+        ],
+
+        _ => vec![],
+    }
+}
+
+fn see_also_ja(source: &str, field: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+    match (source, field) {
+        // meminfo fields
+        ("meminfo", "MemAvailable") => vec![
+            ("meminfo", "MemFree", "実際の空きメモリ"),
+            ("meminfo", "Cached", "回収可能なキャッシュ"),
+            ("meminfo", "SwapFree", "スワップ残量"),
+            ("vmstat", "pgfault", "ページフォルト頻度"),
+            ("pressure", "memory_some_avg10", "メモリ圧力"),
+        ],
+        ("meminfo", "MemFree") => vec![
+            ("meminfo", "MemAvailable", "実効利用可能メモリ"),
+            ("meminfo", "Cached", "回収可能なキャッシュ"),
+            ("meminfo", "Buffers", "バッファキャッシュ"),
+            ("vmstat", "pgfault", "ページフォルト頻度"),
+        ],
+        ("meminfo", "MemTotal") => vec![
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("meminfo", "SwapTotal", "スワップ合計"),
+            ("processes", "processes", "プロセス別メモリ使用量"),
+        ],
+        ("meminfo", "Cached") => vec![
+            ("meminfo", "MemAvailable", "キャッシュ込みの利用可能量"),
+            ("meminfo", "Dirty", "書き込み待ちページ"),
+            ("meminfo", "SReclaimable", "回収可能スラブ"),
+            ("vmstat", "pgfault", "ページフォルト率"),
+        ],
+        ("meminfo", "SwapFree") => vec![
+            ("meminfo", "SwapTotal", "スワップ合計"),
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("vmstat", "pswpin", "スワップインページ"),
+            ("vmstat", "pswpout", "スワップアウトページ"),
+        ],
+        ("meminfo", "SwapTotal") => vec![
+            ("meminfo", "SwapFree", "スワップ残量"),
+            ("vmstat", "pswpin", "スワップイン活動"),
+            ("vmstat", "pswpout", "スワップアウト活動"),
+        ],
+        ("meminfo", "Dirty") => vec![
+            ("diskstats", "devices", "ディスクI/O"),
+            ("pressure", "io_some_avg10", "I/O圧力"),
+            ("meminfo", "Writeback", "書き戻し中"),
+        ],
+
+        // loadavg
+        ("loadavg", "load1") => vec![
+            ("stat", "cpu_user", "CPU使用率"),
+            ("pressure", "cpu_some_avg10", "CPU圧力"),
+            ("stat", "procs_running", "実行中プロセス数"),
+            ("loadavg", "load15", "長期トレンド"),
+        ],
+        ("loadavg", "load5") => vec![
+            ("loadavg", "load1", "短期負荷"),
+            ("loadavg", "load15", "長期負荷"),
+            ("stat", "cpu_user", "CPU使用率"),
+        ],
+        ("loadavg", "load15") => vec![
+            ("loadavg", "load1", "短期トレンド"),
+            ("stat", "cpu_user", "CPU使用率"),
+            ("pressure", "cpu_some_avg10", "CPU圧力"),
+        ],
+
+        // stat
+        ("stat", "cpu_user") => vec![
+            ("stat", "cpu_system", "カーネルCPU時間"),
+            ("stat", "cpu_iowait", "I/O待ち時間"),
+            ("loadavg", "load1", "負荷平均"),
+            ("pressure", "cpu_some_avg10", "CPU圧力"),
+        ],
+        ("stat", "cpu_iowait") => vec![
+            ("pressure", "io_some_avg10", "I/O圧力"),
+            ("diskstats", "devices", "ディスクI/O統計"),
+            ("meminfo", "Dirty", "書き込み待ちページ"),
+            ("vmstat", "pgmajfault", "メジャーページフォルト"),
+        ],
+        ("stat", "procs_running") => vec![
+            ("loadavg", "load1", "負荷平均"),
+            ("stat", "cpu_user", "CPU使用率"),
+            ("pressure", "cpu_some_avg10", "CPU圧力"),
+        ],
+        ("stat", "cpu_system") => vec![
+            ("stat", "cpu_user", "ユーザーCPU時間"),
+            ("stat", "ctxt", "コンテキストスイッチ"),
+            ("interrupts", "interrupt_total", "ハードウェア割り込み"),
+        ],
+
+        // net/tcp
+        ("net/tcp", "connections") => vec![
+            ("net/sockstat", "TCP_tw", "TIME_WAIT数"),
+            ("net/snmp", "Tcp_RetransSegs", "再送数"),
+            ("ss", "tcp_orphaned", "孤立ソケット"),
+            ("file-nr", "fd_usage_pct", "FD使用率"),
+        ],
+
+        // processes
+        ("processes", "processes") => vec![
+            ("stat", "procs_running", "実行中プロセス数"),
+            ("loadavg", "load1", "負荷平均"),
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("vmstat", "oom_kill", "OOMキル回数"),
+        ],
+
+        // pressure
+        ("pressure", "cpu_some_avg10") => vec![
+            ("loadavg", "load1", "負荷平均"),
+            ("stat", "cpu_user", "CPUユーザー時間"),
+            ("stat", "procs_running", "実行中プロセス数"),
+        ],
+        ("pressure", "memory_some_avg10") => vec![
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("vmstat", "pswpout", "スワップアウト活動"),
+            ("vmstat", "pgmajfault", "メジャーページフォルト"),
+            ("vmstat", "oom_kill", "OOMキル回数"),
+        ],
+        ("pressure", "io_some_avg10") => vec![
+            ("diskstats", "devices", "ディスクI/O"),
+            ("stat", "cpu_iowait", "I/O待ちCPU"),
+            ("meminfo", "Dirty", "書き込み待ちページ"),
+        ],
+
+        // df
+        ("df", "root_use_pct") => vec![
+            ("diskstats", "devices", "ディスクI/O"),
+            ("pressure", "io_some_avg10", "I/O圧力"),
+            ("meminfo", "Dirty", "書き込み待ちページ"),
+        ],
+
+        // vmstat
+        ("vmstat", "pgfault") => vec![
+            ("vmstat", "pgmajfault", "メジャーページフォルト"),
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("pressure", "memory_some_avg10", "メモリ圧力"),
+        ],
+        ("vmstat", "pgmajfault") => vec![
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("vmstat", "pswpin", "スワップイン"),
+            ("pressure", "memory_some_avg10", "メモリ圧力"),
+        ],
+        ("vmstat", "pswpin") => vec![
+            ("vmstat", "pswpout", "スワップアウト"),
+            ("meminfo", "SwapFree", "スワップ残量"),
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+        ],
+        ("vmstat", "pswpout") => vec![
+            ("vmstat", "pswpin", "スワップイン"),
+            ("meminfo", "SwapFree", "スワップ残量"),
+            ("pressure", "memory_some_avg10", "メモリ圧力"),
+        ],
+        ("vmstat", "oom_kill") => vec![
+            ("meminfo", "MemAvailable", "利用可能メモリ"),
+            ("meminfo", "SwapFree", "スワップ残量"),
+            ("vmstat", "pswpout", "スワップアウト活動"),
+            ("processes", "processes", "プロセス一覧"),
+        ],
+
+        // thermal
+        ("thermal", "max_temp") => vec![
+            ("stat", "cpu_user", "CPU使用率"),
+            ("loadavg", "load1", "負荷平均"),
+            ("pressure", "cpu_some_avg10", "CPU圧力"),
+        ],
+
+        // file-nr
+        ("file-nr", "fd_usage_pct") => vec![
+            ("net/tcp", "connections", "TCP接続"),
+            ("processes", "processes", "プロセス一覧"),
+            ("net/sockstat", "TCP_tw", "TIME_WAITソケット"),
+        ],
+
+        // net/sockstat
+        ("net/sockstat", "TCP_tw") => vec![
+            ("net/tcp", "connections", "TCP接続"),
+            ("net/snmp", "Tcp_RetransSegs", "再送数"),
+            ("ss", "tcp_orphaned", "孤立ソケット"),
+        ],
+
+        // net/snmp
+        ("net/snmp", "Tcp_RetransSegs") => vec![
+            ("net/tcp", "connections", "TCP接続"),
+            ("net/snmp", "Tcp_OutSegs", "TCP送信セグメント"),
+            ("net/dev", "tx_bytes", "ネットワーク送信"),
+        ],
+
+        // ss
+        ("ss", "tcp_orphaned") => vec![
+            ("net/tcp", "connections", "TCP接続"),
+            ("file-nr", "fd_usage_pct", "FD使用率"),
+            ("net/sockstat", "TCP_tw", "TIME_WAIT数"),
+        ],
+
+        // diskstats
+        ("diskstats", "devices") => vec![
+            ("df", "root_use_pct", "ディスク使用率"),
+            ("pressure", "io_some_avg10", "I/O圧力"),
+            ("stat", "cpu_iowait", "I/O待ちCPU"),
+        ],
+
+        _ => vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

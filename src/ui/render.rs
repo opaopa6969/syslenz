@@ -1173,6 +1173,172 @@ fn style_education_line(text: &str) -> Line<'static> {
     Line::from(spans)
 }
 
+fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
+    let snap = &app.current;
+    let locale = app.locale;
+
+    let get_bytes = |src: &str, fld: &str| -> Option<u64> {
+        snap.entries.get(src)?
+            .fields.iter()
+            .find(|f| f.name == fld)
+            .and_then(|f| match f.value {
+                FieldValue::Bytes(v) => Some(v),
+                _ => None,
+            })
+    };
+
+    let get_float = |src: &str, fld: &str| -> Option<f64> {
+        snap.entries.get(src)?
+            .fields.iter()
+            .find(|f| f.name == fld)
+            .and_then(|f| match f.value {
+                FieldValue::Float(v) => Some(v),
+                FieldValue::Integer(v) => Some(v as f64),
+                _ => None,
+            })
+    };
+
+    let get_integer = |src: &str, fld: &str| -> Option<i64> {
+        snap.entries.get(src)?
+            .fields.iter()
+            .find(|f| f.name == fld)
+            .and_then(|f| match f.value {
+                FieldValue::Integer(v) => Some(v),
+                _ => None,
+            })
+    };
+
+    match (source, field) {
+        ("meminfo", "MemAvailable") => {
+            let total = get_bytes("meminfo", "MemTotal")?;
+            let avail = get_bytes("meminfo", "MemAvailable")?;
+            if total > 0 {
+                let pct = (avail as f64 / total as f64) * 100.0;
+                if pct < 20.0 {
+                    return Some(if locale == crate::i18n::Locale::Ja {
+                        format!("現在メモリが圧迫されています ({:.1}%)。Cached と SwapFree を確認してください", pct)
+                    } else {
+                        format!("Memory is currently under pressure ({:.1}%). Check Cached and SwapFree", pct)
+                    });
+                }
+            }
+            None
+        }
+        ("loadavg", "load1") => {
+            let load1 = get_float("loadavg", "load1")?;
+            let cpu_count = get_integer("stat", "cpu_count")
+                .or_else(|| get_integer("cpuinfo", "cpu_count"))
+                .unwrap_or(1) as f64;
+            if cpu_count > 0.0 && load1 > cpu_count {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("負荷 {:.1} が CPU 数 ({}) を超過。プロセスがキュー待ち", load1, cpu_count as i64)
+                } else {
+                    format!("Load {:.1} exceeds CPU count ({}). Processes are queuing", load1, cpu_count as i64)
+                });
+            }
+            None
+        }
+        ("stat", "cpu_iowait") => {
+            let iowait = get_float("stat", "cpu_iowait")?;
+            if iowait > 10.0 {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("I/O 待ち {:.1}% — ディスクボトルネックの可能性。diskstats と pressure を確認", iowait)
+                } else {
+                    format!("I/O wait {:.1}% — possible disk bottleneck. Check diskstats and pressure", iowait)
+                });
+            }
+            None
+        }
+        ("meminfo", "SwapFree") => {
+            let total = get_bytes("meminfo", "SwapTotal")?;
+            let free = get_bytes("meminfo", "SwapFree")?;
+            if total > 0 {
+                let pct_free = (free as f64 / total as f64) * 100.0;
+                if pct_free < 50.0 {
+                    return Some(if locale == crate::i18n::Locale::Ja {
+                        format!("スワップ残量 {:.1}%。メモリ不足によりスワッピングが進行中", pct_free)
+                    } else {
+                        format!("Swap {:.1}% remaining. Swapping is active due to memory pressure", pct_free)
+                    });
+                }
+            }
+            None
+        }
+        ("df", "root_use_pct") => {
+            let use_pct = get_float("df", "root_use_pct")?;
+            if use_pct > 80.0 {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("ディスク使用率 {:.1}%。容量不足に注意", use_pct)
+                } else {
+                    format!("Disk usage {:.1}%. Watch for space exhaustion", use_pct)
+                });
+            }
+            None
+        }
+        ("file-nr", "fd_usage_pct") => {
+            let usage = get_float("file-nr", "fd_usage_pct")?;
+            if usage > 50.0 {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("FD 使用率 {:.1}%。枯渇するとプロセスがファイルやソケットを開けな���なります", usage)
+                } else {
+                    format!("FD usage {:.1}%. Exhaustion prevents opening files or sockets", usage)
+                });
+            }
+            None
+        }
+        ("thermal", "max_temp") => {
+            let temp = get_float("thermal", "max_temp")?;
+            if temp > 70.0 {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("CPU 温度 {:.0}\u{00B0}C。サーマルスロットリングに注意", temp)
+                } else {
+                    format!("CPU temperature {:.0}\u{00B0}C. Watch for thermal throttling", temp)
+                });
+            }
+            None
+        }
+        ("net/tcp", "connections") => {
+            // Check for CLOSE_WAIT count
+            let entry = snap.entries.get("net/tcp")?;
+            let conn_field = entry.fields.iter().find(|f| f.name == "connections")?;
+            if let FieldValue::Table(rows) = &conn_field.value {
+                let close_wait = rows.iter().filter(|r| r.len() >= 4 && r[3] == "CLOSE_WAIT").count();
+                if close_wait > 10 {
+                    return Some(if locale == crate::i18n::Locale::Ja {
+                        format!("CLOSE_WAIT {}件 — ソケットリークの可能性", close_wait)
+                    } else {
+                        format!("{} CLOSE_WAIT connections — possible socket leak", close_wait)
+                    });
+                }
+            }
+            None
+        }
+        ("vmstat", "pswpout") => {
+            let pswpout = get_integer("vmstat", "pswpout")?;
+            if pswpout > 0 {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("スワップアウト活動中 ({} ページ)。メモリ圧力が存在", pswpout)
+                } else {
+                    format!("Active swap-out ({} pages). Memory pressure exists", pswpout)
+                });
+            }
+            None
+        }
+        ("vmstat", "oom_kill") => {
+            let oom = get_integer("vmstat", "oom_kill")?;
+            if oom > 0 {
+                return Some(if locale == crate::i18n::Locale::Ja {
+                    format!("OOM Killer が {}回発動。過去にメモリ枯渇が発生", oom)
+                } else {
+                    format!("OOM Killer invoked {} time(s). Past memory exhaustion occurred", oom)
+                });
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
     use super::app::HelpLevel;
 
@@ -1236,6 +1402,35 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 format!("  {}", desc_line),
                 style,
             )));
+        }
+
+        // Contextual hint based on current value
+        if matches!(app.help_level, HelpLevel::Detailed | HelpLevel::ExtraDetailed) {
+            let contextual_hint = get_contextual_hint(app, source_name, &field_name);
+            if let Some(hint) = contextual_hint {
+                lines.push(Line::from(Span::styled(
+                    format!("  \u{26A0} {}", hint),
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
+        }
+
+        // SEE ALSO section for Detailed and ExtraDetailed
+        if matches!(app.help_level, HelpLevel::Detailed | HelpLevel::ExtraDetailed) {
+            let related = i18n::see_also(app.locale, source_name, &field_name);
+            if !related.is_empty() {
+                lines.push(Line::from(Span::raw("")));
+                lines.push(Line::from(Span::styled(
+                    "  SEE ALSO:",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )));
+                for (src, fld, reason) in &related {
+                    lines.push(Line::from(Span::styled(
+                        format!("   \u{2192} {}/{} ({})", src, fld, reason),
+                        Style::default().fg(Color::Cyan),
+                    )));
+                }
+            }
         }
     }
 
