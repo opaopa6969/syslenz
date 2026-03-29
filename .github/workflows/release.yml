@@ -9,8 +9,55 @@ permissions:
   contents: write
 
 jobs:
+  # Validate that CHANGELOG.md has an entry for this version
+  changelog-check:
+    name: Validate CHANGELOG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check CHANGELOG entry exists
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! grep -q "\[${VERSION}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no entry for version ${VERSION}"
+            echo "Please add a section: ## [${VERSION}] - YYYY-MM-DD"
+            exit 1
+          fi
+          echo "Found CHANGELOG entry for ${VERSION}"
+
+  # Validate crates.io packaging
+  package-check:
+    name: Validate crates.io package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check package contents
+        run: |
+          echo "=== Files included in crate package ==="
+          cargo package --list
+          echo ""
+          echo "=== Checking for unwanted files ==="
+          if cargo package --list | grep -E "^(target/|\.git/)"; then
+            echo "::error::Package contains unwanted files (target/ or .git/)"
+            exit 1
+          fi
+          echo "No unwanted files found."
+
+      - name: Dry-run publish
+        run: cargo publish --dry-run
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   build:
     name: Build ${{ matrix.target }}
+    needs: [changelog-check, package-check]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -58,32 +105,62 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Rename binary (Unix)
+      # Package as tar.gz (Unix) or zip (Windows)
+      - name: Package binary (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/syslenz ${{ matrix.artifact }}
-          chmod +x ${{ matrix.artifact }}
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/syslenz staging/
+          cp README.md LICENSE CHANGELOG.md staging/ 2>/dev/null || true
+          cd staging
+          tar czf ../${{ matrix.artifact }}.tar.gz *
+          cd ..
 
-      - name: Rename binary (Windows)
+      - name: Package binary (Windows)
         if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/syslenz.exe ${{ matrix.artifact }}
-
-      - name: Generate SHA256
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
-          else
-            sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
-          fi
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/syslenz.exe staging/
+          cp README.md LICENSE CHANGELOG.md staging/ 2>/dev/null || true
+          cd staging
+          7z a ../${{ matrix.artifact }}.zip *
+          cd ..
 
-      - name: Upload artifact
+      - name: Generate SHA256 (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            shasum -a 256 ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+          else
+            sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+          fi
+          cat ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Generate SHA256 (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sha256sum ${{ matrix.artifact }}.zip > ${{ matrix.artifact }}.zip.sha256
+          cat ${{ matrix.artifact }}.zip.sha256
+
+      - name: Upload artifact (Unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
-            ${{ matrix.artifact }}
-            ${{ matrix.artifact }}.sha256
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.zip.sha256
 
   release:
     name: Create Release
@@ -97,11 +174,19 @@ jobs:
         with:
           path: artifacts
 
-      - name: Collect binaries
+      - name: Collect release files and generate checksums.txt
         run: |
           mkdir -p release
           find artifacts -type f \( -name "syslenz-*" \) -exec cp {} release/ \;
+          echo "=== Release files ==="
           ls -la release/
+
+          # Generate consolidated checksums.txt
+          cd release
+          cat *.sha256 | sort > checksums.txt
+          echo ""
+          echo "=== checksums.txt ==="
+          cat checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -118,6 +203,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify dry-run
+        run: cargo publish --dry-run
+
       - name: Publish
         run: cargo publish --allow-dirty
         env:

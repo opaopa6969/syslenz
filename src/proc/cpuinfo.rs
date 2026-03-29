@@ -3,6 +3,10 @@ use std::fs;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
     let content = fs::read_to_string("/proc/cpuinfo")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let mut fields = Vec::new();
 
     let mut cpu_count = 0;

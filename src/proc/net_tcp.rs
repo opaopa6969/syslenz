@@ -11,28 +11,41 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         };
 
         let proto = if *path == "/proc/net/tcp" { "tcp" } else { "tcp6" };
-
-        for (i, line) in content.lines().enumerate() {
-            if i == 0 {
-                continue; // skip header
-            }
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 4 {
-                let local = parse_addr(parts[1]);
-                let remote = parse_addr(parts[2]);
-                let state = decode_tcp_state(parts[3]);
-                let uid = parts.get(7).unwrap_or(&"?").to_string();
-                rows.push(vec![
-                    proto.to_string(),
-                    local,
-                    remote,
-                    state,
-                    uid,
-                ]);
-            }
-        }
+        parse_proto_content(proto, &content, &mut rows);
     }
 
+    build_entry(rows)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
+    let mut rows = Vec::new();
+    parse_proto_content("tcp", content, &mut rows);
+    build_entry(rows)
+}
+
+fn parse_proto_content(proto: &str, content: &str, rows: &mut Vec<Vec<String>>) {
+    for (i, line) in content.lines().enumerate() {
+        if i == 0 {
+            continue; // skip header
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 4 {
+            let local = parse_addr(parts[1]);
+            let remote = parse_addr(parts[2]);
+            let state = decode_tcp_state(parts[3]);
+            let uid = parts.get(7).unwrap_or(&"?").to_string();
+            rows.push(vec![
+                proto.to_string(),
+                local,
+                remote,
+                state,
+                uid,
+            ]);
+        }
+    }
+}
+
+fn build_entry(rows: Vec<Vec<String>>) -> anyhow::Result<ProcEntry> {
     let count = rows.len() as i64;
 
     Ok(ProcEntry {

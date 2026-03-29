@@ -10,10 +10,54 @@
 use crate::proc::Snapshot;
 
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+
+// ---------------------------------------------------------------------------
+// BL-072: SSH ControlMaster support
+// ---------------------------------------------------------------------------
+
+/// Return the directory used for SSH ControlMaster sockets.
+/// Creates it if missing (mode 0700 for security).
+fn control_socket_dir() -> PathBuf {
+    let dir = if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        PathBuf::from(runtime).join("syslenz-ssh")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".cache").join("syslenz-ssh")
+    } else {
+        PathBuf::from("/tmp/syslenz-ssh")
+    };
+    if !dir.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    dir
+}
+
+/// Return the ControlPath for a given host. The socket is placed under
+/// [`control_socket_dir`] using the host string (sanitized).
+fn control_path_for(host: &str) -> PathBuf {
+    let sanitized: String = host.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
+    control_socket_dir().join(format!("ctl-{}", sanitized))
+}
+
+/// Build common SSH arguments that enable ControlMaster socket reuse.
+fn ssh_control_args(host: &str) -> Vec<String> {
+    let ctl = control_path_for(host);
+    let ctl_str = ctl.to_string_lossy().to_string();
+    vec![
+        "-o".to_string(), format!("ControlPath={}", ctl_str),
+        "-o".to_string(), "ControlMaster=auto".to_string(),
+        "-o".to_string(), "ControlPersist=60".to_string(),
+    ]
+}
 
 /// Capture a single [`Snapshot`] from a remote host via SSH.
 ///
@@ -29,7 +73,9 @@ use std::time::Duration;
 ///   not installed).
 /// - The output cannot be parsed as a valid `Snapshot`.
 pub fn capture_remote(host: &str) -> anyhow::Result<Snapshot> {
-    let mut child = Command::new("ssh")
+    let ctl_args = ssh_control_args(host);
+    let mut cmd = Command::new("ssh");
+    cmd
         // Disable pseudo-TTY allocation — we only want stdout.
         .arg("-T")
         // Batch mode: never prompt for passwords (rely on keys / agent).
@@ -37,7 +83,12 @@ pub fn capture_remote(host: &str) -> anyhow::Result<Snapshot> {
         .arg("BatchMode=yes")
         // Fail fast on connection issues.
         .arg("-o")
-        .arg("ConnectTimeout=10")
+        .arg("ConnectTimeout=10");
+    // BL-072: ControlMaster args for persistent connections
+    for arg in &ctl_args {
+        cmd.arg(arg);
+    }
+    let mut child = cmd
         .arg(host)
         .arg("syslenz")
         .arg("--export")

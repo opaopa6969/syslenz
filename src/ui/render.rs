@@ -11,7 +11,7 @@ use crate::i18n::{self, T};
 use crate::proc::FieldValue;
 use super::app::{App, View};
 use super::view_data::{
-    DashboardData, DetailData, DiagnosticsData, ViewColor, ViewData,
+    DashboardData, DetailData, DiagnosticsData, ViewColor, ViewData, WelcomeData,
 };
 
 /// Convert a ViewColor to a ratatui Color.
@@ -75,17 +75,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Build the ViewData layer — pre-computed data for the current view.
     let view_data = app.build_view_data();
 
-    // Dashboard and Welcome are full-width (no sidebar)
-    let is_fullwidth = matches!(app.view, View::Dashboard | View::Welcome | View::Diagnostics | View::CategoryGuide);
+    // Dashboard, Welcome, Tutorial etc are full-width (no sidebar)
+    let is_fullwidth = matches!(app.view, View::Dashboard | View::Welcome | View::Diagnostics | View::CategoryGuide | View::Tutorial);
 
     let main_area = chunks[main_chunk_idx];
 
     if is_fullwidth {
         match view_data {
             ViewData::Dashboard(ref data) => draw_dashboard(f, data, main_area),
-            ViewData::Welcome(_) => draw_welcome(f, app, main_area),
+            ViewData::Welcome(ref data) => draw_welcome(f, data, app.locale, main_area),
             ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app.locale, main_area),
             ViewData::CategoryGuide(_) => draw_category_guide(f, app, main_area),
+            ViewData::Tutorial(ref data) => draw_tutorial(f, data, main_area),
             _ => {}
         }
     } else {
@@ -138,19 +139,41 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
+    use super::app::ConnectionStatus;
+
     let mut spans = Vec::new();
-    for (i, label) in app.host_labels.iter().enumerate() {
+    for (i, host) in app.hosts.iter().enumerate() {
         let fkey = format!("F{}", i + 1);
+        // Color based on connection status
+        let conn_indicator = match &host.connection_status {
+            ConnectionStatus::Local => "",
+            ConnectionStatus::Connected { .. } => "\u{25CF}", // filled circle
+            ConnectionStatus::Disconnected { .. } => "\u{25CB}", // empty circle
+            ConnectionStatus::Connecting => "\u{25D4}", // half circle
+        };
+        let label_text = if conn_indicator.is_empty() {
+            format!(" [{}:{}] ", fkey, host.label)
+        } else {
+            format!(" [{}:{} {}] ", fkey, host.label, conn_indicator)
+        };
+
         if i == app.active_host {
+            let bg = match &host.connection_status {
+                ConnectionStatus::Disconnected { .. } => Color::Yellow,
+                _ => Color::Cyan,
+            };
             spans.push(Span::styled(
-                format!(" [{}:{}] ", fkey, label),
-                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+                label_text,
+                Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(
-                format!(" [{}:{}] ", fkey, label),
-                Style::default().fg(Color::DarkGray),
-            ));
+            let fg = match &host.connection_status {
+                ConnectionStatus::Connected { .. } => Color::Green,
+                ConnectionStatus::Disconnected { .. } => Color::Yellow,
+                ConnectionStatus::Connecting => Color::DarkGray,
+                ConnectionStatus::Local => Color::DarkGray,
+            };
+            spans.push(Span::styled(label_text, Style::default().fg(fg)));
         }
     }
     let line = Line::from(spans);
@@ -451,123 +474,66 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn draw_welcome(f: &mut Frame, app: &App, area: Rect) {
-    let l = app.locale;
-    let title = if l == crate::i18n::Locale::Ja {
-        " syslenz — /proc の全てを構造化データで "
-    } else {
-        " syslenz — Wireshark for /proc "
-    };
+/// BL-074: Render the interactive tutorial view.
+fn draw_tutorial(f: &mut Frame, data: &super::view_data::TutorialData, area: Rect) {
+    let title = format!(" {} ", data.title);
 
-    let (keys_text, _footer) = if l == crate::i18n::Locale::Ja {
-        (vec![
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  D       ", Style::default().fg(Color::Yellow)),
-                Span::raw("ダッシュボード（システム概要）"),
-            ]),
-            Line::from(vec![
-                Span::styled("  O       ", Style::default().fg(Color::Yellow)),
-                Span::raw("クラシックモード（全ソース一覧）"),
-            ]),
-            Line::from(vec![
-                Span::styled("  j/k ↑/↓ ", Style::default().fg(Color::Yellow)),
-                Span::raw("ソース / フィールド移動"),
-            ]),
-            Line::from(vec![
-                Span::styled("  Enter → ", Style::default().fg(Color::Yellow)),
-                Span::raw("ドリルイン（詳細表示）"),
-            ]),
-            Line::from(vec![
-                Span::styled("  BS ←    ", Style::default().fg(Color::Yellow)),
-                Span::raw("戻る"),
-            ]),
-            Line::from(vec![
-                Span::styled("  d       ", Style::default().fg(Color::Yellow)),
-                Span::raw("差分ビュー"),
-            ]),
-            Line::from(vec![
-                Span::styled("  g       ", Style::default().fg(Color::Yellow)),
-                Span::raw("グラフ（数値フィールドの推移）"),
-            ]),
-            Line::from(vec![
-                Span::styled("  /       ", Style::default().fg(Color::Yellow)),
-                Span::raw("ソース検索"),
-            ]),
-            Line::from(vec![
-                Span::styled("  ?       ", Style::default().fg(Color::Yellow)),
-                Span::raw("ヘルプパネル（フィールド説明）"),
-            ]),
-            Line::from(vec![
-                Span::styled("  L       ", Style::default().fg(Color::Yellow)),
-                Span::raw("言語切り替え (EN/JA)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  e       ", Style::default().fg(Color::Yellow)),
-                Span::raw("JSON エクスポート"),
-            ]),
-            Line::from(vec![
-                Span::styled("  q       ", Style::default().fg(Color::Yellow)),
-                Span::raw("終了"),
-            ]),
-            Line::from(""),
-        ],
-        " D でダッシュボード、O でクラシックモード ")
-    } else {
-        (vec![
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  D       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Dashboard (system overview)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  O       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Classic mode (all sources list)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  j/k ↑/↓ ", Style::default().fg(Color::Yellow)),
-                Span::raw("Navigate sources / fields"),
-            ]),
-            Line::from(vec![
-                Span::styled("  Enter → ", Style::default().fg(Color::Yellow)),
-                Span::raw("Drill in (detail view)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  BS ←    ", Style::default().fg(Color::Yellow)),
-                Span::raw("Go back"),
-            ]),
-            Line::from(vec![
-                Span::styled("  d       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Diff view"),
-            ]),
-            Line::from(vec![
-                Span::styled("  g       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Graph (sparkline of numeric field)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  /       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Search sources"),
-            ]),
-            Line::from(vec![
-                Span::styled("  ?       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Help panel (field descriptions)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  L       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Toggle language (EN/JA)"),
-            ]),
-            Line::from(vec![
-                Span::styled("  e       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Export snapshot as JSON"),
-            ]),
-            Line::from(vec![
-                Span::styled("  q       ", Style::default().fg(Color::Yellow)),
-                Span::raw("Quit"),
-            ]),
-            Line::from(""),
-        ],
-        " Press D for Dashboard, O for Classic mode ")
-    };
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+
+    // Progress bar
+    let filled = data.step + 1;
+    let bar: String = (0..data.total_steps)
+        .map(|i| if i < filled { '#' } else { '-' })
+        .collect();
+    lines.push(Line::from(vec![
+        Span::raw("  Progress: ["),
+        Span::styled(&bar, Style::default().fg(Color::Green)),
+        Span::raw("]"),
+    ]));
+    lines.push(Line::from(""));
+
+    // Body text
+    for line in data.body.lines() {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::raw(line),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("  {}", data.nav_hint),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    let p = Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL).title(title)
+            .border_style(Style::default().fg(Color::Cyan)))
+        .alignment(ratatui::layout::Alignment::Left);
+    f.render_widget(p, area);
+}
+
+fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale, area: Rect) {
+    let title = format!(" {} ", data.title);
+
+    let mut keys_text = vec![Line::from("")];
+    for (key, desc) in &data.keybindings {
+        keys_text.push(Line::from(vec![
+            Span::styled(format!("  {:<10}", key), Style::default().fg(Color::Yellow)),
+            Span::raw(desc.as_str()),
+        ]));
+    }
+    keys_text.push(Line::from(""));
+    keys_text.push(Line::from(vec![
+        Span::styled(
+            format!("  {}", data.footer),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
+    keys_text.push(Line::from(""));
 
     let p = Paragraph::new(keys_text)
         .block(Block::default().borders(Borders::ALL).title(title)
@@ -678,8 +644,8 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
 
     let net_headers: Vec<&str> = data.network.headers.iter().map(|s| s.as_str()).collect();
     let net_table = Table::new(net_rows, vec![
-        Constraint::Length(12), Constraint::Length(14), Constraint::Length(12),
-        Constraint::Length(14), Constraint::Min(12),
+        Constraint::Length(12), Constraint::Length(12), Constraint::Length(12),
+        Constraint::Length(12), Constraint::Min(12),
     ])
     .block(Block::default().borders(Borders::ALL)
         .title(if is_ja { " ネットワーク " } else { " Network " })
@@ -1501,6 +1467,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         View::TableView => i18n::t(l, T::VIEW_TABLE),
         View::Graph => i18n::t(l, T::VIEW_GRAPH),
         View::CategoryGuide => if l == crate::i18n::Locale::Ja { "カテゴリガイド" } else { "CATEGORY GUIDE" },
+        View::Tutorial => if l == crate::i18n::Locale::Ja { "チュートリアル" } else { "TUTORIAL" },
     };
 
     let status = Line::from(vec![
@@ -1522,7 +1489,19 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(format!("{}  ", i18n::t(l, T::QUIT))),
         Span::styled(
             if let Some(ref host) = app.remote_host {
-                format!(" {} | {}{} | {} {} | SSH:{} ", refresh_indicator, elapsed, i18n::t(l, T::AGO), snapshot_count, i18n::t(l, T::SNAPS), host)
+                let conn_label = match &app.connection_status {
+                    super::app::ConnectionStatus::Connected { last_seen } => {
+                        let secs_ago = last_seen.elapsed().as_secs();
+                        format!("Connected ({}s ago)", secs_ago)
+                    }
+                    super::app::ConnectionStatus::Disconnected { last_seen, since: _ } => {
+                        let secs_ago = last_seen.elapsed().as_secs();
+                        format!("DISCONNECTED (last: {}s ago)", secs_ago)
+                    }
+                    super::app::ConnectionStatus::Connecting => "Connecting...".to_string(),
+                    super::app::ConnectionStatus::Local => "local".to_string(),
+                };
+                format!(" {} | {}{} | {} {} | [{}] {} ", refresh_indicator, elapsed, i18n::t(l, T::AGO), snapshot_count, i18n::t(l, T::SNAPS), host, conn_label)
             } else {
                 format!(" {} | {}{} | {} {} ", refresh_indicator, elapsed, i18n::t(l, T::AGO), snapshot_count, i18n::t(l, T::SNAPS))
             },

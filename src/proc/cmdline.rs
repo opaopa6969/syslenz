@@ -3,6 +3,10 @@ use std::fs;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
     let content = fs::read_to_string("/proc/cmdline")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let cmdline = content.trim().to_string();
     let param_count = cmdline.split_whitespace().count() as i64;
 

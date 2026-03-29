@@ -53,6 +53,18 @@ impl T {
     pub const VIEW_DIFF: &str = "view_diff";
     pub const VIEW_TABLE: &str = "view_table";
     pub const VIEW_GRAPH: &str = "view_graph";
+    pub const VIEW_DASHBOARD: &str = "view_dashboard";
+    pub const VIEW_WELCOME: &str = "view_welcome";
+
+    // Welcome screen keys
+    pub const WELCOME_NAV: &str = "welcome_nav";
+    pub const WELCOME_DRILL: &str = "welcome_drill";
+    pub const WELCOME_DIFF: &str = "welcome_diff";
+    pub const WELCOME_SEARCH: &str = "welcome_search";
+    pub const WELCOME_GRAPH: &str = "welcome_graph";
+    pub const WELCOME_HELP: &str = "welcome_help";
+    pub const WELCOME_LANG: &str = "welcome_lang";
+    pub const WELCOME_CTA: &str = "welcome_cta";
 
     // Table headers
     pub const FIELD: &str = "field";
@@ -100,6 +112,17 @@ fn en(key: &str) -> &'static str {
         "view_diff" => "DIFF",
         "view_table" => "TABLE",
         "view_graph" => "GRAPH",
+        "view_dashboard" => "DASHBOARD",
+        "view_welcome" => "WELCOME",
+
+        "welcome_nav" => "Navigate sources / fields",
+        "welcome_drill" => "Drill in (detail view)",
+        "welcome_diff" => "Diff view",
+        "welcome_search" => "Search sources",
+        "welcome_graph" => "Graph (sparkline of numeric field)",
+        "welcome_help" => "Help panel (field descriptions)",
+        "welcome_lang" => "Toggle language (EN/JA)",
+        "welcome_cta" => "Press D for Dashboard, O for Classic mode",
 
         "field" => "Field",
         "value" => "Value",
@@ -141,6 +164,17 @@ fn ja(key: &str) -> &'static str {
         "view_diff" => "差分",
         "view_table" => "テーブル",
         "view_graph" => "グラフ",
+        "view_dashboard" => "ダッシュボード",
+        "view_welcome" => "ようこそ",
+
+        "welcome_nav" => "ソース / フィールド移動",
+        "welcome_drill" => "ドリルイン（詳細表示）",
+        "welcome_diff" => "差分ビュー",
+        "welcome_search" => "ソース検索",
+        "welcome_graph" => "グラフ（数値フィールドの推移）",
+        "welcome_help" => "ヘルプパネル（フィールド説明）",
+        "welcome_lang" => "言語切り替え (EN/JA)",
+        "welcome_cta" => "D でダッシュボード、O でクラシックモード",
 
         "field" => "フィールド",
         "value" => "値",
@@ -5549,6 +5583,9 @@ mod tests {
         T::REFRESH, T::GRAPH, T::AUTO, T::EXPORT, T::QUIT,
         T::HELP, T::LANG, T::AGO, T::SNAPS,
         T::VIEW_OVERVIEW, T::VIEW_DETAIL, T::VIEW_DIFF, T::VIEW_TABLE, T::VIEW_GRAPH,
+        T::VIEW_DASHBOARD, T::VIEW_WELCOME,
+        T::WELCOME_NAV, T::WELCOME_DRILL, T::WELCOME_DIFF, T::WELCOME_SEARCH,
+        T::WELCOME_GRAPH, T::WELCOME_HELP, T::WELCOME_LANG, T::WELCOME_CTA,
         T::FIELD, T::VALUE, T::UNIT, T::DESCRIPTION, T::OLD, T::NEW,
         T::NO_DATA, T::NO_CHANGES, T::NO_TABLE_DATA,
         T::EXPORTED, T::EXPORT_FAILED, T::SEARCHING,
