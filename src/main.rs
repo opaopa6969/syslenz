@@ -1,7 +1,9 @@
 mod alert;
+mod common_metric;
 mod config;
 mod diagnostics;
 mod education;
+mod metric_kind;
 mod serve;
 mod prometheus;
 mod proc;
