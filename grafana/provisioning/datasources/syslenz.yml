@@ -1,0 +1,12 @@
+apiVersion: 1
+
+datasources:
+  - name: syslenz
+    type: prometheus
+    access: proxy
+    url: http://syslenz-prometheus:9101
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: GET
+      scrapeInterval: 15s

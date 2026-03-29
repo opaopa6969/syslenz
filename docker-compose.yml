@@ -9,6 +9,10 @@
 # Web UI (if built with --features web):
 #   docker compose --profile web up -d
 #   open http://localhost:3000
+#
+# Grafana dashboard:
+#   docker compose --profile grafana up -d
+#   open http://localhost:3001
 
 services:
   syslenz:
@@ -18,6 +22,34 @@ services:
     pid: "host"        # Access host /proc
     read_only: true
     command: ["--serve", "0.0.0.0:9100"]
+
+  syslenz-prometheus:
+    build: .
+    ports:
+      - "9101:9101"
+    pid: "host"
+    read_only: true
+    command: ["--prometheus", "0.0.0.0:9101"]
+    profiles:
+      - grafana
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-storage:/var/lib/grafana
+    depends_on:
+      - syslenz-prometheus
+    profiles:
+      - grafana
 
   syslenz-web:
     build:
@@ -31,3 +63,6 @@ services:
     command: ["--web", "3000"]
     profiles:
       - web
+
+volumes:
+  grafana-storage:
