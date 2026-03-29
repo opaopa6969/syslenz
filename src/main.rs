@@ -97,7 +97,7 @@ fn main() -> Result<()> {
         return prometheus::run_prometheus_server(bind);
     }
 
-    // --otel [endpoint]
+    // --otel [endpoint] [--otel-level core|full]
     if args.iter().any(|a| a == "--otel") {
         let endpoint = args.iter().position(|a| a == "--otel")
             .and_then(|pos| args.get(pos + 1))
@@ -108,7 +108,12 @@ fn main() -> Result<()> {
             .and_then(|pos| args.get(pos + 1))
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(5);
-        return otel::run_otel_export(endpoint, interval);
+        // BL-073: --otel-level core|full
+        let level = args.iter().position(|a| a == "--otel-level")
+            .and_then(|pos| args.get(pos + 1))
+            .map(|s| otel::OtelLevel::from_str(s))
+            .unwrap_or(otel::OtelLevel::Full);
+        return otel::run_otel_export_with_level(endpoint, interval, level);
     }
 
     // --web [port]
@@ -158,6 +163,9 @@ fn main() -> Result<()> {
     // --classic flag (start in classic Overview mode)
     let start_classic = args.iter().any(|a| a == "--classic")
         || cfg.general.default_view == "classic";
+
+    // BL-074: --tutorial flag
+    let start_tutorial = args.iter().any(|a| a == "--tutorial");
 
     // --ssh <user@host> (supports multiple)
     let ssh_hosts: Vec<String> = args.iter().enumerate()
@@ -235,7 +243,7 @@ fn main() -> Result<()> {
         }
         extra_hosts.push((format!("tcp:{}", a), format!("tcp:{}", a)));
     }
-    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, alert_rules, extra_hosts);
+    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, start_tutorial, alert_rules, extra_hosts);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -255,6 +263,7 @@ fn run(
     connect_addr: Option<String>,
     locale: i18n::Locale,
     start_classic: bool,
+    start_tutorial: bool,
     alert_rules: Vec<alert::AlertRule>,
     extra_hosts: Vec<(String, String)>,
 ) -> Result<()> {
@@ -276,7 +285,9 @@ fn run(
     };
     app.locale = locale;
     app.alert_rules = alert_rules;
-    if start_classic {
+    if start_tutorial {
+        app.start_tutorial();
+    } else if start_classic {
         app.view = ui::app::View::Overview;
         app.focus = ui::app::Focus::Sidebar;
     }
@@ -322,6 +333,17 @@ fn run(
                         KeyCode::Esc => app.cancel_search(),
                         KeyCode::Backspace => { app.search_query.pop(); }
                         KeyCode::Char(c) => app.search_query.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // BL-074: Tutorial mode key handling
+                if app.tutorial_step.is_some() && matches!(app.view, ui::app::View::Tutorial) {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => app.tutorial_finish(),
+                        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => app.tutorial_next(),
+                        KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => app.tutorial_prev(),
                         _ => {}
                     }
                     continue;

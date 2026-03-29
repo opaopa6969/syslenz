@@ -3,6 +3,10 @@ use std::fs;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
     let content = fs::read_to_string("/proc/zoneinfo")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let mut rows = Vec::new();
     let mut current_zone = String::new();
     let mut free_pages: i64 = 0;

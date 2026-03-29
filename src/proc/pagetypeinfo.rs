@@ -3,6 +3,10 @@ use std::fs;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
     let content = fs::read_to_string("/proc/pagetypeinfo")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let mut rows = Vec::new();
     let mut in_free_pages = false;
 

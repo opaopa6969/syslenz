@@ -3,6 +3,10 @@ use std::fs;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
     let content = fs::read_to_string("/proc/version")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let text = content.trim();
 
     let mut fields = vec![

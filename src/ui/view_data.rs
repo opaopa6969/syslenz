@@ -28,6 +28,18 @@ pub enum ViewData {
     Graph(GraphData),
     Diagnostics(DiagnosticsData),
     CategoryGuide(CategoryGuideData),
+    /// BL-074: Tutorial view data.
+    Tutorial(TutorialData),
+}
+
+/// BL-074: Tutorial step data.
+#[derive(Debug, Clone, Serialize)]
+pub struct TutorialData {
+    pub step: usize,
+    pub total_steps: usize,
+    pub title: String,
+    pub body: String,
+    pub nav_hint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -284,6 +296,24 @@ fn get_bytes_value(app: &App, source: &str, field: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// BL-076: Format a bytes-per-second rate as a human-readable string.
+fn format_rate(bytes_per_sec: f64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1024.0 * KIB;
+    const GIB: f64 = 1024.0 * MIB;
+    if bytes_per_sec >= GIB {
+        format!("{:.1} GiB/s", bytes_per_sec / GIB)
+    } else if bytes_per_sec >= MIB {
+        format!("{:.1} MiB/s", bytes_per_sec / MIB)
+    } else if bytes_per_sec >= KIB {
+        format!("{:.1} KiB/s", bytes_per_sec / KIB)
+    } else if bytes_per_sec > 0.5 {
+        format!("{:.0} B/s", bytes_per_sec)
+    } else {
+        "0 B/s".to_string()
+    }
+}
+
 /// Helper: build an ASCII bar graph string.
 fn make_bar(pct: u64, width: usize) -> String {
     let filled = (pct as usize * width / 100).min(width);
@@ -303,6 +333,31 @@ impl App {
             View::Graph => ViewData::Graph(self.build_graph_data()),
             View::Diagnostics => ViewData::Diagnostics(self.build_diagnostics_data()),
             View::CategoryGuide => ViewData::CategoryGuide(self.build_category_guide_data()),
+            View::Tutorial => ViewData::Tutorial(self.build_tutorial_data()),
+        }
+    }
+
+    /// BL-074: Build tutorial step data.
+    fn build_tutorial_data(&self) -> TutorialData {
+        let step = self.tutorial_step.unwrap_or(0);
+        let (en, ja) = self.tutorial_text();
+        let body = if self.locale == Locale::Ja { ja } else { en };
+        let title = if self.locale == Locale::Ja {
+            format!("syslenz チュートリアル ({}/{})", step + 1, Self::TUTORIAL_STEPS)
+        } else {
+            format!("syslenz Tutorial ({}/{})", step + 1, Self::TUTORIAL_STEPS)
+        };
+        let nav_hint = if self.locale == Locale::Ja {
+            "Enter/Right: 次へ | Backspace/Left: 戻る | q: 終了".to_string()
+        } else {
+            "Enter/Right: Next | Backspace/Left: Back | q: Exit".to_string()
+        };
+        TutorialData {
+            step,
+            total_steps: Self::TUTORIAL_STEPS,
+            title,
+            body: body.to_string(),
+            nav_hint,
         }
     }
 
@@ -330,12 +385,8 @@ impl App {
     pub fn build_status_bar_data(&self) -> StatusBarData {
         let l = self.locale;
         let view_name = match self.view {
-            View::Dashboard => {
-                if l == Locale::Ja { "ダッシュボード" } else { "DASHBOARD" }
-            }
-            View::Welcome => {
-                if l == Locale::Ja { "ようこそ" } else { "WELCOME" }
-            }
+            View::Dashboard => i18n::t(l, T::VIEW_DASHBOARD),
+            View::Welcome => i18n::t(l, T::VIEW_WELCOME),
             View::Diagnostics => {
                 if l == Locale::Ja { "診断" } else { "DIAGNOSTICS" }
             }
@@ -346,6 +397,9 @@ impl App {
             View::Graph => i18n::t(l, T::VIEW_GRAPH),
             View::CategoryGuide => {
                 if l == Locale::Ja { "カテゴリガイド" } else { "CATEGORY GUIDE" }
+            }
+            View::Tutorial => {
+                if l == Locale::Ja { "チュートリアル" } else { "TUTORIAL" }
             }
         };
 
@@ -470,26 +524,27 @@ impl App {
             })
             .collect();
 
-        // Network section
+        // Network section (BL-076: add RX/s and TX/s rate columns)
         let net_headers = if l == Locale::Ja {
             vec![
                 "IF".to_string(),
                 "RX バイト".to_string(),
-                "RX パケット".to_string(),
+                "RX/s".to_string(),
                 "TX バイト".to_string(),
-                "TX パケット".to_string(),
+                "TX/s".to_string(),
             ]
         } else {
             vec![
                 "Interface".to_string(),
                 "RX Bytes".to_string(),
-                "RX Pkts".to_string(),
+                "RX/s".to_string(),
                 "TX Bytes".to_string(),
-                "TX Pkts".to_string(),
+                "TX/s".to_string(),
             ]
         };
 
-        let net_rows: Vec<Vec<String>> = self
+        // Get current net/dev table rows
+        let current_net_rows: Vec<Vec<String>> = self
             .current
             .entries
             .get("net/dev")
@@ -509,6 +564,72 @@ impl App {
                 }
             })
             .unwrap_or_default();
+
+        // BL-076: Compute rates from previous snapshot
+        let prev_net_table = self.snapshots.last().and_then(|snap| {
+            snap.entries.get("net/dev").and_then(|e| {
+                e.fields.iter().find(|f| matches!(f.value, FieldValue::Table(_)))
+            }).and_then(|f| {
+                if let FieldValue::Table(ref data) = f.value {
+                    Some(data.clone())
+                } else {
+                    None
+                }
+            })
+        });
+
+        let time_delta_secs = self.snapshots.last().map(|prev| {
+            let cur_dur = self.current.timestamp
+                .duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default();
+            let prev_dur = prev.timestamp
+                .duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default();
+            let delta = cur_dur.as_secs_f64() - prev_dur.as_secs_f64();
+            if delta > 0.0 { delta } else { 1.0 }
+        });
+
+        let net_rows: Vec<Vec<String>> = current_net_rows.iter().map(|row| {
+            // Row layout: [iface, rx_bytes, rx_pkts, tx_bytes, tx_pkts]
+            let iface = row.first().cloned().unwrap_or_default();
+            let rx_bytes_str = row.get(1).cloned().unwrap_or_default();
+            let tx_bytes_str = row.get(3).cloned().unwrap_or_default();
+
+            // Find the matching previous row by interface name
+            let (rx_rate, tx_rate) = if let (Some(prev_rows), Some(dt)) = (&prev_net_table, time_delta_secs) {
+                let prev_row = prev_rows.iter().find(|r| r.first().map(|s| s.as_str()) == Some(iface.as_str()));
+                if let Some(prev) = prev_row {
+                    let parse_net_bytes = |s: &str| -> u64 {
+                        // Handle formatted strings like "1.2 GiB", "500.0 MiB", "1024 B"
+                        let s = s.trim();
+                        if let Some(rest) = s.strip_suffix("GiB") {
+                            (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0 * 1024.0) as u64
+                        } else if let Some(rest) = s.strip_suffix("MiB") {
+                            (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0) as u64
+                        } else if let Some(rest) = s.strip_suffix("KiB") {
+                            (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0) as u64
+                        } else if let Some(rest) = s.strip_suffix(" B") {
+                            rest.trim().parse::<u64>().unwrap_or(0)
+                        } else {
+                            // Try raw number
+                            s.replace(',', "").parse::<u64>().unwrap_or(0)
+                        }
+                    };
+                    let cur_rx = parse_net_bytes(&rx_bytes_str);
+                    let prev_rx = parse_net_bytes(prev.get(1).map(|s| s.as_str()).unwrap_or("0"));
+                    let cur_tx = parse_net_bytes(&tx_bytes_str);
+                    let prev_tx = parse_net_bytes(prev.get(3).map(|s| s.as_str()).unwrap_or("0"));
+
+                    let rx_delta = cur_rx.saturating_sub(prev_rx) as f64;
+                    let tx_delta = cur_tx.saturating_sub(prev_tx) as f64;
+                    (format_rate(rx_delta / dt), format_rate(tx_delta / dt))
+                } else {
+                    ("-".to_string(), "-".to_string())
+                }
+            } else {
+                ("-".to_string(), "-".to_string())
+            };
+
+            vec![iface, rx_bytes_str, rx_rate, tx_bytes_str, tx_rate]
+        }).collect();
 
         // Compute bar graph data for memory
         let mem_total = get_bytes_value(self, "meminfo", "MemTotal");
@@ -649,44 +770,43 @@ impl App {
 
     fn build_welcome_data(&self) -> WelcomeData {
         let l = self.locale;
-        let (title, footer, keybindings) = if l == Locale::Ja {
-            (
-                "syslenz — /proc の全てを構造化データで".to_string(),
-                "D でダッシュボード、O でクラシックモード".to_string(),
-                vec![
-                    ("D".into(), "ダッシュボード（システム概要）".into()),
-                    ("O".into(), "クラシックモード（全ソース一覧）".into()),
-                    ("j/k ↑/↓".into(), "ソース / フィールド移動".into()),
-                    ("Enter →".into(), "ドリルイン（詳細表示）".into()),
-                    ("BS ←".into(), "戻る".into()),
-                    ("d".into(), "差分ビュー".into()),
-                    ("g".into(), "グラフ（数値フィールドの推移）".into()),
-                    ("/".into(), "ソース検索".into()),
-                    ("?".into(), "ヘルプパネル（フィールド説明）".into()),
-                    ("L".into(), "言語切り替え (EN/JA)".into()),
-                    ("e".into(), "JSON エクスポート".into()),
-                    ("q".into(), "終了".into()),
-                ],
-            )
+        let title = if l == Locale::Ja {
+            "syslenz — /proc の全てを構造化データで".to_string()
         } else {
-            (
-                "syslenz — Wireshark for /proc".to_string(),
-                "Press D for Dashboard, O for Classic mode".to_string(),
-                vec![
-                    ("D".into(), "Dashboard (system overview)".into()),
-                    ("O".into(), "Classic mode (all sources list)".into()),
-                    ("j/k ↑/↓".into(), "Navigate sources / fields".into()),
-                    ("Enter →".into(), "Drill in (detail view)".into()),
-                    ("BS ←".into(), "Go back".into()),
-                    ("d".into(), "Diff view".into()),
-                    ("g".into(), "Graph (sparkline of numeric field)".into()),
-                    ("/".into(), "Search sources".into()),
-                    ("?".into(), "Help panel (field descriptions)".into()),
-                    ("L".into(), "Toggle language (EN/JA)".into()),
-                    ("e".into(), "Export snapshot as JSON".into()),
-                    ("q".into(), "Quit".into()),
-                ],
-            )
+            "syslenz — Wireshark for /proc".to_string()
+        };
+        let footer = i18n::t(l, T::WELCOME_CTA).to_string();
+
+        let keybindings = if l == Locale::Ja {
+            vec![
+                ("D".into(), "ダッシュボード（システム概要）".into()),
+                ("O".into(), "クラシックモード（全ソース一覧）".into()),
+                ("j/k ↑/↓".into(), i18n::t(l, T::WELCOME_NAV).to_string()),
+                ("Enter →".into(), i18n::t(l, T::WELCOME_DRILL).to_string()),
+                ("BS ←".into(), i18n::t(l, T::BACK).to_string()),
+                ("d".into(), i18n::t(l, T::WELCOME_DIFF).to_string()),
+                ("g".into(), i18n::t(l, T::WELCOME_GRAPH).to_string()),
+                ("/".into(), i18n::t(l, T::WELCOME_SEARCH).to_string()),
+                ("?".into(), i18n::t(l, T::WELCOME_HELP).to_string()),
+                ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
+                ("e".into(), i18n::t(l, T::EXPORT).to_string()),
+                ("q".into(), i18n::t(l, T::QUIT).to_string()),
+            ]
+        } else {
+            vec![
+                ("D".into(), "Dashboard (system overview)".into()),
+                ("O".into(), "Classic mode (all sources list)".into()),
+                ("j/k ↑/↓".into(), i18n::t(l, T::WELCOME_NAV).to_string()),
+                ("Enter →".into(), i18n::t(l, T::WELCOME_DRILL).to_string()),
+                ("BS ←".into(), i18n::t(l, T::BACK).to_string()),
+                ("d".into(), i18n::t(l, T::WELCOME_DIFF).to_string()),
+                ("g".into(), i18n::t(l, T::WELCOME_GRAPH).to_string()),
+                ("/".into(), i18n::t(l, T::WELCOME_SEARCH).to_string()),
+                ("?".into(), i18n::t(l, T::WELCOME_HELP).to_string()),
+                ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
+                ("e".into(), i18n::t(l, T::EXPORT).to_string()),
+                ("q".into(), i18n::t(l, T::QUIT).to_string()),
+            ]
         };
 
         WelcomeData {

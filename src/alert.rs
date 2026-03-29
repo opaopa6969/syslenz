@@ -8,6 +8,11 @@ pub struct AlertRule {
     pub condition: String, // e.g. "< 500000000" or "> 90.0"
     pub severity: String,  // "info", "warning", "critical"
     pub message: String,
+    /// Optional external command to execute when the alert fires.
+    /// Supports `{message}`, `{source}`, `{field}`, `{value}`, `{severity}` placeholders.
+    /// Example: `action = "notify-send 'syslenz: {message}'"` or `action = "curl -X POST ..."`.
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -176,6 +181,40 @@ pub fn field_alert_severity<'a>(alerts: &'a [AlertEvent], source: &str, field: &
     None
 }
 
+/// Execute external action commands for newly-firing alerts (BL-071).
+///
+/// Only fires actions for alerts that are newly firing (not in `prev_firing`).
+/// Runs the command asynchronously (spawns a detached child process) so the
+/// TUI never blocks.
+pub fn execute_actions(rules: &[AlertRule], events: &[AlertEvent], prev_firing: &[usize]) {
+    for event in events {
+        if !event.firing {
+            continue;
+        }
+        // Only fire action on *new* alerts (not already firing previously)
+        if prev_firing.contains(&event.rule_index) {
+            continue;
+        }
+        if let Some(ref action_template) = rules.get(event.rule_index).and_then(|r| r.action.as_ref()) {
+            let cmd = action_template
+                .replace("{message}", &event.message)
+                .replace("{source}", &event.source)
+                .replace("{field}", &event.field)
+                .replace("{value}", &event.current_value)
+                .replace("{severity}", &event.severity);
+
+            // Spawn detached so TUI doesn't block
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&cmd)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +250,59 @@ mod tests {
         assert!(compare(5.0, CompareOp::Lte, 5.0));
         assert!(compare(5.0, CompareOp::Eq, 5.0));
         assert!(compare(5.1, CompareOp::Neq, 5.0));
+    }
+
+    // BL-071: AlertRule with action field deserializes correctly
+    #[test]
+    fn alert_rule_action_field_optional() {
+        // Without action
+        let toml_str = r#"
+            source = "loadavg"
+            field = "load_1min"
+            condition = "> 8.0"
+            severity = "warning"
+            message = "High load"
+        "#;
+        let rule: AlertRule = toml::from_str(toml_str).unwrap();
+        assert!(rule.action.is_none());
+
+        // With action
+        let toml_str = r#"
+            source = "loadavg"
+            field = "load_1min"
+            condition = "> 8.0"
+            severity = "warning"
+            message = "High load"
+            action = "echo {message}"
+        "#;
+        let rule: AlertRule = toml::from_str(toml_str).unwrap();
+        assert_eq!(rule.action, Some("echo {message}".to_string()));
+    }
+
+    // BL-071: execute_actions does not fire for already-firing alerts
+    #[test]
+    fn execute_actions_skips_prev_firing() {
+        let rules = vec![AlertRule {
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            condition: "> 8.0".to_string(),
+            severity: "warning".to_string(),
+            message: "High load".to_string(),
+            action: Some("echo test".to_string()),
+        }];
+        let events = vec![AlertEvent {
+            rule_index: 0,
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            severity: "warning".to_string(),
+            message: "High load".to_string(),
+            current_value: "10.0".to_string(),
+            firing: true,
+        }];
+        // With prev_firing containing index 0, action should be skipped
+        // (This just ensures no panic — we can't easily test command execution)
+        execute_actions(&rules, &events, &[0]);
+        // With empty prev_firing, action should fire (spawns `echo test` harmlessly)
+        execute_actions(&rules, &events, &[]);
     }
 }

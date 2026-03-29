@@ -3,13 +3,23 @@ use std::fs;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
     let content = fs::read_to_string("/proc/loadavg")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let parts: Vec<&str> = content.trim().split_whitespace().collect();
+    if parts.len() < 5 {
+        anyhow::bail!("invalid loadavg format: expected 5 fields, got {}", parts.len());
+    }
 
     let load1: f64 = parts[0].parse()?;
     let load5: f64 = parts[1].parse()?;
     let load15: f64 = parts[2].parse()?;
 
     let sched_parts: Vec<&str> = parts[3].split('/').collect();
+    if sched_parts.len() < 2 {
+        anyhow::bail!("invalid loadavg scheduler field: missing '/' separator");
+    }
     let running: i64 = sched_parts[0].parse()?;
     let total: i64 = sched_parts[1].parse()?;
     let last_pid: i64 = parts[4].parse()?;
