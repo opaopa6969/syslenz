@@ -1,0 +1,41 @@
+{
+  "name": "syslenz4node",
+  "version": "1.0.0",
+  "description": "Node.js client library for connecting to syslenz TCP servers (--serve mode). Zero external dependencies.",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "types": "./types/index.d.ts"
+    }
+  },
+  "files": [
+    "src/",
+    "types/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "syslenz",
+    "monitoring",
+    "metrics",
+    "system",
+    "tcp",
+    "snapshot"
+  ],
+  "author": "opaopa6969 <opaopa6969@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opaopa6969/syslenz4node.git"
+  },
+  "homepage": "https://github.com/opaopa6969/syslenz",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
