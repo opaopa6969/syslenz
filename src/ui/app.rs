@@ -989,7 +989,7 @@ impl App {
     // === BL-074: Tutorial mode ===
 
     /// Total number of tutorial steps.
-    pub const TUTORIAL_STEPS: usize = 6;
+    pub const TUTORIAL_STEPS: usize = 8;
 
     /// Start tutorial mode at step 0.
     pub fn start_tutorial(&mut self) {
@@ -1031,9 +1031,22 @@ impl App {
                         }
                     }
                     5 => {
-                        // Step 5: Dashboard
+                        // Step 5: Help levels
+                        self.view = View::Detail;
+                        self.focus = Focus::Content;
+                        self.help_level = HelpLevel::ExtraDetailed;
+                    }
+                    6 => {
+                        // Step 6: Diagnostics
+                        self.view = View::Diagnostics;
+                        self.focus = Focus::Content;
+                        self.selected_diagnostic = 0;
+                    }
+                    7 => {
+                        // Step 7: Dashboard (finale)
                         self.view = View::Dashboard;
                         self.focus = Focus::Content;
+                        self.help_level = HelpLevel::Off;
                     }
                     _ => {}
                 }
@@ -1065,46 +1078,86 @@ impl App {
     }
 
     /// Get tutorial step text (English and Japanese).
-    pub fn tutorial_text(&self) -> (&'static str, &'static str) {
+    /// Uses dynamic data from the current snapshot where applicable.
+    pub fn tutorial_text(&self) -> (String, String) {
+        use crate::proc::FieldValue;
         let step = self.tutorial_step.unwrap_or(0);
+
+        // Helper to get a value from the snapshot
+        let get_val = |source: &str, field: &str| -> Option<f64> {
+            self.current.entries.get(source).and_then(|e| {
+                e.fields.iter().find(|f| f.name == field).and_then(|f| match &f.value {
+                    FieldValue::Integer(n) => Some(*n as f64),
+                    FieldValue::Float(n) => Some(*n),
+                    _ => None,
+                })
+            })
+        };
+
+        let source_count = self.source_keys.len();
+        let field_count: usize = self.current.entries.values().map(|e| e.fields.len()).sum();
+        let mem_info = get_val("meminfo", "MemAvailable")
+            .zip(get_val("meminfo", "MemTotal"))
+            .map(|(a, t)| (a / 1024.0 / 1024.0, (a / t * 100.0) as u64));
+        let load = get_val("loadavg", "load_1min");
+        let diag_count = crate::diagnostics::analyze(&self.current, self.locale).len();
+
         match step {
             0 => (
-                "Welcome to syslenz! This tutorial will guide you through the key features.\n\n\
-                 syslenz reads data from /proc and other system interfaces\n\
-                 to show you structured, live system information.\n\n\
-                 Press Enter or Right arrow to proceed to the next step.\n\
-                 Press Backspace or Left arrow to go back.\n\
-                 Press q to exit the tutorial at any time.",
-                "syslenz へようこそ! このチュートリアルで主な機能を体験します。\n\n\
-                 syslenz は /proc などからシステム情報を読み取り、\n\
-                 構造化されたライブデータとして表示します。\n\n\
-                 Enter または右矢印で次のステップへ進みます。\n\
-                 Backspace または左矢印で戻ります。\n\
-                 q でチュートリアルを終了します。",
+                format!(
+                    "Welcome to syslenz! This tutorial will guide you through the key features.\n\n\
+                     syslenz reads data from /proc and other system interfaces\n\
+                     to show you structured, live system information.\n\n\
+                     Your system right now: {} sources, {} fields.{}{}\n\n\
+                     Press Enter or Right arrow to proceed to the next step.\n\
+                     Press Backspace or Left arrow to go back.\n\
+                     Press q to exit the tutorial at any time.",
+                    source_count, field_count,
+                    mem_info.map(|(gb, pct)| format!("\n     Memory: {:.1}GB available ({}%)", gb, pct)).unwrap_or_default(),
+                    load.map(|l| format!("\n     Load: {:.2}", l)).unwrap_or_default(),
+                ),
+                format!(
+                    "syslenz へようこそ! このチュートリアルで主な機能を体験します。\n\n\
+                     syslenz は /proc などからシステム情報を読み取り、\n\
+                     構造化されたライブデータとして表示します。\n\n\
+                     現在のシステム: {} ソース、{} フィールド。{}{}\n\n\
+                     Enter または右矢印で次のステップへ進みます。\n\
+                     Backspace または左矢印で戻ります。\n\
+                     q でチュートリアルを終了します。",
+                    source_count, field_count,
+                    mem_info.map(|(gb, pct)| format!("\n     メモリ: {:.1}GB 利用可能 ({}%)", gb, pct)).unwrap_or_default(),
+                    load.map(|l| format!("\n     負荷: {:.2}", l)).unwrap_or_default(),
+                ),
             ),
             1 => (
-                "Step 1: Source List (Sidebar)\n\n\
-                 The left sidebar lists all /proc sources (meminfo, loadavg, stat, etc.).\n\
-                 Use j/k (or Up/Down) to navigate the list.\n\
-                 Each source represents a different aspect of your system.\n\n\
-                 Press Enter to continue.",
-                "ステップ 1: ソースリスト (サイドバー)\n\n\
-                 左のサイドバーに全 /proc ソース (meminfo, loadavg, stat 等) が表示されます。\n\
-                 j/k (または上下矢印) でリストを移動します。\n\
-                 各ソースはシステムの異なる側面を表しています。\n\n\
-                 Enter で次へ進みます。",
+                format!(
+                    "Step 1: Source List (Sidebar)\n\n\
+                     The left sidebar lists all {} /proc sources (meminfo, loadavg, stat, etc.).\n\
+                     Use j/k (or Up/Down) to navigate the list.\n\
+                     Each source represents a different aspect of your system.\n\n\
+                     Press Enter to continue.",
+                    source_count
+                ),
+                format!(
+                    "ステップ 1: ソースリスト (サイドバー)\n\n\
+                     左のサイドバーに全 {} 個の /proc ソース (meminfo, loadavg, stat 等) が表示されます。\n\
+                     j/k (または上下矢印) でリストを移動します。\n\
+                     各ソースはシステムの異なる側面を表しています。\n\n\
+                     Enter で次へ進みます。",
+                    source_count
+                ),
             ),
             2 => (
                 "Step 2: Detail View\n\n\
                  Press Enter on a source to see its fields.\n\
                  Each field has a name, value, unit, and description.\n\
                  Use j/k to browse fields. Press Tab to switch focus.\n\n\
-                 Press Enter to continue.",
+                 Press Enter to continue.".into(),
                 "ステップ 2: 詳細ビュー\n\n\
                  ソースで Enter を押すとフィールドが表示されます。\n\
                  各フィールドには名前、値、単位、説明があります。\n\
                  j/k でフィールドを閲覧。Tab でフォーカスを切り替えます。\n\n\
-                 Enter で次へ進みます。",
+                 Enter で次へ進みます。".into(),
             ),
             3 => (
                 "Step 3: Diff View (d key)\n\n\
@@ -1112,45 +1165,91 @@ impl App {
                  This shows what changed between the current and previous snapshot.\n\
                  Green = increased, Red = decreased.\n\
                  Use [ and ] to time-travel through snapshot history.\n\n\
-                 Press Enter to continue.",
+                 Press Enter to continue.".into(),
                 "ステップ 3: Diff ビュー (d キー)\n\n\
                  d を押すと diff モードに入ります。\n\
                  現在と前回のスナップショットの差分が表示されます。\n\
                  緑 = 増加、赤 = 減少。\n\
                  [ と ] でスナップショット履歴をタイムトラベルできます。\n\n\
-                 Enter で次へ進みます。",
+                 Enter で次へ進みます。".into(),
             ),
             4 => (
                 "Step 4: Graph View (g key)\n\n\
                  Select a numeric field and press g to see a time-series graph.\n\
                  The graph shows how the value has changed over recent snapshots.\n\
                  Press Backspace to return from the graph.\n\n\
-                 Press Enter to continue.",
+                 Press Enter to continue.".into(),
                 "ステップ 4: グラフビュー (g キー)\n\n\
                  数値フィールドを選択して g を押すと時系列グラフが表示されます。\n\
                  最近のスナップショットでの値の変化が確認できます。\n\
                  Backspace でグラフから戻ります。\n\n\
-                 Enter で次へ進みます。",
+                 Enter で次へ進みます。".into(),
             ),
             5 => (
-                "Step 5: Dashboard (D key)\n\n\
-                 Press D to see the Dashboard — a live overview of key metrics:\n\
+                "Step 5: Help Levels (? key)\n\n\
+                 Press ? to cycle through help levels: OFF → NORMAL → DETAILED → EXTRA.\n\
+                 Right now you're seeing EXTRA — the deepest level:\n\n\
+                   NORMAL:   One-line description for each field\n\
+                   DETAILED: Multi-line explanation + SEE ALSO cross-references\n\
+                   EXTRA:    Full explanation + contextual hints + Learning Breadcrumbs\n\n\
+                 The help panel on the right shows SEE ALSO links and\n\
+                 'Learn next' suggestions to deepen your understanding.\n\n\
+                 Press Enter to continue.".into(),
+                "ステップ 5: ヘルプレベル (? キー)\n\n\
+                 ? でヘルプレベルを切り替え: OFF → NORMAL → DETAILED → EXTRA。\n\
+                 今は EXTRA — 最も詳しいレベルを表示中:\n\n\
+                   NORMAL:   各フィールドの1行説明\n\
+                   DETAILED: 詳細解説 + SEE ALSO 相互参照\n\
+                   EXTRA:    完全解説 + コンテキストヒント + 学習パス\n\n\
+                 右のヘルプパネルに SEE ALSO リンクと\n\
+                 「次に学ぶ」提案が表示されます。\n\n\
+                 Enter で次へ進みます。".into(),
+            ),
+            6 => (
+                format!(
+                    "Step 6: Diagnostics (X key)\n\n\
+                     The diagnostics view auto-detects system issues.\n\
+                     Currently {} finding(s) detected on your system.\n\n\
+                     Use j/k to select a finding, Enter to jump to related metrics.\n\
+                     The > marker shows findings with jumpable metrics.\n\
+                     Press Backspace to return from a jump.\n\n\
+                     Press Enter to continue.",
+                    diag_count
+                ),
+                format!(
+                    "ステップ 6: 診断 (X キー)\n\n\
+                     診断ビューはシステムの問題を自動検出します。\n\
+                     現在、あなたのシステムで {} 件の検出があります。\n\n\
+                     j/k で検出項目を選択、Enter で関連メトリクスにジャンプ。\n\
+                     > マーカーはジャンプ可能な検出項目を示します。\n\
+                     Backspace でジャンプから戻れます。\n\n\
+                     Enter で次へ進みます。",
+                    diag_count
+                ),
+            ),
+            7 => (
+                "Step 7: Dashboard (D key)\n\n\
+                 The Dashboard shows a live overview of key metrics:\n\
                  Load average, Memory, CPU, Network, and Disk.\n\
                  Use j/k to select sections, Enter to drill into details.\n\n\
                  This is the end of the tutorial! Press Enter to finish\n\
                  and explore syslenz on your own.\n\n\
-                 Other useful keys: ? for help, / for search, e to export,\n\
-                 X for diagnostics, C for category guide, L to toggle language.",
-                "ステップ 5: ダッシュボード (D キー)\n\n\
-                 D でダッシュボード表示 — 主要メトリクスの概要:\n\
+                 Other useful keys:\n\
+                   /  Search       e  Export       L  Toggle language\n\
+                   C  Category guide (learning by topic)\n\
+                   c  Copy to clipboard".into(),
+                "ステップ 7: ダッシュボード (D キー)\n\n\
+                 ダッシュボードは主要メトリクスの概要を表示:\n\
                  負荷平均、メモリ、CPU、ネットワーク、ディスク。\n\
                  j/k でセクション選択、Enter で詳細へドリルイン。\n\n\
                  これでチュートリアル終了です! Enter で完了し\n\
                  自由に syslenz を操作してください。\n\n\
-                 便利なキー: ? ヘルプ、/ 検索、e エクスポート、\n\
-                 X 診断、C カテゴリガイド、L 言語切り替え。",
+                 便利なキー:\n\
+                   /  検索         e  エクスポート   L  言語切り替え\n\
+                   C  カテゴリガイド (トピック別学習)\n\
+                   c  クリップボードにコピー".into(),
             ),
-            _ => ("", ""),
+            _ => (String::new(), String::new()),
         }
     }
 
