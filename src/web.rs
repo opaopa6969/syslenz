@@ -15,7 +15,8 @@ use axum::{
         sse::{Event, Sse},
         Html, IntoResponse, Json,
     },
-    routing::get,
+    http::StatusCode,
+    routing::{get, post},
     Router,
 };
 #[cfg(feature = "web")]
@@ -35,6 +36,10 @@ struct AppState {
     history: Mutex<Vec<Snapshot>>,
     tx: broadcast::Sender<String>,
     locale: Locale,
+    config_path: Option<std::path::PathBuf>,
+    alert_rules: Mutex<Vec<crate::alert::AlertRule>>,
+    history_config: crate::config::HistoryTomlConfig,
+    diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
 }
 
 #[cfg(feature = "web")]
@@ -44,11 +49,16 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
         let (tx, _) = broadcast::channel::<String>(64);
         let initial = Snapshot::capture()?;
 
+        let cfg = crate::config::Config::load();
         let state = Arc::new(AppState {
             current: Mutex::new(initial),
             history: Mutex::new(Vec::new()),
             tx: tx.clone(),
             locale,
+            config_path: crate::config::Config::config_path(),
+            alert_rules: Mutex::new(cfg.alert.clone()),
+            history_config: cfg.history.clone(),
+            diagnostic_runbooks: cfg.diagnostic_runbook.clone(),
         });
 
         // Background task: capture snapshots periodically
@@ -80,6 +90,9 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             .route("/api/stream", get(sse_handler))
             .route("/api/view", get(view_handler))
             .route("/api/field-help", get(field_help_handler))
+            .route("/settings", get(settings_page_handler))
+            .route("/api/v1/settings", get(settings_api_handler))
+            .route("/api/v1/settings/alerts", post(settings_alerts_handler))
             .with_state(state);
 
         let addr = format!("0.0.0.0:{}", port);
@@ -1659,5 +1672,398 @@ init();
 </html>"##,
         lang = lang,
         initial_locale = initial_locale,
+    )
+}
+async fn settings_page_handler(State(state): State<Arc<AppState>>) -> Html<String> {
+    let lang = match state.locale {
+        Locale::Ja => "ja",
+        Locale::En => "en",
+    };
+    Html(build_settings_html(lang))
+}
+
+/// GET /api/v1/settings — returns current config as JSON
+#[cfg(feature = "web")]
+async fn settings_api_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let rules = state.alert_rules.lock().unwrap().clone();
+
+    #[derive(serde::Serialize)]
+    struct SettingsResponse {
+        alert_rules: Vec<crate::alert::AlertRule>,
+        history: HistoryInfo,
+        diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
+    }
+    #[derive(serde::Serialize)]
+    struct HistoryInfo {
+        enabled: bool,
+        interval_secs: u64,
+        retention_days: u32,
+    }
+
+    Json(SettingsResponse {
+        alert_rules: rules,
+        history: HistoryInfo {
+            enabled: state.history_config.enabled,
+            interval_secs: state.history_config.interval_secs,
+            retention_days: state.history_config.retention_days,
+        },
+        diagnostic_runbooks: state.diagnostic_runbooks.clone(),
+    })
+}
+
+/// POST /api/v1/settings/alerts — accepts JSON array of alert rules, writes to config file
+#[cfg(feature = "web")]
+async fn settings_alerts_handler(
+    State(state): State<Arc<AppState>>,
+    Json(new_rules): Json<Vec<crate::alert::AlertRule>>,
+) -> impl IntoResponse {
+    // Update in-memory state
+    {
+        let mut rules = state.alert_rules.lock().unwrap();
+        *rules = new_rules.clone();
+    }
+
+    // Write to config file
+    if let Some(ref path) = state.config_path {
+        // Read existing TOML, replace [[alert]] section, write back
+        let contents = std::fs::read_to_string(path).unwrap_or_default();
+        let updated = replace_alert_section_in_toml(&contents, &new_rules);
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        if let Err(e) = std::fs::write(path, &updated) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to write config: {}", e)})),
+            ).into_response();
+        }
+    }
+
+    Json(serde_json::json!({"alert_rules": new_rules})).into_response()
+}
+
+/// Replace the [[alert]] sections in TOML with the new rules.
+/// Preserves all other config sections.
+#[cfg(feature = "web")]
+fn replace_alert_section_in_toml(
+    existing: &str,
+    rules: &[crate::alert::AlertRule],
+) -> String {
+    // Remove existing [[alert]] blocks
+    let mut result = String::new();
+    let mut skip = false;
+    for line in existing.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[alert]]" {
+            skip = true;
+            continue;
+        }
+        // A new section header ends the skip
+        if skip && trimmed.starts_with('[') {
+            skip = false;
+        }
+        if skip {
+            // Skip key=value lines and blank lines within an [[alert]] block
+            if trimmed.is_empty() || trimmed.contains('=') {
+                continue;
+            }
+            // Non key=value, non-empty, non-section line — stop skipping
+            skip = false;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    // Append new [[alert]] blocks
+    if !rules.is_empty() {
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+        for rule in rules {
+            result.push_str("\n[[alert]]\n");
+            result.push_str(&format!("source = {:?}\n", rule.source));
+            result.push_str(&format!("field = {:?}\n", rule.field));
+            result.push_str(&format!("condition = {:?}\n", rule.condition));
+            result.push_str(&format!("severity = {:?}\n", rule.severity));
+            result.push_str(&format!("message = {:?}\n", rule.message));
+            if let Some(ref action) = rule.action {
+                result.push_str(&format!("action = {:?}\n", action));
+            }
+            if !rule.notify.is_empty() {
+                let notify_strs: Vec<String> = rule.notify.iter().map(|n| format!("{:?}", n)).collect();
+                result.push_str(&format!("notify = [{}]\n", notify_strs.join(", ")));
+            }
+        }
+    }
+
+    result
+}
+
+/// Build the HTML for the settings page (G20-15).
+#[cfg(feature = "web")]
+fn build_settings_html(lang: &str) -> String {
+    let title = if lang == "ja" { "設定" } else { "Settings" };
+    let rules_label = if lang == "ja" { "アラートルール" } else { "Alert Rules" };
+    let add_label = if lang == "ja" { "新規ルール追加" } else { "Add New Rule" };
+    let save_label = if lang == "ja" { "保存" } else { "Save" };
+    let delete_label = if lang == "ja" { "削除" } else { "Delete" };
+    let back_label = if lang == "ja" { "ダッシュボードに戻る" } else { "Back to Dashboard" };
+
+    format!(r##"<!DOCTYPE html>
+<html lang="{lang}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>syslenz - {title}</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+:root{{
+  --bg:#1a1b26;--bg-dark:#16161e;--bg-hl:#1f2335;--bg-sel:#292e42;
+  --fg:#c0caf5;--fg-dim:#565f89;--border:#3b4261;
+  --blue:#7aa2f7;--green:#9ece6a;--yellow:#e0af68;--red:#f7768e;
+  --cyan:#7dcfff;--purple:#bb9af7;--orange:#ff9e64;
+}}
+html,body{{height:100%}}
+body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg);color:var(--fg);padding:20px}}
+h1{{color:var(--blue);font-size:20px;margin-bottom:16px;display:flex;align-items:center;gap:12px}}
+h2{{color:var(--purple);font-size:15px;margin:20px 0 10px;text-transform:uppercase;letter-spacing:.5px}}
+a{{color:var(--blue);text-decoration:none}}
+a:hover{{text-decoration:underline}}
+.container{{max-width:1100px;margin:0 auto}}
+
+/* Table */
+.rules-table{{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px}}
+.rules-table th{{text-align:left;padding:8px;color:var(--purple);border-bottom:2px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.5px}}
+.rules-table td{{padding:6px 8px;border-bottom:1px solid var(--bg-sel);vertical-align:top}}
+.rules-table tr:hover{{background:var(--bg-hl)}}
+.sev-critical{{color:var(--red);font-weight:bold}}
+.sev-warning{{color:var(--yellow)}}
+.sev-info{{color:var(--cyan)}}
+
+/* Form */
+.form-card{{background:var(--bg-dark);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:20px}}
+.form-row{{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;align-items:end}}
+.form-group{{display:flex;flex-direction:column;gap:4px}}
+.form-group label{{font-size:11px;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.5px}}
+.form-group input,.form-group select{{
+  background:var(--bg);border:1px solid var(--border);color:var(--fg);
+  padding:6px 10px;border-radius:4px;font-family:inherit;font-size:12px;
+  outline:none;min-width:120px;
+}}
+.form-group input:focus,.form-group select:focus{{border-color:var(--blue)}}
+
+/* Buttons */
+.btn{{
+  padding:6px 16px;border:1px solid var(--border);border-radius:4px;
+  font-family:inherit;font-size:12px;cursor:pointer;
+  background:var(--bg-sel);color:var(--fg);
+}}
+.btn:hover{{background:var(--border)}}
+.btn-primary{{background:var(--blue);color:var(--bg-dark);border-color:var(--blue);font-weight:bold}}
+.btn-primary:hover{{opacity:0.85}}
+.btn-danger{{background:transparent;color:var(--red);border-color:var(--red)}}
+.btn-danger:hover{{background:var(--red);color:var(--bg-dark)}}
+.btn-sm{{padding:3px 10px;font-size:11px}}
+
+/* Status */
+.status-msg{{padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;display:none}}
+.status-msg.success{{display:block;background:rgba(158,206,106,0.15);color:var(--green);border:1px solid var(--green)}}
+.status-msg.error{{display:block;background:rgba(247,118,142,0.15);color:var(--red);border:1px solid var(--red)}}
+
+.empty-state{{color:var(--fg-dim);font-size:13px;padding:20px;text-align:center}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>
+    <a href="/" title="{back_label}">syslenz</a>
+    <span style="color:var(--fg-dim);font-size:14px">/</span>
+    <span>{title}</span>
+  </h1>
+
+  <div id="status-msg" class="status-msg"></div>
+
+  <h2>{rules_label}</h2>
+  <table class="rules-table" id="rules-table">
+    <thead>
+      <tr>
+        <th>Source</th><th>Field</th><th>Condition</th><th>Severity</th>
+        <th>Message</th><th>Notify</th><th>Action</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="rules-tbody">
+      <tr><td colspan="8" class="empty-state">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <h2>{add_label}</h2>
+  <div class="form-card">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Source</label>
+        <input type="text" id="f-source" placeholder="meminfo">
+      </div>
+      <div class="form-group">
+        <label>Field</label>
+        <input type="text" id="f-field" placeholder="MemAvailable">
+      </div>
+      <div class="form-group">
+        <label>Condition</label>
+        <input type="text" id="f-condition" placeholder="< 500000000">
+      </div>
+      <div class="form-group">
+        <label>Severity</label>
+        <select id="f-severity">
+          <option value="info">info</option>
+          <option value="warning" selected>warning</option>
+          <option value="critical">critical</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Message</label>
+        <input type="text" id="f-message" placeholder="Low memory available" style="width:100%">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Notify URLs (comma-separated, e.g. slack:https://..., webhook:https://...)</label>
+        <input type="text" id="f-notify" placeholder="slack:https://hooks.slack.com/..." style="width:100%">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Action (optional shell command)</label>
+        <input type="text" id="f-action" placeholder="notify-send 'syslenz: {{message}}'" style="width:100%">
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:8px">
+      <button class="btn btn-primary" onclick="addRule()">{add_label}</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;margin-top:16px">
+    <button class="btn btn-primary" onclick="saveRules()">{save_label}</button>
+    <a href="/" class="btn">{back_label}</a>
+  </div>
+</div>
+
+<script>
+let rules = [];
+
+async function loadSettings() {{
+  try {{
+    const resp = await fetch('/api/v1/settings');
+    const data = await resp.json();
+    rules = data.alert_rules || [];
+    renderRules();
+  }} catch(e) {{
+    showStatus('Failed to load settings: ' + e.message, true);
+  }}
+}}
+
+function renderRules() {{
+  const tbody = document.getElementById('rules-tbody');
+  if (rules.length === 0) {{
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No alert rules configured</td></tr>';
+    return;
+  }}
+  let html = '';
+  rules.forEach((r, i) => {{
+    const sevClass = 'sev-' + r.severity;
+    const notify = (r.notify || []).join(', ');
+    const action = r.action || '';
+    html += '<tr>'
+      + '<td>' + esc(r.source) + '</td>'
+      + '<td>' + esc(r.field) + '</td>'
+      + '<td><code>' + esc(r.condition) + '</code></td>'
+      + '<td class="' + sevClass + '">' + esc(r.severity) + '</td>'
+      + '<td>' + esc(r.message) + '</td>'
+      + '<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc(notify) + '</td>'
+      + '<td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis">' + esc(action) + '</td>'
+      + '<td><button class="btn btn-danger btn-sm" onclick="deleteRule(' + i + ')">{delete_label}</button></td>'
+      + '</tr>';
+  }});
+  tbody.innerHTML = html;
+}}
+
+function addRule() {{
+  const source = document.getElementById('f-source').value.trim();
+  const field = document.getElementById('f-field').value.trim();
+  const condition = document.getElementById('f-condition').value.trim();
+  const severity = document.getElementById('f-severity').value;
+  const message = document.getElementById('f-message').value.trim();
+  const notifyRaw = document.getElementById('f-notify').value.trim();
+  const action = document.getElementById('f-action').value.trim();
+
+  if (!source || !field || !condition || !message) {{
+    showStatus('Source, Field, Condition, and Message are required.', true);
+    return;
+  }}
+
+  const notify = notifyRaw ? notifyRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const rule = {{ source, field, condition, severity, message, notify }};
+  if (action) rule.action = action;
+
+  rules.push(rule);
+  renderRules();
+  // Clear form
+  ['f-source','f-field','f-condition','f-message','f-notify','f-action'].forEach(id => document.getElementById(id).value = '');
+  showStatus('Rule added (not yet saved to file).', false);
+}}
+
+function deleteRule(idx) {{
+  rules.splice(idx, 1);
+  renderRules();
+  showStatus('Rule removed (not yet saved to file).', false);
+}}
+
+async function saveRules() {{
+  try {{
+    const resp = await fetch('/api/v1/settings/alerts', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(rules),
+    }});
+    if (!resp.ok) {{
+      const err = await resp.json().catch(() => ({{}}));
+      throw new Error(err.error || 'HTTP ' + resp.status);
+    }}
+    const data = await resp.json();
+    rules = data.alert_rules || rules;
+    renderRules();
+    showStatus('Settings saved to config file.', false);
+  }} catch(e) {{
+    showStatus('Failed to save: ' + e.message, true);
+  }}
+}}
+
+function showStatus(msg, isError) {{
+  const el = document.getElementById('status-msg');
+  el.textContent = msg;
+  el.className = 'status-msg ' + (isError ? 'error' : 'success');
+  setTimeout(() => {{ el.className = 'status-msg'; }}, 5000);
+}}
+
+function esc(s) {{
+  if (typeof s !== 'string') return String(s);
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}}
+
+loadSettings();
+</script>
+</body>
+</html>"##,
+        lang = lang,
+        title = title,
+        rules_label = rules_label,
+        add_label = add_label,
+        save_label = save_label,
+        delete_label = delete_label,
+        back_label = back_label,
     )
 }

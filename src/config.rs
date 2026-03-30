@@ -1,9 +1,9 @@
 use crate::alert::AlertRule;
 use crate::history::HistoryConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct RunbookConfig {
     pub pattern: String,
     pub url: String,
@@ -23,7 +23,7 @@ pub struct Config {
     pub diagnostic_runbook: Vec<RunbookConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct HistoryTomlConfig {
     pub enabled: bool,
@@ -54,7 +54,7 @@ impl From<&HistoryTomlConfig> for HistoryConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct GeneralConfig {
     pub lang: String,
@@ -74,7 +74,7 @@ impl Default for GeneralConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct OtelConfig {
     pub endpoint: String,
@@ -90,7 +90,7 @@ impl Default for OtelConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct WebConfig {
     pub port: u16,
@@ -136,7 +136,7 @@ impl Config {
         }
     }
 
-    fn config_path() -> Option<PathBuf> {
+    pub fn config_path() -> Option<PathBuf> {
         // Try $XDG_CONFIG_HOME first, then fall back to ~/.config
         let config_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
             PathBuf::from(xdg)
