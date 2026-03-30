@@ -26,6 +26,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use anyhow::Result;
+use std::fs;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -77,6 +78,16 @@ fn main() -> Result<()> {
             }
         }
         return Ok(());
+    }
+
+    // --install-service — generate and install a systemd service file
+    if args.iter().any(|a| a == "--install-service") {
+        return install_service(&args);
+    }
+
+    // --uninstall-service — stop, disable, and remove the systemd service
+    if args.iter().any(|a| a == "--uninstall-service") {
+        return uninstall_service(&args);
     }
 
     // --serve [bind_addr] — TCP server mode (for Docker containers)
@@ -482,6 +493,144 @@ fn run(
         } else if app.auto_refresh {
             app.refresh()?;
         }
+    }
+
+    Ok(())
+}
+
+const SERVICE_NAME: &str = "syslenz";
+const SERVICE_PATH: &str = "/etc/systemd/system/syslenz.service";
+
+fn detect_locale_from_args(args: &[String]) -> i18n::Locale {
+    args.iter().position(|a| a == "--lang")
+        .and_then(|pos| args.get(pos + 1))
+        .map(|s| i18n::Locale::from_str(s))
+        .unwrap_or(i18n::Locale::En)
+}
+
+fn service_msg(locale: i18n::Locale, key: &str) -> &'static str {
+    match locale {
+        i18n::Locale::En => match key {
+            "install_root" => "Installing systemd service...",
+            "install_written" => "Service file written to /etc/systemd/system/syslenz.service",
+            "install_enabled" => "Service enabled and started.",
+            "install_status" => "Check status with: systemctl status syslenz",
+            "install_not_root" => "Not running as root. Printing service file to stdout.",
+            "install_hint" => "To install manually, save the above to /etc/systemd/system/syslenz.service and run:",
+            "install_hint_cmds" => "  sudo systemctl daemon-reload\n  sudo systemctl enable --now syslenz",
+            "uninstall_root" => "Removing systemd service...",
+            "uninstall_stopped" => "Service stopped and disabled.",
+            "uninstall_removed" => "Service file removed.",
+            "uninstall_not_found" => "Service file not found. Nothing to remove.",
+            "uninstall_not_root" => "Not running as root. To uninstall manually, run:",
+            "uninstall_hint_cmds" => "  sudo systemctl stop syslenz\n  sudo systemctl disable syslenz\n  sudo rm /etc/systemd/system/syslenz.service\n  sudo systemctl daemon-reload",
+            _ => "?",
+        },
+        i18n::Locale::Ja => match key {
+            "install_root" => "systemd サービスをインストール中...",
+            "install_written" => "サービスファイルを /etc/systemd/system/syslenz.service に書き込みました",
+            "install_enabled" => "サービスを有効化し、起動しました。",
+            "install_status" => "状態確認: systemctl status syslenz",
+            "install_not_root" => "root 権限がありません。サービスファイルを標準出力に表示します。",
+            "install_hint" => "手動でインストールするには、上記を /etc/systemd/system/syslenz.service に保存し、以下を実行してください:",
+            "install_hint_cmds" => "  sudo systemctl daemon-reload\n  sudo systemctl enable --now syslenz",
+            "uninstall_root" => "systemd サービスを削除中...",
+            "uninstall_stopped" => "サービスを停止し、無効化しました。",
+            "uninstall_removed" => "サービスファイルを削除しました。",
+            "uninstall_not_found" => "サービスファイルが見つかりません。削除するものはありません。",
+            "uninstall_not_root" => "root 権限がありません。手動でアンインストールするには、以下を実行してください:",
+            "uninstall_hint_cmds" => "  sudo systemctl stop syslenz\n  sudo systemctl disable syslenz\n  sudo rm /etc/systemd/system/syslenz.service\n  sudo systemctl daemon-reload",
+            _ => "?",
+        },
+    }
+}
+
+fn generate_service_unit() -> String {
+    // Find the absolute path of the current executable
+    let exe_path = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "/usr/local/bin/syslenz".to_string());
+
+    format!(
+        r#"[Unit]
+Description=SysLenz System Monitor (Prometheus + TCP)
+Documentation=https://github.com/syslenz/syslenz
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={exe} --prometheus --serve
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=syslenz
+
+[Install]
+WantedBy=multi-user.target
+"#,
+        exe = exe_path,
+    )
+}
+
+fn is_root() -> bool {
+    // On Unix, UID 0 means root
+    unsafe { libc::geteuid() == 0 }
+}
+
+fn install_service(args: &[String]) -> Result<()> {
+    let locale = detect_locale_from_args(args);
+    let unit = generate_service_unit();
+
+    if is_root() {
+        eprintln!("{}", service_msg(locale, "install_root"));
+        fs::write(SERVICE_PATH, &unit)?;
+        eprintln!("{}", service_msg(locale, "install_written"));
+
+        // daemon-reload + enable + start
+        Command::new("systemctl").arg("daemon-reload").status()?;
+        Command::new("systemctl")
+            .args(["enable", "--now", SERVICE_NAME])
+            .status()?;
+
+        eprintln!("{}", service_msg(locale, "install_enabled"));
+        eprintln!("{}", service_msg(locale, "install_status"));
+    } else {
+        eprintln!("{}", service_msg(locale, "install_not_root"));
+        eprintln!();
+        println!("{}", unit);
+        eprintln!("{}", service_msg(locale, "install_hint"));
+        eprintln!("{}", service_msg(locale, "install_hint_cmds"));
+    }
+
+    Ok(())
+}
+
+fn uninstall_service(args: &[String]) -> Result<()> {
+    let locale = detect_locale_from_args(args);
+
+    if is_root() {
+        if !Path::new(SERVICE_PATH).exists() {
+            eprintln!("{}", service_msg(locale, "uninstall_not_found"));
+            return Ok(());
+        }
+        eprintln!("{}", service_msg(locale, "uninstall_root"));
+
+        let _ = Command::new("systemctl")
+            .args(["stop", SERVICE_NAME])
+            .status();
+        let _ = Command::new("systemctl")
+            .args(["disable", SERVICE_NAME])
+            .status();
+
+        fs::remove_file(SERVICE_PATH)?;
+        Command::new("systemctl").arg("daemon-reload").status()?;
+
+        eprintln!("{}", service_msg(locale, "uninstall_stopped"));
+        eprintln!("{}", service_msg(locale, "uninstall_removed"));
+    } else {
+        eprintln!("{}", service_msg(locale, "uninstall_not_root"));
+        eprintln!("{}", service_msg(locale, "uninstall_hint_cmds"));
     }
 
     Ok(())
