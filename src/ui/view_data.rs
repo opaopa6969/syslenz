@@ -1200,7 +1200,6 @@ impl App {
 #[cfg(test)]
 mod view_data_tests {
     use super::*;
-
     // P-A1: diag_count matches diagnostics::analyze().len()
     #[cfg(target_os = "linux")]
     #[test]

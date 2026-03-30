@@ -1,4 +1,5 @@
 use crate::alert::AlertRule;
+use crate::history::HistoryConfig;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -9,8 +10,40 @@ pub struct Config {
     pub otel: OtelConfig,
     pub web: WebConfig,
     pub ssh: SshConfig,
+    pub history: HistoryTomlConfig,
     #[serde(default)]
     pub alert: Vec<AlertRule>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct HistoryTomlConfig {
+    pub enabled: bool,
+    pub interval_secs: u64,
+    pub retention_days: u32,
+    pub path: Option<String>,
+}
+
+impl Default for HistoryTomlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 60,
+            retention_days: 7,
+            path: None,
+        }
+    }
+}
+
+impl From<&HistoryTomlConfig> for HistoryConfig {
+    fn from(toml: &HistoryTomlConfig) -> Self {
+        Self {
+            enabled: toml.enabled,
+            interval_secs: toml.interval_secs,
+            retention_days: toml.retention_days,
+            path: toml.path.as_ref().map(PathBuf::from),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

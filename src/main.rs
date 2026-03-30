@@ -3,6 +3,7 @@ mod common_metric;
 mod config;
 mod diagnostics;
 mod education;
+mod history;
 mod metric_kind;
 mod serve;
 mod prometheus;
