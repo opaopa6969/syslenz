@@ -10,7 +10,7 @@ keywords = ["linux", "proc", "tui", "system-monitor", "sysadmin"]
 categories = ["command-line-utilities", "os::linux-apis"]
 
 [features]
-default = []
+default = ["web"]
 otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tokio"]
 web = ["axum", "tokio", "tower-http", "tokio-stream"]
 x11widget = ["x11rb"]
@@ -23,6 +23,7 @@ serde_json = "1"
 toml = "0.8"
 anyhow = "1"
 libc = "0.2"
+ureq = "2"
 
 # OpenTelemetry (optional)
 opentelemetry = { version = "0.28", optional = true }

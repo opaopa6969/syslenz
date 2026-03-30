@@ -235,6 +235,31 @@ fn main() -> Result<()> {
         None
     };
 
+    // --no-web flag disables automatic web server
+    let no_web = args.iter().any(|a| a == "--no-web");
+
+    // --web-port <PORT> (default 8080)
+    let web_port: u16 = args.iter().position(|a| a == "--web-port")
+        .and_then(|pos| args.get(pos + 1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(8080);
+
+    // Start web server alongside TUI (unless --no-web)
+    #[cfg(feature = "web")]
+    let _web_thread = if !no_web {
+        let web_locale = locale;
+        let port = web_port;
+        Some(std::thread::spawn(move || {
+            if let Err(e) = web::run_web_server(port, web_locale) {
+                eprintln!("Web server error: {}", e);
+            }
+        }))
+    } else {
+        None
+    };
+    #[cfg(not(feature = "web"))]
+    let _web_thread: Option<std::thread::JoinHandle<()>> = None;
+
     // TUI mode
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -243,6 +268,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let alert_rules = cfg.alert;
+    let diagnostic_runbooks = cfg.diagnostic_runbook;
     // Build list of extra remote hosts (beyond the primary one used to construct the App).
     // The primary is determined by run(): first ssh_host, then docker_container, then connect_addr.
     // All remaining hosts go into extra_hosts.
@@ -271,7 +297,7 @@ fn main() -> Result<()> {
         }
         extra_hosts.push((format!("tcp:{}", a), format!("tcp:{}", a)));
     }
-    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, start_tutorial, alert_rules, extra_hosts);
+    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, start_tutorial, alert_rules, diagnostic_runbooks, extra_hosts);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -293,6 +319,7 @@ fn run(
     start_classic: bool,
     start_tutorial: bool,
     alert_rules: Vec<alert::AlertRule>,
+    diagnostic_runbooks: Vec<config::RunbookConfig>,
     extra_hosts: Vec<(String, String)>,
 ) -> Result<()> {
     let mut app = if let Some(ref host) = ssh_host {
@@ -313,6 +340,7 @@ fn run(
     };
     app.locale = locale;
     app.alert_rules = alert_rules;
+    app.diagnostic_runbooks = diagnostic_runbooks;
     if start_tutorial {
         app.start_tutorial();
     } else if start_classic {
@@ -460,6 +488,37 @@ fn run(
                                         format!("Copied: {}", truncate(&text, 40))
                                     }
                                 );
+                            }
+                        }
+                    }
+                    KeyCode::Char('R') => {
+                        if matches!(app.view, ui::app::View::Diagnostics) {
+                            let findings = crate::diagnostics::analyze(
+                                &app.current, app.locale, &app.diagnostic_runbooks,
+                            );
+                            if let Some(finding) = findings.get(app.selected_diagnostic) {
+                                if let Some(ref url) = finding.runbook_url {
+                                    // Try to open in browser; show URL in status either way
+                                    let _ = std::process::Command::new("xdg-open")
+                                        .arg(url)
+                                        .stdout(std::process::Stdio::null())
+                                        .stderr(std::process::Stdio::null())
+                                        .spawn()
+                                        .or_else(|_| {
+                                            std::process::Command::new("open")
+                                                .arg(url)
+                                                .stdout(std::process::Stdio::null())
+                                                .stderr(std::process::Stdio::null())
+                                                .spawn()
+                                        });
+                                    app.status_message = Some(
+                                        if app.locale == i18n::Locale::Ja {
+                                            format!("Runbook: {}", url)
+                                        } else {
+                                            format!("Runbook: {}", url)
+                                        }
+                                    );
+                                }
                             }
                         }
                     }

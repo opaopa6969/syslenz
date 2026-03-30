@@ -206,6 +206,7 @@ pub struct DiagnosticRow {
     pub detail: String,
     pub suggestion: String,
     pub related_metrics: Vec<(String, String)>,
+    pub runbook_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -744,7 +745,7 @@ impl App {
             .collect();
 
         // P-A1: Diagnostic badge — run analyze once, extract count & worst severity
-        let diag_findings = crate::diagnostics::analyze(&self.current, l);
+        let diag_findings = crate::diagnostics::analyze(&self.current, l, &self.diagnostic_runbooks);
         let diag_count = diag_findings.len();
         let diag_severity = diag_findings.iter().fold(None, |worst, f| {
             let sev = match f.severity {
@@ -1118,7 +1119,7 @@ impl App {
 
     fn build_diagnostics_data(&self) -> DiagnosticsData {
         let l = self.locale;
-        let findings = crate::diagnostics::analyze(&self.current, l);
+        let findings = crate::diagnostics::analyze(&self.current, l, &self.diagnostic_runbooks);
 
         let title = if l == Locale::Ja {
             format!("診断 — {}件の検出", findings.len())
@@ -1142,6 +1143,7 @@ impl App {
                     detail: f.detail.clone(),
                     suggestion: f.suggestion.clone(),
                     related_metrics: f.related_metrics.clone(),
+                    runbook_url: f.runbook_url.clone(),
                 }
             })
             .collect();
@@ -1206,7 +1208,7 @@ mod view_data_tests {
     fn dashboard_diag_count_matches_analyze() {
         let app = App::new().unwrap();
         let data = app.test_build_dashboard_data();
-        let findings = crate::diagnostics::analyze(&app.current, app.locale);
+        let findings = crate::diagnostics::analyze(&app.current, app.locale, &app.diagnostic_runbooks);
         assert_eq!(data.diag_count, findings.len());
     }
 

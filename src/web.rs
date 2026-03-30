@@ -79,6 +79,7 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             .route("/api/sources", get(sources_handler))
             .route("/api/stream", get(sse_handler))
             .route("/api/view", get(view_handler))
+            .route("/api/field-help", get(field_help_handler))
             .with_state(state);
 
         let addr = format!("0.0.0.0:{}", port);
@@ -136,6 +137,13 @@ async fn sse_handler(
 struct ViewQuery {
     view: Option<String>,
     locale: Option<String>,
+    /// G20-10: URL state sharing — host selector (reserved for multi-host)
+    #[allow(dead_code)]
+    host: Option<String>,
+    /// G20-10: URL state sharing — select source by name
+    source: Option<String>,
+    /// G20-10: URL state sharing — select field by name
+    field: Option<String>,
 }
 
 #[cfg(feature = "web")]
@@ -143,7 +151,7 @@ async fn view_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ViewQuery>,
 ) -> impl IntoResponse {
-    use crate::ui::app::{App, View, Focus};
+    use crate::ui::app::View;
 
     let locale = params
         .locale
@@ -156,26 +164,75 @@ async fn view_handler(
 
     // Build a minimal App to use the ViewData builders
     let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
-    let view = match params.view.as_deref() {
-        Some("welcome") => View::Welcome,
-        Some("detail") => View::Detail,
-        Some("diff") => View::Diff,
-        Some("table") => View::TableView,
-        Some("graph") => View::Graph,
-        Some("diagnostics") => View::Diagnostics,
-        Some("category") => View::CategoryGuide,
-        _ => View::Dashboard,
+
+    // G20-10: If source/field are specified, auto-select detail view
+    let view = if params.source.is_some() {
+        View::Detail
+    } else {
+        match params.view.as_deref() {
+            Some("welcome") => View::Welcome,
+            Some("detail") => View::Detail,
+            Some("diff") => View::Diff,
+            Some("table") => View::TableView,
+            Some("graph") => View::Graph,
+            Some("diagnostics") => View::Diagnostics,
+            Some("category") => View::CategoryGuide,
+            _ => View::Dashboard,
+        }
     };
 
-    let app = App {
+    // G20-10: Resolve source index from query param
+    let selected_source = params.source.as_deref()
+        .and_then(|s| source_keys.iter().position(|k| k == s))
+        .unwrap_or(0);
+
+    // G20-10: Resolve field index from query param
+    let selected_field = if let (Some(src_name), Some(field_name)) = (params.source.as_deref(), params.field.as_deref()) {
+        snapshot.entries.get(src_name)
+            .and_then(|entry| entry.fields.iter().position(|f| f.name == field_name))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let app = build_minimal_app(snapshot, history, source_keys, view, locale, selected_source, selected_field);
+
+    let view_data = app.build_view_data();
+    Json(view_data)
+}
+
+/// Build a minimal App for ViewData generation (shared by view_handler and field_help_handler).
+#[cfg(feature = "web")]
+fn build_minimal_app(
+    snapshot: Snapshot,
+    history: Vec<Snapshot>,
+    source_keys: Vec<String>,
+    view: crate::ui::app::View,
+    locale: Locale,
+    selected_source: usize,
+    selected_field: usize,
+) -> crate::ui::app::App {
+    use crate::ui::app::{App, Focus, HostState, ConnectionStatus};
+
+    let host0 = HostState {
+        label: "localhost".to_string(),
+        current: snapshot.clone(),
+        snapshots: history.clone(),
+        max_snapshots: 60,
+        receiver: None,
+        connection_status: ConnectionStatus::Local,
+        alert_events: Vec::new(),
+    };
+
+    App {
         snapshots: history,
         current: snapshot,
         diffs: Vec::new(),
         view,
         focus: Focus::Content,
-        selected_source: 0,
+        selected_source,
         source_keys,
-        selected_field: 0,
+        selected_field,
         sidebar_scroll: 0,
         field_scroll: 0,
         table_scroll: 0,
@@ -204,10 +261,128 @@ async fn view_handler(
         diff_target_index: None,
         alert_rules: Vec::new(),
         active_alerts: Vec::new(),
+        diagnostic_runbooks: Vec::new(),
+        hosts: vec![host0],
+        active_host: 0,
+        connection_status: ConnectionStatus::Local,
+        tutorial_step: None,
+        view_history: Vec::new(),
+        selected_diagnostic: 0,
+        selected_related_metric: None,
+    }
+}
+
+/// G20-7: /api/field-help endpoint — P-A4 spec
+/// GET /api/field-help?source=meminfo&field=MemAvailable&lang=ja
+#[cfg(feature = "web")]
+#[derive(serde::Deserialize)]
+struct FieldHelpQuery {
+    source: String,
+    field: String,
+    lang: Option<String>,
+}
+
+#[cfg(feature = "web")]
+#[derive(serde::Serialize)]
+struct FieldHelpResponse {
+    source: String,
+    field: String,
+    description: FieldHelpDescription,
+    see_also: Vec<FieldHelpLink>,
+    breadcrumbs: Vec<FieldHelpLink>,
+    contextual_hint: Option<String>,
+}
+
+#[cfg(feature = "web")]
+#[derive(serde::Serialize)]
+struct FieldHelpDescription {
+    normal: String,
+    detailed: String,
+    extra: String,
+}
+
+#[cfg(feature = "web")]
+#[derive(serde::Serialize)]
+struct FieldHelpLink {
+    source: String,
+    field: String,
+    reason: String,
+}
+
+#[cfg(feature = "web")]
+async fn field_help_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<FieldHelpQuery>,
+) -> impl IntoResponse {
+    use crate::i18n;
+    use crate::education;
+
+    let locale = params.lang.as_deref()
+        .map(Locale::from_str)
+        .unwrap_or(state.locale);
+
+    let source = &params.source;
+    let field = &params.field;
+
+    // Description (normal, detailed, extra) from i18n
+    let description = match i18n::field_description(locale, source, field) {
+        Some((normal, detailed, extra)) => FieldHelpDescription {
+            normal: normal.to_string(),
+            detailed: detailed.to_string(),
+            extra: extra.to_string(),
+        },
+        None => FieldHelpDescription {
+            normal: String::new(),
+            detailed: String::new(),
+            extra: String::new(),
+        },
     };
 
-    let view_data = app.build_view_data();
-    Json(view_data)
+    // See-also cross-links from i18n
+    let see_also: Vec<FieldHelpLink> = i18n::see_also(locale, source, field)
+        .into_iter()
+        .map(|(src, fld, reason)| FieldHelpLink {
+            source: src.to_string(),
+            field: fld.to_string(),
+            reason: reason.to_string(),
+        })
+        .collect();
+
+    // Breadcrumbs (learning path) from education
+    let breadcrumbs: Vec<FieldHelpLink> = education::breadcrumbs(locale, source, field)
+        .into_iter()
+        .map(|(src, fld, reason)| FieldHelpLink {
+            source: src.to_string(),
+            field: fld.to_string(),
+            reason: reason.to_string(),
+        })
+        .collect();
+
+    // Contextual hint: computed from live snapshot data
+    let contextual_hint = {
+        let snapshot = state.current.lock().unwrap().clone();
+        let history = state.history.lock().unwrap().clone();
+        let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
+        let selected_source = source_keys.iter().position(|k| k == source).unwrap_or(0);
+        let selected_field_idx = snapshot.entries.get(source.as_str())
+            .and_then(|entry| entry.fields.iter().position(|f| f.name == *field))
+            .unwrap_or(0);
+        let app = build_minimal_app(
+            snapshot, history, source_keys,
+            crate::ui::app::View::Detail, locale,
+            selected_source, selected_field_idx,
+        );
+        crate::ui::render::get_contextual_hint_for_api(&app, source, field)
+    };
+
+    Json(FieldHelpResponse {
+        source: source.to_string(),
+        field: field.to_string(),
+        description,
+        see_also,
+        breadcrumbs,
+        contextual_hint,
+    })
 }
 
 #[cfg(feature = "web")]

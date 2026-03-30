@@ -3,6 +3,12 @@ use crate::history::HistoryConfig;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct RunbookConfig {
+    pub pattern: String,
+    pub url: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -13,6 +19,8 @@ pub struct Config {
     pub history: HistoryTomlConfig,
     #[serde(default)]
     pub alert: Vec<AlertRule>,
+    #[serde(default)]
+    pub diagnostic_runbook: Vec<RunbookConfig>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -150,6 +150,8 @@ pub struct App {
     pub alert_rules: Vec<AlertRule>,
     /// Currently active (firing) alerts
     pub active_alerts: Vec<AlertEvent>,
+    /// Diagnostic runbook URL mappings from config
+    pub diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
 
     // === BL-030: Multi-host state (HostState per host) ===
     /// Per-host state containers. `hosts[0]` is always localhost or the primary host.
@@ -222,6 +224,7 @@ impl App {
             diff_target_index: None,
             alert_rules: Vec::new(),
             active_alerts: Vec::new(),
+            diagnostic_runbooks: Vec::new(),
             hosts: vec![host0],
             active_host: 0,
             connection_status: ConnectionStatus::Local,
@@ -286,6 +289,7 @@ impl App {
             diff_target_index: None,
             alert_rules: Vec::new(),
             active_alerts: Vec::new(),
+            diagnostic_runbooks: Vec::new(),
             hosts: vec![host0],
             active_host: 0,
             connection_status: conn_status,
@@ -351,6 +355,7 @@ impl App {
             diff_target_index: None,
             alert_rules: Vec::new(),
             active_alerts: Vec::new(),
+            diagnostic_runbooks: Vec::new(),
             hosts: vec![host0],
             active_host: 0,
             connection_status: ConnectionStatus::Local,
@@ -542,6 +547,14 @@ impl App {
         // BL-071: Execute external actions for newly-firing alerts
         alert::execute_actions(&self.alert_rules, &self.active_alerts, &prev_firing);
 
+        // G20-8: Send webhook/Slack notifications for newly-firing alerts
+        let host_label = self.hosts[self.active_host].label.as_str();
+        alert::send_notifications(&self.alert_rules, &self.active_alerts, &prev_firing, host_label);
+
+        // G20-9: Record alert state transitions to history
+        let history_dir = crate::history::default_alert_history_dir();
+        alert::record_alert_history(&history_dir, &self.active_alerts, &prev_firing, host_label);
+
         // Sync active host state
         self.hosts[self.active_host].current = self.current.clone();
         self.hosts[self.active_host].snapshots = self.snapshots.clone();
@@ -668,14 +681,14 @@ impl App {
                 }
                 View::Diagnostics => {
                     if let Some(ref mut sel) = self.selected_related_metric {
-                        let findings = crate::diagnostics::analyze(&self.current, self.locale);
+                        let findings = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks);
                         if let Some(f) = findings.get(self.selected_diagnostic) {
                             if *sel + 1 < f.related_metrics.len() {
                                 *sel += 1;
                             }
                         }
                     } else {
-                        let count = crate::diagnostics::analyze(&self.current, self.locale).len();
+                        let count = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks).len();
                         if self.selected_diagnostic + 1 < count {
                             self.selected_diagnostic += 1;
                         }
@@ -725,7 +738,7 @@ impl App {
                         }
                     }
                     View::Diagnostics => {
-                        let findings = crate::diagnostics::analyze(&self.current, self.locale);
+                        let findings = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks);
                         if let Some(finding) = findings.get(self.selected_diagnostic) {
                             if finding.related_metrics.is_empty() {
                                 // No related metrics to jump to
@@ -1100,7 +1113,7 @@ impl App {
             .zip(get_val("meminfo", "MemTotal"))
             .map(|(a, t)| (a / 1024.0 / 1024.0, (a / t * 100.0) as u64));
         let load = get_val("loadavg", "load_1min");
-        let diag_count = crate::diagnostics::analyze(&self.current, self.locale).len();
+        let diag_count = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks).len();
 
         match step {
             0 => (
@@ -1275,7 +1288,7 @@ impl App {
             }
             View::Diagnostics => {
                 // Copy all diagnostics as text
-                let findings = crate::diagnostics::analyze(&self.current, self.locale);
+                let findings = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks);
                 if findings.is_empty() {
                     Some("No diagnostic findings.".to_string())
                 } else {
@@ -1421,6 +1434,7 @@ mod tests {
             severity: "warning".to_string(),
             message: "High load".to_string(),
             action: None,
+            notify: Vec::new(),
         }];
         let events = crate::alert::evaluate_alerts(&snap, &rules, &[]);
         assert_eq!(events.len(), 1);
@@ -1441,6 +1455,7 @@ mod tests {
             severity: "warning".to_string(),
             message: "High load".to_string(),
             action: None,
+            notify: Vec::new(),
         }];
         let events = crate::alert::evaluate_alerts(&snap, &rules, &[]);
         // Should produce no firing events
@@ -1461,6 +1476,7 @@ mod tests {
             severity: "critical".to_string(),
             message: "Low memory".to_string(),
             action: None,
+            notify: Vec::new(),
         }];
         // First evaluation
         let events1 = crate::alert::evaluate_alerts(&snap, &rules, &[]);

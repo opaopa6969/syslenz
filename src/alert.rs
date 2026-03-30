@@ -1,5 +1,7 @@
 use crate::proc::{FieldValue, Snapshot};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AlertRule {
@@ -13,6 +15,9 @@ pub struct AlertRule {
     /// Example: `action = "notify-send 'syslenz: {message}'"` or `action = "curl -X POST ..."`.
     #[serde(default)]
     pub action: Option<String>,
+    /// G20-8: Notification endpoints. Each entry is "slack:URL" or "webhook:URL".
+    #[serde(default)]
+    pub notify: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,7 +30,7 @@ pub enum CompareOp {
     Neq,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AlertEvent {
     pub rule_index: usize,
     pub source: String,
@@ -215,6 +220,82 @@ pub fn execute_actions(rules: &[AlertRule], events: &[AlertEvent], prev_firing: 
     }
 }
 
+/// G20-8: Send a notification to a single endpoint.
+/// For "slack:URL" — POST Slack-formatted JSON.
+/// For "webhook:URL" — POST full structured JSON payload.
+fn send_notification(endpoint: &str, event: &AlertEvent, host: &str) {
+    if let Some(url) = endpoint.strip_prefix("slack:") {
+        let text = format!(
+            "\u{1f6a8} [{}] {} ({}: {})",
+            host, event.message, event.field, event.current_value
+        );
+        let payload = serde_json::json!({ "text": text });
+        let _ = ureq::post(url)
+            .set("Content-Type", "application/json")
+            .send_string(&payload.to_string());
+    } else if let Some(url) = endpoint.strip_prefix("webhook:") {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let payload = serde_json::json!({
+            "tool": "syslenz",
+            "host": host,
+            "severity": event.severity,
+            "source": event.source,
+            "field": event.field,
+            "value": event.current_value,
+            "message": event.message,
+            "timestamp": now,
+        });
+        let _ = ureq::post(url)
+            .set("Content-Type", "application/json")
+            .send_string(&payload.to_string());
+    }
+}
+
+/// G20-8: Send notifications for newly-firing alerts (fire-and-forget via spawned threads).
+/// Only notifies on state transition (not previously firing).
+pub fn send_notifications(rules: &[AlertRule], events: &[AlertEvent], prev_firing: &[usize], host: &str) {
+    for event in events {
+        if !event.firing {
+            continue;
+        }
+        // Only notify on new firing (state transition)
+        if prev_firing.contains(&event.rule_index) {
+            continue;
+        }
+        if let Some(rule) = rules.get(event.rule_index) {
+            for endpoint in &rule.notify {
+                let endpoint = endpoint.clone();
+                let event = event.clone();
+                let host = host.to_string();
+                std::thread::spawn(move || {
+                    send_notification(&endpoint, &event, &host);
+                });
+            }
+        }
+    }
+}
+
+/// G20-9: Record alert events (firing and resolved) to the history directory.
+/// Delegates to `history::append_alert_event` for each event that represents
+/// a state transition (newly firing or just resolved).
+pub fn record_alert_history(
+    history_dir: &Path,
+    events: &[AlertEvent],
+    prev_firing: &[usize],
+    host: &str,
+) {
+    for event in events {
+        let is_new_firing = event.firing && !prev_firing.contains(&event.rule_index);
+        let is_resolved = !event.firing && prev_firing.contains(&event.rule_index);
+        if is_new_firing || is_resolved {
+            let _ = crate::history::append_alert_event(history_dir, event, host);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +346,7 @@ mod tests {
         "#;
         let rule: AlertRule = toml::from_str(toml_str).unwrap();
         assert!(rule.action.is_none());
+        assert!(rule.notify.is_empty());
 
         // With action
         let toml_str = r#"
@@ -279,6 +361,23 @@ mod tests {
         assert_eq!(rule.action, Some("echo {message}".to_string()));
     }
 
+    // G20-8: AlertRule with notify field deserializes correctly
+    #[test]
+    fn alert_rule_notify_field() {
+        let toml_str = r#"
+            source = "meminfo"
+            field = "MemAvailable"
+            condition = "< 500000"
+            severity = "critical"
+            message = "Memory critically low"
+            notify = ["slack:https://hooks.slack.com/xxx", "webhook:https://my.endpoint/alert"]
+        "#;
+        let rule: AlertRule = toml::from_str(toml_str).unwrap();
+        assert_eq!(rule.notify.len(), 2);
+        assert_eq!(rule.notify[0], "slack:https://hooks.slack.com/xxx");
+        assert_eq!(rule.notify[1], "webhook:https://my.endpoint/alert");
+    }
+
     // BL-071: execute_actions does not fire for already-firing alerts
     #[test]
     fn execute_actions_skips_prev_firing() {
@@ -289,6 +388,7 @@ mod tests {
             severity: "warning".to_string(),
             message: "High load".to_string(),
             action: Some("echo test".to_string()),
+            notify: Vec::new(),
         }];
         let events = vec![AlertEvent {
             rule_index: 0,
@@ -304,5 +404,125 @@ mod tests {
         execute_actions(&rules, &events, &[0]);
         // With empty prev_firing, action should fire (spawns `echo test` harmlessly)
         execute_actions(&rules, &events, &[]);
+    }
+
+    // G20-8: send_notifications skips already-firing alerts
+    #[test]
+    fn send_notifications_skips_prev_firing() {
+        let rules = vec![AlertRule {
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            condition: "> 8.0".to_string(),
+            severity: "warning".to_string(),
+            message: "High load".to_string(),
+            action: None,
+            // Using an invalid URL so notification would fail silently if attempted
+            notify: vec!["webhook:http://127.0.0.1:1/nonexistent".to_string()],
+        }];
+        let events = vec![AlertEvent {
+            rule_index: 0,
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            severity: "warning".to_string(),
+            message: "High load".to_string(),
+            current_value: "10.0".to_string(),
+            firing: true,
+        }];
+        // With prev_firing containing 0, should not attempt notification (no panic)
+        send_notifications(&rules, &events, &[0], "testhost");
+        // With empty prev_firing, spawns thread that will fail silently
+        send_notifications(&rules, &events, &[], "testhost");
+    }
+
+    // G20-8: send_notifications skips non-firing events
+    #[test]
+    fn send_notifications_skips_non_firing() {
+        let rules = vec![AlertRule {
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            condition: "> 8.0".to_string(),
+            severity: "warning".to_string(),
+            message: "High load".to_string(),
+            action: None,
+            notify: vec!["webhook:http://127.0.0.1:1/nonexistent".to_string()],
+        }];
+        let events = vec![AlertEvent {
+            rule_index: 0,
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            severity: "warning".to_string(),
+            message: "High load".to_string(),
+            current_value: "5.0".to_string(),
+            firing: false,
+        }];
+        // Non-firing event should not trigger notification
+        send_notifications(&rules, &events, &[], "testhost");
+    }
+
+    // G20-9: record_alert_history writes firing and resolved events
+    #[test]
+    fn record_alert_history_writes_events() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let events = vec![
+            AlertEvent {
+                rule_index: 0,
+                source: "meminfo".to_string(),
+                field: "MemAvailable".to_string(),
+                severity: "critical".to_string(),
+                message: "Memory low".to_string(),
+                current_value: "100000".to_string(),
+                firing: true,
+            },
+            AlertEvent {
+                rule_index: 1,
+                source: "loadavg".to_string(),
+                field: "load_1min".to_string(),
+                severity: "warning".to_string(),
+                message: "Load resolved".to_string(),
+                current_value: "2.0".to_string(),
+                firing: false,
+            },
+        ];
+        // rule_index 0 is newly firing, rule_index 1 was previously firing (now resolved)
+        record_alert_history(tmp.path(), &events, &[1], "testhost");
+
+        let alert_file = tmp.path().join("alerts.jsonl");
+        assert!(alert_file.exists(), "alerts.jsonl should be created");
+        let content = std::fs::read_to_string(&alert_file).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "Should have 2 lines (1 firing, 1 resolved)");
+
+        // Verify first line is the firing event
+        let entry1: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(entry1["host"], "testhost");
+        assert_eq!(entry1["severity"], "critical");
+        assert_eq!(entry1["source"], "meminfo");
+        assert_eq!(entry1["status"], "firing");
+
+        // Verify second line is the resolved event
+        let entry2: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(entry2["status"], "resolved");
+        assert_eq!(entry2["source"], "loadavg");
+    }
+
+    // G20-9: record_alert_history skips events without state transition
+    #[test]
+    fn record_alert_history_skips_no_transition() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let events = vec![AlertEvent {
+            rule_index: 0,
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            severity: "warning".to_string(),
+            message: "Still firing".to_string(),
+            current_value: "10.0".to_string(),
+            firing: true,
+        }];
+        // Already was firing — no state transition
+        record_alert_history(tmp.path(), &events, &[0], "testhost");
+
+        let alert_file = tmp.path().join("alerts.jsonl");
+        // File should not exist (no events written)
+        assert!(!alert_file.exists(), "No file should be created for non-transition events");
     }
 }

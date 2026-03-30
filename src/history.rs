@@ -130,6 +130,49 @@ impl HistoryWriter {
     }
 }
 
+/// G20-9: Append an alert event to `alerts.jsonl` in the history directory.
+/// Each line is a JSON object with timestamp, severity, source, field, value, message, host, status.
+pub fn append_alert_event(
+    dir: &std::path::Path,
+    event: &crate::alert::AlertEvent,
+    host: &str,
+) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    let path = dir.join("alerts.jsonl");
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let status = if event.firing { "firing" } else { "resolved" };
+
+    let entry = serde_json::json!({
+        "timestamp": now,
+        "severity": event.severity,
+        "source": event.source,
+        "field": event.field,
+        "value": event.current_value,
+        "message": event.message,
+        "host": host,
+        "status": status,
+    });
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    writeln!(file, "{}", entry)?;
+
+    Ok(())
+}
+
+/// Default alert history directory: same as snapshot history directory.
+/// Public so that alert.rs can call record_alert_history with this path.
+pub fn default_alert_history_dir() -> PathBuf {
+    default_history_dir()
+}
+
 /// Default history directory: ~/.local/share/syslenz/history
 fn default_history_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
@@ -276,5 +319,93 @@ mod tests {
         let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1743206400);
         let name = writer.filename_for(time);
         assert_eq!(name, "2025-03-29.jsonl");
+    }
+
+    // G20-9: append_alert_event writes to alerts.jsonl
+    #[test]
+    fn append_alert_event_writes_jsonl() {
+        let tmp = TempDir::new().unwrap();
+        let event = crate::alert::AlertEvent {
+            rule_index: 0,
+            source: "meminfo".to_string(),
+            field: "MemAvailable".to_string(),
+            severity: "critical".to_string(),
+            message: "Memory low".to_string(),
+            current_value: "100000".to_string(),
+            firing: true,
+        };
+
+        append_alert_event(tmp.path(), &event, "myhost").unwrap();
+
+        let path = tmp.path().join("alerts.jsonl");
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(entry["host"], "myhost");
+        assert_eq!(entry["severity"], "critical");
+        assert_eq!(entry["source"], "meminfo");
+        assert_eq!(entry["field"], "MemAvailable");
+        assert_eq!(entry["value"], "100000");
+        assert_eq!(entry["message"], "Memory low");
+        assert_eq!(entry["status"], "firing");
+        assert!(entry["timestamp"].is_number());
+    }
+
+    // G20-9: append_alert_event records resolved status
+    #[test]
+    fn append_alert_event_resolved() {
+        let tmp = TempDir::new().unwrap();
+        let event = crate::alert::AlertEvent {
+            rule_index: 0,
+            source: "loadavg".to_string(),
+            field: "load_1min".to_string(),
+            severity: "warning".to_string(),
+            message: "Load normal".to_string(),
+            current_value: "2.0".to_string(),
+            firing: false,
+        };
+
+        append_alert_event(tmp.path(), &event, "server1").unwrap();
+
+        let path = tmp.path().join("alerts.jsonl");
+        let content = fs::read_to_string(&path).unwrap();
+        let entry: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
+        assert_eq!(entry["status"], "resolved");
+        assert_eq!(entry["host"], "server1");
+    }
+
+    // G20-9: multiple appends accumulate in alerts.jsonl
+    #[test]
+    fn append_alert_event_appends_multiple() {
+        let tmp = TempDir::new().unwrap();
+        let event1 = crate::alert::AlertEvent {
+            rule_index: 0,
+            source: "meminfo".to_string(),
+            field: "MemAvailable".to_string(),
+            severity: "critical".to_string(),
+            message: "Firing".to_string(),
+            current_value: "100".to_string(),
+            firing: true,
+        };
+        let event2 = crate::alert::AlertEvent {
+            rule_index: 0,
+            source: "meminfo".to_string(),
+            field: "MemAvailable".to_string(),
+            severity: "critical".to_string(),
+            message: "Resolved".to_string(),
+            current_value: "900000".to_string(),
+            firing: false,
+        };
+
+        append_alert_event(tmp.path(), &event1, "host1").unwrap();
+        append_alert_event(tmp.path(), &event2, "host1").unwrap();
+
+        let path = tmp.path().join("alerts.jsonl");
+        let content = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2);
     }
 }

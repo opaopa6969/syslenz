@@ -890,7 +890,16 @@ fn section_style(selected: bool) -> Style {
 
 fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect) {
     let is_ja = app.locale == crate::i18n::Locale::Ja;
-    let hint = if is_ja { "Enter:ジャンプ  Backspace:戻る  c:コピー" } else { "Enter:jump  Backspace:back  c:copy" };
+    let selected_has_runbook = data.findings.get(app.selected_diagnostic)
+        .and_then(|f| f.runbook_url.as_ref())
+        .is_some();
+    let hint = if is_ja {
+        let base = "Enter:ジャンプ  Backspace:戻る  c:コピー";
+        if selected_has_runbook { format!("{}  R:Runbook", base) } else { base.to_string() }
+    } else {
+        let base = "Enter:jump  Backspace:back  c:copy";
+        if selected_has_runbook { format!("{}  R:runbook", base) } else { base.to_string() }
+    };
     let title = format!(" {} ({}) ", data.title, hint);
 
     if data.findings.is_empty() {
@@ -928,10 +937,11 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect
         };
         let has_metrics = !finding.related_metrics.is_empty();
         let indicator = if has_metrics { " >" } else { "" };
+        let runbook_icon = if finding.runbook_url.is_some() { "\u{1F4D6} " } else { "" };
         let row = Row::new(vec![
             Cell::from(finding.severity.clone()).style(sev_style),
             Cell::from(finding.source.clone()).style(Style::default().fg(Color::DarkGray)),
-            Cell::from(format!("{}{}", finding.title, indicator)).style(sev_style),
+            Cell::from(format!("{}{}{}", runbook_icon, finding.title, indicator)).style(sev_style),
             Cell::from(finding.detail.clone()),
             Cell::from(finding.suggestion.clone()).style(Style::default().fg(Color::Green)),
         ]).height(2);
@@ -1244,6 +1254,11 @@ fn style_education_line(text: &str) -> Line<'static> {
     }
 
     Line::from(spans)
+}
+
+/// Public API for the web server to compute contextual hints.
+pub fn get_contextual_hint_for_api(app: &App, source: &str, field: &str) -> Option<String> {
+    get_contextual_hint(app, source, field)
 }
 
 fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
