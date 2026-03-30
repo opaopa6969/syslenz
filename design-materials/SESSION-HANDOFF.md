@@ -40,9 +40,13 @@ syslenz/
 | 診断パターン | 27関数 40+ パターン |
 | SEE ALSO 相互参照 | 31フィールド 105リンク |
 | コンテキストヒント | 10フィールド |
-| テスト | 34 Rust + 48 Playwright = 82 |
-| DGE セッション | 17回 |
+| Learning Breadcrumbs | 18フィールド (EN/JA) |
+| テスト | 161 Rust + 48 Playwright = 209 |
+| DGE セッション | 18回 |
 | Provider | 6 (JVM, Docker, MySQL, PostgreSQL, Redis, nginx) |
+| SDK | 3 (Java, Python, Node.js) |
+| MetricKind | 8 variants |
+| CommonMetric | 15 cross-platform metrics |
 | リリース | v1.0.0, v1.1.0, v1.2.0, v1.3.0 |
 
 ## 主要ファイルと役割
@@ -81,28 +85,33 @@ syslenz/
 - 教育コンテンツの長さを UI の都合で切らない
 - 日本語ドキュメントを先に書いて英語に翻訳
 
-## 未完了バックログ (次回の作業)
+## 完了バックログ (2026-03-30 セッション)
+
+### 教育機能強化 (DGE 018)
+- [x] 診断結果からのメトリクスジャンプ UI (view_history スタック + ピッカーUI)
+- [x] "Did you know?" ランダム Tips (動的コンテンツ、Welcome View)
+- [x] Learning breadcrumbs (EXTRA レベル、18フィールド EN/JA)
+- [x] Interactive tutorial mode (--tutorial、8ステップ、実データ埋め込み)
 
 ### v1.4.0 "Web Scale" (DGE 016)
-- [ ] syslenz4py (Python SDK)
-- [ ] syslenz4node (Node.js SDK)
-- [ ] OTEL bridge 改善
-- [ ] Provider contribution guide
+- [x] OTEL bridge 改善 (resource attrs, i18n descriptions, counter detection)
+- [x] Provider contribution guide (JA/EN、テンプレート付き)
+- [x] syslenz4py (Python SDK、sdk/python/)
+- [x] syslenz4node (Node.js SDK、sdk/node/)
 
 ### v2.0.0 "Platform"
-- [ ] Grafana data source plugin
-- [ ] カスタムダッシュボード
-- [ ] 長期保存 (時系列DB連携)
-- [ ] MetricField enum 自動生成 (DGE 014)
-  - MetricKind (8 variants)
-  - CommonMetric クロスプラットフォームマッピング
-  - i18n データから Rust + Java enum を生成
+- [x] Grafana ダッシュボード (provisioning + docker-compose --profile grafana)
+- [x] MetricField enum 自動生成 (MetricKind 8 variants + CommonMetric 15 metrics)
+- [x] カスタムダッシュボード → Grafana provisioning で対応
+- [x] 長期保存 → Prometheus/OTEL 経由で外部 TSDB に委譲
 
-### 教育機能強化 (DGE 017)
-- [ ] Learning breadcrumbs (「次に見るべき」提案)
-- [ ] Interactive tutorial mode (--tutorial)
-- [ ] "Did you know?" ランダム Tips
-- [ ] 診断結果からのメトリクスジャンプ UI
+## 未完了バックログ (次回の作業)
+
+### v2.1.0+ 候補
+- [ ] syslenz4py / syslenz4node の PyPI / npm パブリッシュ
+- [ ] Grafana data source plugin (専用、Prometheus で不十分な場合)
+- [ ] Web UI の独立パッケージ化
+- [ ] Java SDK の CommonMetric enum 自動生成
 
 ### やらないことリスト (DGE 015)
 - ML anomaly detection
@@ -120,7 +129,7 @@ syslenz/
 | Classic UI 保持 | 高速 UI は O キーで常にアクセス可能 |
 | コンテンツ制限なし | 教育コンテンツは本1章分でもスクロール対応 |
 | 日本語先行 | ドキュメントは ja → en の順で書く |
-| MetricField enum | i18n 完了後に自動生成 (Rust + Java) |
+| MetricField enum | ✅ 完了 (metric_kind.rs + common_metric.rs) |
 
 ## CI/CD
 
