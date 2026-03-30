@@ -1,5 +1,5 @@
 ---
-version: v1.3.0
+version: v1.4.0
 lang: ja
 ---
 
@@ -73,6 +73,27 @@ docker run --rm -it --pid=host --privileged syslenz/syslenz
 - **OpenTelemetry エクスポート** -- 全数値メトリクスを OTLP 対応バックエンドにプッシュ
 - **バイリンガル** -- 英語・日本語完全対応（`L`キーまたは`--lang`で切替）
 - **キーボード操作の TUI** -- サイドバーナビゲーション、ドリルイン、検索、クリップボードコピー
+- **診断ジャンプ** -- 診断結果から関連メトリクスへ直接ジャンプ
+- **Learning Breadcrumbs** -- EXTRA ヘルプレベルで「次のステップ」ヒントを表示（18フィールド）
+- **"Did you know?" Tips** -- Welcome 画面にランダムな学習 Tips を表示
+- **チュートリアルモード** -- `--tutorial` で実データを使った8ステップのガイド付きウォークスルー
+- **SDK 3種** -- Java (syslenz4j)、Python (syslenz4py)、Node.js (syslenz4node) で syslenz にプログラムからアクセス
+- **Grafana 連携** -- `docker compose --profile grafana` でダッシュボード自動プロビジョニング
+
+## v1.4.0 の新機能
+
+- **診断ジャンプ** -- 診断結果から関連メトリクスソースへ直接ナビゲーション（view_history スタック + ピッカー UI）
+- **"Did you know?" Tips** -- Welcome ビューに動的なランダム教育 Tips を表示
+- **Learning Breadcrumbs** -- EXTRA ヘルプレベルで18フィールド（EN/JA）に「次のステップ」ヒントを表示し、深い探索を促す
+- **インタラクティブチュートリアル** -- `--tutorial` で実データを埋め込んだ8ステップのガイド付きウォークスルーを起動
+- **SEE ALSO 相互参照** -- 31フィールドに105のクロスリファレンスを追加
+- **Python SDK (syslenz4py)** -- Python から syslenz に接続（`sdk/python/`）
+- **Node.js SDK (syslenz4node)** -- Node.js から syslenz に接続（`sdk/node/`）
+- **OTEL ブリッジ改善** -- リソース属性、i18n 記述、カウンター検出
+- **Provider 貢献ガイド** -- 新規 Provider 作成のステップバイステップガイド（JA/EN、テンプレート付き）
+- **Grafana ダッシュボードプロビジョニング** -- `docker compose --profile grafana` で Prometheus + Grafana + ビルトインダッシュボードを自動セットアップ
+- **MetricKind / CommonMetric enum** -- 型付きメトリクス分類（8 variants）とクロスプラットフォームメトリクス（15種）
+- **診断パターン拡張** -- 27チェック関数、40以上のパターン
 
 ## v1.1.0 の新機能
 
@@ -112,6 +133,7 @@ docker run --rm -it --pid=host --privileged syslenz/syslenz
 | [キーバインド](keybindings.md) | ビュー別キーバインド一覧 |
 | [OpenTelemetry](otel.md) | OTLP メトリクスエクスポート、Prometheus/Grafana セットアップ |
 | [データソース](sources.md) | 55以上の全データソース：読み取り内容と主要フィールド |
+| [Provider 貢献ガイド](provider-contribution-guide.md) | 新規 Provider の作り方、テンプレート、テスト手順 |
 
 ---
 

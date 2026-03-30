@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-03-29 "Teach, Connect, Scale"
+
+### Added
+- **Diagnostics jump** -- navigate directly from a diagnostic finding to the related metric source (view_history stack + picker UI)
+- **"Did you know?" Tips** -- random educational tips displayed dynamically on the Welcome view
+- **Learning breadcrumbs** -- at EXTRA help level, 18 fields (EN/JA) show "next step" hints guiding deeper exploration
+- **Interactive tutorial mode** -- `--tutorial` flag launches an 8-step guided walkthrough using live system data
+- **SEE ALSO cross-links** -- 31 fields with 105 cross-references to related metrics
+- **Contextual hints** -- 10 fields display context-aware guidance
+- **syslenz4py** (Python SDK) -- connect to syslenz from Python (`sdk/python/`)
+- **syslenz4node** (Node.js SDK) -- connect to syslenz from Node.js (`sdk/node/`)
+- **OTEL bridge improvements** -- resource attributes, i18n descriptions, counter detection
+- **Provider contribution guide** -- step-by-step guide for creating new providers (JA/EN, with template)
+- **Grafana dashboard provisioning** -- `docker compose --profile grafana` sets up Prometheus + Grafana with pre-built dashboards
+- **MetricKind enum** -- 8 variants for typed metric classification
+- **CommonMetric enum** -- 15 cross-platform metrics for SDK interoperability
+- **Diagnostics expanded to 27 check functions** (40+ patterns) -- added diagnostic deep-dive, related_metrics linking
+- **DGE 017** -- education-first design philosophy
+- **DGE 018** -- education feature expansion (diagnostics jump, tips, breadcrumbs, tutorial)
+- **DGE 019** -- SDK + Grafana + MetricKind design session
+
 ## [1.3.0] - 2026-03-29 "See More, Learn More"
 
 ### Added

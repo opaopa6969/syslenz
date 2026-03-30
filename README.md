@@ -10,7 +10,28 @@
 
 Zero config. One binary. Every Linux metric as structured, typed data.
 
+## 30 Second Quick Start
+
+```bash
+curl -sSf https://raw.githubusercontent.com/opaopa6969/syslenz/main/scripts/install.sh | sh
+syslenz
+```
+
+That's it. No config, no agents, no signup.
+
+## 21 Seconds to First Insight
+
+Traditional SaaS monitoring tools take **7+ minutes** from signup to first metric: create account, install agent, configure dashboard, wait for data. syslenz takes **21 seconds**: download the binary, run it, see everything. Your data never leaves your machine.
+
 ## Why syslenz?
+
+| Axis | syslenz | SaaS Monitoring | htop/top |
+|------|---------|-----------------|----------|
+| **Education** | 4-level help, category guides, learning breadcrumbs, tips, tutorial mode | Docs site (separate) | None |
+| **Time to Value** | 21 seconds | 7+ minutes | Instant but shallow |
+| **Data Sovereignty** | 100% local, your machine | Cloud (vendor lock-in) | Local |
+| **Embeddability** | SDK (Java, Python, Node.js), OTEL, Prometheus, JSON | API (paid tier) | None |
+| **Cost** | Free / MIT | $15-35/host/month | Free |
 
 ### For the SRE: instant deep-dive on any host
 
@@ -39,6 +60,9 @@ Capture full system state as JSON, compare across hosts, track changes over time
 ## Install
 
 ```bash
+# One-liner install
+curl -sSf https://raw.githubusercontent.com/opaopa6969/syslenz/main/scripts/install.sh | sh
+
 # From crates.io
 cargo install syslenz
 
@@ -57,6 +81,10 @@ syslenz --connect localhost:9100
 # Docker (Web UI)
 docker compose --profile web up -d
 # Open http://localhost:3000
+
+# Docker (Grafana + Prometheus + syslenz)
+docker compose --profile grafana up -d
+# Open http://localhost:3001 (Grafana), http://localhost:9090 (Prometheus)
 
 # Binary releases
 # See https://github.com/opaopa6969/syslenz/releases
@@ -236,16 +264,45 @@ See `plugins/examples/` for details.
 
 ## Auto-Diagnostics
 
-Automatically detects 25+ patterns including:
+Automatically detects 40+ patterns across 27 check functions including:
 
-- Memory pressure, swap exhaustion, OOM kills
-- CPU overload, load spikes, pressure stalls
-- Disk usage, temperature warnings
-- Network: SYN flood, CLOSE_WAIT leak, TIME_WAIT excess, orphaned TCP
-- Zombie processes, D-state stuck processes
+- Memory pressure, swap exhaustion, OOM kills, memory leak detection
+- CPU overload, load spikes, pressure stalls, context switch rate
+- Disk usage, inode pressure, temperature warnings
+- Network: SYN flood, CLOSE_WAIT leak, TIME_WAIT excess, orphaned TCP, TCP retransmission, UDP errors
+- Zombie processes, D-state stuck processes, high-memory process flagging
 - File descriptor exhaustion, DNS misconfiguration, conntrack overflow
+- IP forwarding detection, kernel taint inspection, recent reboot notification
 
-Press `X` in the TUI to see all active diagnostics with severity and suggested actions.
+Press `X` in the TUI to see all active diagnostics with severity and suggested actions. Use **diagnostics jump** to navigate directly from a diagnostic finding to the related metric source.
+
+## Education Features
+
+- **4-level contextual help** -- press `?` to cycle OFF / NORMAL / DETAILED / EXTRA
+- **Category Guide** (`C`) -- structured learning paths for Memory, CPU, Network, Storage, Process, Hardware
+- **Learning Breadcrumbs** -- at EXTRA help level, 18 fields show "next step" hints guiding deeper exploration
+- **"Did you know?" Tips** -- random tips displayed on the Welcome screen (`W`)
+- **Tutorial Mode** (`--tutorial`) -- guided 8-step walkthrough using live system data
+- **SEE ALSO cross-links** -- 31 fields with 105 cross-references to related metrics
+- **Diagnostics Jump** -- from any diagnostic finding, jump directly to the related metric source
+
+## SDKs
+
+| SDK | Language | Location | Package |
+|-----|----------|----------|---------|
+| [syslenz4j](https://github.com/opaopa6969/syslenz4j) | Java | External repo | Maven Central: `org.unlaxer.infra:syslenz4j` |
+| syslenz4py | Python | `sdk/python/` | (PyPI planned) |
+| syslenz4node | Node.js | `sdk/node/` | (npm planned) |
+
+All SDKs connect to syslenz's TCP server (`--serve`) and provide typed metric access with `MetricKind` (8 variants) and `CommonMetric` (15 cross-platform metrics) enums.
+
+## Grafana Integration
+
+```bash
+docker compose --profile grafana up -d
+```
+
+Pre-provisioned Grafana dashboards are included. syslenz exports metrics via Prometheus (`--prometheus`) or OpenTelemetry (`--otel`), and the Grafana profile sets up Prometheus scraping and dashboard provisioning automatically. Open Grafana at `http://localhost:3001`.
 
 ## Architecture
 
@@ -283,6 +340,8 @@ Each parser reads a `/proc` or `/sys` file and returns a `Vec<Field>` with typed
 - [Japanese docs](docs/ja/index.md)
 - [OpenTelemetry / Prometheus](docs/opentelemetry.md)
 - [Audit Examples](docs/audit-examples.md)
+- [Provider Contribution Guide](docs/en/provider-contribution-guide.md) / [プロバイダー貢献ガイド](docs/ja/provider-contribution-guide.md)
+- [SDK Cookbook](docs/en/getting-started.md#sdks)
 
 ## Verifying Downloads
 
@@ -365,4 +424,4 @@ MIT
 
 ---
 
-v1.3.0 | [Changelog](CHANGELOG.md) | [GitHub](https://github.com/opaopa6969/syslenz)
+v1.4.0 | [Changelog](CHANGELOG.md) | [GitHub](https://github.com/opaopa6969/syslenz)

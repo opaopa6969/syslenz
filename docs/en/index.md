@@ -1,5 +1,5 @@
 ---
-version: v1.3.0
+version: v1.4.0
 lang: en
 ---
 
@@ -73,6 +73,27 @@ Download the latest release from the [GitHub Releases](https://github.com/opaopa
 - **OpenTelemetry export** -- push all numeric metrics to any OTLP-compatible backend
 - **Bilingual** -- full English and Japanese support (switch with `L` key or `--lang`)
 - **Keyboard-driven TUI** -- sidebar navigation, drill-in, search, copy to clipboard
+- **Diagnostics jump** -- navigate from diagnostic findings directly to the related metric
+- **Learning breadcrumbs** -- "next step" hints at EXTRA help level (18 fields)
+- **"Did you know?" Tips** -- random learning tips on the Welcome screen
+- **Tutorial mode** -- `--tutorial` launches an 8-step guided walkthrough with live data
+- **3 SDKs** -- Java (syslenz4j), Python (syslenz4py), Node.js (syslenz4node) for programmatic access
+- **Grafana integration** -- `docker compose --profile grafana` for auto-provisioned dashboards
+
+## What's New in v1.4.0
+
+- **Diagnostics jump** -- navigate directly from a diagnostic finding to the related metric source (view_history stack + picker UI)
+- **"Did you know?" Tips** -- random educational tips displayed dynamically on the Welcome view
+- **Learning breadcrumbs** -- at EXTRA help level, 18 fields (EN/JA) show "next step" hints guiding deeper exploration
+- **Interactive tutorial mode** -- `--tutorial` launches an 8-step guided walkthrough using live system data
+- **SEE ALSO cross-links** -- 31 fields with 105 cross-references to related metrics
+- **Python SDK (syslenz4py)** -- connect to syslenz from Python (`sdk/python/`)
+- **Node.js SDK (syslenz4node)** -- connect to syslenz from Node.js (`sdk/node/`)
+- **OTEL bridge improvements** -- resource attributes, i18n descriptions, counter detection
+- **Provider contribution guide** -- step-by-step guide for creating new providers (JA/EN, with template)
+- **Grafana dashboard provisioning** -- `docker compose --profile grafana` sets up Prometheus + Grafana with pre-built dashboards
+- **MetricKind / CommonMetric enums** -- typed metric classification (8 variants) and cross-platform metrics (15 metrics)
+- **Diagnostics expanded to 27 check functions** (40+ patterns) -- diagnostic deep-dive with related_metrics linking
 
 ## What's New in v1.3.0
 
@@ -112,6 +133,7 @@ Download the latest release from the [GitHub Releases](https://github.com/opaopa
 | [Keybindings](keybindings.md) | Complete keybinding reference by view |
 | [OpenTelemetry](otel.md) | OTLP metrics export, Prometheus/Grafana setup |
 | [Data Sources](sources.md) | All 55+ data sources: what they read and key fields |
+| [Provider Contribution Guide](provider-contribution-guide.md) | How to create new providers, template, testing |
 
 ---
 
