@@ -80,6 +80,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // --query [source[.field]] [--json] — CLI query mode (no TUI)
+    if let Some(pos) = args.iter().position(|a| a == "--query") {
+        let query = args.get(pos + 1)
+            .filter(|s| !s.starts_with("--"))
+            .map(|s| s.as_str());
+        let json_mode = args.iter().any(|a| a == "--json");
+        let code = run_query(query, json_mode);
+        std::process::exit(code);
+    }
+
     // --install-service — generate and install a systemd service file
     if args.iter().any(|a| a == "--install-service") {
         return install_service(&args);
@@ -661,5 +671,73 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}...", &s[..max])
     } else {
         s.to_string()
+    }
+}
+
+/// CLI --query mode: returns exit code (0 = success, 1 = not found).
+fn run_query(query: Option<&str>, json_mode: bool) -> i32 {
+    let snapshot = match proc::Snapshot::capture() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to capture snapshot: {}", e);
+            return 1;
+        }
+    };
+
+    match query {
+        // No argument: list all source names
+        None => {
+            for key in snapshot.entries.keys() {
+                println!("{}", key);
+            }
+            0
+        }
+        Some(q) => {
+            if let Some(dot_pos) = q.find('.') {
+                // source.field form
+                let source = &q[..dot_pos];
+                let field_name = &q[dot_pos + 1..];
+                let entry = match snapshot.entries.get(source) {
+                    Some(e) => e,
+                    None => {
+                        eprintln!("Source '{}' not found", source);
+                        return 1;
+                    }
+                };
+                let field = match entry.fields.iter().find(|f| f.name == field_name) {
+                    Some(f) => f,
+                    None => {
+                        eprintln!("Field '{}' not found in '{}'", field_name, source);
+                        return 1;
+                    }
+                };
+                if json_mode {
+                    let obj = serde_json::json!({
+                        "source": source,
+                        "field": field.name,
+                        "value": field.value,
+                        "unit": field.unit,
+                        "description": field.description,
+                    });
+                    println!("{}", serde_json::to_string(&obj).unwrap());
+                } else {
+                    println!("{}", field.value.display());
+                }
+                0
+            } else {
+                // source only: print all fields as TSV
+                let entry = match snapshot.entries.get(q) {
+                    Some(e) => e,
+                    None => {
+                        eprintln!("Source '{}' not found", q);
+                        return 1;
+                    }
+                };
+                for field in &entry.fields {
+                    println!("{}\t{}", field.name, field.value.display());
+                }
+                0
+            }
+        }
     }
 }

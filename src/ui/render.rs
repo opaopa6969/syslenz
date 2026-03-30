@@ -83,7 +83,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if is_fullwidth {
         match view_data {
             ViewData::Dashboard(ref data) => draw_dashboard(f, data, main_area),
-            ViewData::Welcome(ref data) => draw_welcome(f, data, app.locale, main_area),
+            ViewData::Welcome(ref data) => draw_welcome(f, data, app.locale, main_area, &app.help_level),
             ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app, main_area),
             ViewData::CategoryGuide(_) => draw_category_guide(f, app, main_area),
             ViewData::Tutorial(ref data) => draw_tutorial(f, data, main_area),
@@ -516,7 +516,7 @@ fn draw_tutorial(f: &mut Frame, data: &super::view_data::TutorialData, area: Rec
     f.render_widget(p, area);
 }
 
-fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale, area: Rect) {
+fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale, area: Rect, help_level: &super::app::HelpLevel) {
     let title = format!(" {} ", data.title);
 
     let mut keys_text = vec![Line::from("")];
@@ -526,6 +526,19 @@ fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale,
             Span::raw(desc.as_str()),
         ]));
     }
+
+    // P-A2: Show advanced keybindings when help_level is Detailed or ExtraDetailed
+    let show_advanced = matches!(help_level, super::app::HelpLevel::Detailed | super::app::HelpLevel::ExtraDetailed);
+    if show_advanced && !data.advanced_keybindings.is_empty() {
+        keys_text.push(Line::from(""));
+        for (key, desc) in &data.advanced_keybindings {
+            keys_text.push(Line::from(vec![
+                Span::styled(format!("  {:<10}", key), Style::default().fg(Color::DarkGray)),
+                Span::raw(desc.as_str()),
+            ]));
+        }
+    }
+
     keys_text.push(Line::from(""));
     keys_text.push(Line::from(vec![
         Span::styled(
@@ -597,9 +610,9 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         ])
         .split(area);
 
-    // Section 0: Load Average + Uptime (single row)
+    // Section 0: Load Average + Uptime + Diagnostic badge (P-A1)
     let sec0_style = section_style(data.selected_section == 0);
-    let load_line = Line::from(vec![
+    let mut load_spans = vec![
         Span::styled(" Load: ", Style::default().fg(Color::Yellow)),
         Span::styled(&data.load.load1, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         Span::raw(" / "),
@@ -609,7 +622,24 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         Span::raw("    "),
         Span::styled(" Up: ", Style::default().fg(Color::Yellow)),
         Span::styled(&data.load.uptime, Style::default().fg(Color::Cyan)),
-    ]);
+        Span::raw("    "),
+    ];
+    // P-A1: Diagnostic badge
+    if data.diag_count > 0 {
+        let badge_color = data.diag_severity.as_ref()
+            .map(|c| view_color_to_color(c))
+            .unwrap_or(Color::Yellow);
+        let badge_text = if is_ja {
+            format!("\u{26a0} {}件の問題 (X:診断)", data.diag_count)
+        } else {
+            format!("\u{26a0} {} issues (X:diagnostics)", data.diag_count)
+        };
+        load_spans.push(Span::styled(badge_text, Style::default().fg(badge_color).add_modifier(Modifier::BOLD)));
+    } else {
+        let badge_text = if is_ja { "\u{2713} 正常" } else { "\u{2713} healthy" };
+        load_spans.push(Span::styled(badge_text, Style::default().fg(Color::Green)));
+    }
+    let load_line = Line::from(load_spans);
     let p = Paragraph::new(load_line)
         .block(Block::default().borders(Borders::ALL)
             .title(if is_ja { " 負荷 / 稼働時間 " } else { " Load / Uptime " })

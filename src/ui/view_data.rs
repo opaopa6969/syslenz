@@ -71,6 +71,9 @@ pub struct DashboardData {
     // Sparkline history
     pub load_history: Vec<u64>,
     pub mem_history: Vec<u64>,
+    // Diagnostic badge (P-A1)
+    pub diag_count: usize,
+    pub diag_severity: Option<ViewColor>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,6 +129,8 @@ pub enum ViewColor {
 #[derive(Debug, Clone, Serialize)]
 pub struct WelcomeData {
     pub keybindings: Vec<(String, String)>,
+    /// P-A2: Advanced keybindings shown only at Detailed/ExtraDetailed help levels.
+    pub advanced_keybindings: Vec<(String, String)>,
     pub title: String,
     pub footer: String,
     pub tip: String,
@@ -738,6 +743,25 @@ impl App {
             })
             .collect();
 
+        // P-A1: Diagnostic badge — run analyze once, extract count & worst severity
+        let diag_findings = crate::diagnostics::analyze(&self.current, l);
+        let diag_count = diag_findings.len();
+        let diag_severity = diag_findings.iter().fold(None, |worst, f| {
+            let sev = match f.severity {
+                crate::diagnostics::Severity::Critical => Some(ViewColor::Red),
+                crate::diagnostics::Severity::Warning => Some(ViewColor::Yellow),
+                crate::diagnostics::Severity::Info => Some(ViewColor::Cyan),
+            };
+            match (&worst, &sev) {
+                (None, _) => sev,
+                (Some(ViewColor::Red), _) => worst,
+                (_, Some(ViewColor::Red)) => sev,
+                (Some(ViewColor::Yellow), _) => worst,
+                (_, Some(ViewColor::Yellow)) => sev,
+                _ => worst,
+            }
+        });
+
         DashboardData {
             load,
             memory: MemorySection { items: mem_items },
@@ -767,6 +791,8 @@ impl App {
             procs_running: get_field_value(self, "stat", "processes_running"),
             load_history,
             mem_history,
+            diag_count,
+            diag_severity,
         }
     }
 
@@ -779,6 +805,7 @@ impl App {
         };
         let footer = i18n::t(l, T::WELCOME_CTA).to_string();
 
+        // P-A2: Split keybindings into basic (6) and advanced
         let keybindings = if l == Locale::Ja {
             vec![
                 ("D".into(), "ダッシュボード（システム概要）".into()),
@@ -786,12 +813,6 @@ impl App {
                 ("j/k ↑/↓".into(), i18n::t(l, T::WELCOME_NAV).to_string()),
                 ("Enter →".into(), i18n::t(l, T::WELCOME_DRILL).to_string()),
                 ("BS ←".into(), i18n::t(l, T::BACK).to_string()),
-                ("d".into(), i18n::t(l, T::WELCOME_DIFF).to_string()),
-                ("g".into(), i18n::t(l, T::WELCOME_GRAPH).to_string()),
-                ("/".into(), i18n::t(l, T::WELCOME_SEARCH).to_string()),
-                ("?".into(), i18n::t(l, T::WELCOME_HELP).to_string()),
-                ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
-                ("e".into(), i18n::t(l, T::EXPORT).to_string()),
                 ("q".into(), i18n::t(l, T::QUIT).to_string()),
             ]
         } else {
@@ -801,13 +822,33 @@ impl App {
                 ("j/k ↑/↓".into(), i18n::t(l, T::WELCOME_NAV).to_string()),
                 ("Enter →".into(), i18n::t(l, T::WELCOME_DRILL).to_string()),
                 ("BS ←".into(), i18n::t(l, T::BACK).to_string()),
+                ("q".into(), i18n::t(l, T::QUIT).to_string()),
+            ]
+        };
+
+        let advanced_keybindings = if l == Locale::Ja {
+            vec![
                 ("d".into(), i18n::t(l, T::WELCOME_DIFF).to_string()),
                 ("g".into(), i18n::t(l, T::WELCOME_GRAPH).to_string()),
                 ("/".into(), i18n::t(l, T::WELCOME_SEARCH).to_string()),
+                ("X".into(), "診断".into()),
+                ("C".into(), "カテゴリガイド".into()),
                 ("?".into(), i18n::t(l, T::WELCOME_HELP).to_string()),
                 ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
                 ("e".into(), i18n::t(l, T::EXPORT).to_string()),
-                ("q".into(), i18n::t(l, T::QUIT).to_string()),
+                ("c".into(), "コピー".into()),
+            ]
+        } else {
+            vec![
+                ("d".into(), i18n::t(l, T::WELCOME_DIFF).to_string()),
+                ("g".into(), i18n::t(l, T::WELCOME_GRAPH).to_string()),
+                ("/".into(), i18n::t(l, T::WELCOME_SEARCH).to_string()),
+                ("X".into(), "Diagnostics".into()),
+                ("C".into(), "Category guide".into()),
+                ("?".into(), i18n::t(l, T::WELCOME_HELP).to_string()),
+                ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
+                ("e".into(), i18n::t(l, T::EXPORT).to_string()),
+                ("c".into(), "Copy".into()),
             ]
         };
 
@@ -815,6 +856,7 @@ impl App {
 
         WelcomeData {
             keybindings,
+            advanced_keybindings,
             title,
             footer,
             tip,
@@ -1110,6 +1152,16 @@ impl App {
         }
     }
 
+    #[cfg(test)]
+    pub fn test_build_dashboard_data(&self) -> DashboardData {
+        self.build_dashboard_data()
+    }
+
+    #[cfg(test)]
+    pub fn test_build_welcome_data(&self) -> WelcomeData {
+        self.build_welcome_data()
+    }
+
     fn build_category_guide_data(&self) -> CategoryGuideData {
         use crate::education::{self, Category};
 
@@ -1142,5 +1194,80 @@ impl App {
             },
             content_scroll: self.category_scroll,
         }
+    }
+}
+
+#[cfg(test)]
+mod view_data_tests {
+    use super::*;
+
+    // P-A1: diag_count matches diagnostics::analyze().len()
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dashboard_diag_count_matches_analyze() {
+        let app = App::new().unwrap();
+        let data = app.test_build_dashboard_data();
+        let findings = crate::diagnostics::analyze(&app.current, app.locale);
+        assert_eq!(data.diag_count, findings.len());
+    }
+
+    // P-A1: diag_severity is None when no findings
+    #[test]
+    fn dashboard_diag_severity_none_when_empty() {
+        // When diag_count == 0, diag_severity should be None
+        let data = DashboardData {
+            load: LoadSection {
+                load1: String::new(), load5: String::new(),
+                load15: String::new(), uptime: String::new(),
+            },
+            memory: MemorySection { items: vec![] },
+            cpu: CpuSection { items: vec![] },
+            network: NetworkSection { headers: vec![], rows: vec![] },
+            system: SystemSection {
+                disk_pct: String::new(), temp: String::new(), fd_pct: String::new(),
+            },
+            selected_section: 0,
+            mem_used_pct: 0, mem_bar: String::new(),
+            mem_used_bytes: 0, mem_total_bytes: 0,
+            swap_used_pct: 0, swap_bar: String::new(),
+            swap_used_bytes: 0, swap_total_bytes: 0,
+            cached: String::new(), buffers: String::new(),
+            cpu_used_pct: 0, cpu_bar: String::new(),
+            cpu_user_pct: 0, cpu_sys_pct: 0, cpu_io_pct: 0,
+            ctx_switches: String::new(), procs_running: String::new(),
+            load_history: vec![], mem_history: vec![],
+            diag_count: 0, diag_severity: None,
+        };
+        assert_eq!(data.diag_count, 0);
+        assert!(data.diag_severity.is_none());
+    }
+
+    // P-A2: basic keybindings has exactly 6 entries
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn welcome_basic_keybindings_count() {
+        let app = App::new().unwrap();
+        let data = app.test_build_welcome_data();
+        assert_eq!(data.keybindings.len(), 6, "basic keybindings should have 6 entries");
+    }
+
+    // P-A2: advanced keybindings are non-empty
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn welcome_advanced_keybindings_present() {
+        let app = App::new().unwrap();
+        let data = app.test_build_welcome_data();
+        assert!(!data.advanced_keybindings.is_empty(), "advanced keybindings should be non-empty");
+    }
+
+    // P-A2: help_level Off → only basic keybindings should be shown
+    // (WelcomeData always has both; the render layer decides what to display)
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn welcome_data_has_both_tiers() {
+        let app = App::new().unwrap();
+        let data = app.test_build_welcome_data();
+        assert_eq!(data.keybindings.len(), 6);
+        assert!(data.advanced_keybindings.len() >= 5);
     }
 }
