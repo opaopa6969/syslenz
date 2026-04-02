@@ -20,7 +20,6 @@ use axum::{
     },
     http::StatusCode,
     routing::{get, post},
-    Router,
 };
 #[cfg(feature = "web")]
 use std::sync::{Arc, Mutex};

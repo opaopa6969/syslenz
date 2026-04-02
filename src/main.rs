@@ -35,6 +35,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
+use std::fs;
 use std::io;
 use std::io::Write;
 use std::path::Path;

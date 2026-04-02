@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-04-02 "Full Article Coverage"
+
+### Added
+- Article overlay coverage for all 691 metrics (EN + JA) — every field now has a dedicated article
+- Group articles with full quality content (volta style: real episodes, ASCII diagrams, tuning steps):
+  - vmstat families: thp, compact, allocstall, numa, workingset, kswapd, pgscan/pgsteal, pgalloc, swap, balloon, nr_zone, nr_active_inactive, unevictable_pgs
+  - net/netstat: TcpExt (130+ fields), IpExt
+  - net/snmp: Ip, Icmp, Tcp, Udp, UdpLite
+  - meminfo: HugePages, Active_Inactive, Slab
+- Sourceguide articles for all 45 data sources
+- 29 concept articles: bottleneck-triage, memory-pressure, latency-analysis, pressure-stall, resource-model, and more
+- 717 EN + 717 JA markdown article files total
+
+### Fixed
+- Duplicate `jump_to_metric` in `app.rs` (merged features, removed duplicate)
+- Duplicate `Router` import in `web.rs`
+- Missing `use std::fs` in `main.rs`
+
 ## [1.5.0] - 2026-04-02 "Fleet, Articles, Live Controls"
 
 ### Added

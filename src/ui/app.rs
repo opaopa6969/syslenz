@@ -827,9 +827,23 @@ impl App {
             self.selected_source = source_idx;
             self.selected_field = field_idx;
             self.field_scroll = 0;
+            self.table_scroll = 0;
             self.selected_related_metric = None;
             self.focus = Focus::Content;
             self.view = View::Detail;
+            self.came_from_dashboard = false;
+        } else {
+            self.status_message = Some(if self.locale == Locale::Ja {
+                format!(
+                    "{} / {} は現在のスナップショットにありません",
+                    source, field
+                )
+            } else {
+                format!(
+                    "{}/{} is not present in the current snapshot",
+                    source, field
+                )
+            });
         }
     }
 
@@ -1225,36 +1239,6 @@ impl App {
                     overlay.selected_link - 1
                 };
             }
-        }
-    }
-
-    fn jump_to_metric(&mut self, source: &str, field: &str) {
-        if let Some(source_idx) = self.source_keys.iter().position(|k| k == source) {
-            self.selected_source = source_idx;
-            self.selected_field = 0;
-            self.field_scroll = 0;
-            self.table_scroll = 0;
-            self.focus = Focus::Content;
-            self.view = View::Detail;
-            self.came_from_dashboard = false;
-
-            if let Some(entry) = self.current.entries.get(source) {
-                if let Some(field_idx) = entry.fields.iter().position(|f| f.name == field) {
-                    self.selected_field = field_idx;
-                }
-            }
-        } else {
-            self.status_message = Some(if self.locale == Locale::Ja {
-                format!(
-                    "{} / {} は現在のスナップショットにありません",
-                    source, field
-                )
-            } else {
-                format!(
-                    "{}/{} is not present in the current snapshot",
-                    source, field
-                )
-            });
         }
     }
 
