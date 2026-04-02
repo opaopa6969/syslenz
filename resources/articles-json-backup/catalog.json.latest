@@ -1,0 +1,50 @@
+{
+  "articles": [
+    {
+      "id": "concept.resource-model",
+      "kind": "concept",
+      "title_en": "Article Resource Model",
+      "title_ja": "記事リソースモデル",
+      "body_en": "What is this?\nThis article is loaded from resources/articles/catalog.json.\n\nWhy it matters\nContent editors can update article text without touching Rust source files.\n\nHow to use\n- Keep stable IDs\n- Edit per-locale text in resource files\n- Link across metric/group/concept articles by id",
+      "body_ja": "これは何か\nこの記事は resources/articles/catalog.json から読み込まれています。\n\nなぜ重要か\nRust のソースを変更せずに記事テキストを更新できます。\n\n使い方\n- ID を安定維持する\n- locale ごとの本文を resource 側で編集する\n- metric/group/concept を id で相互リンクする",
+      "links": [
+        {
+          "type": "article",
+          "label_en": "Cross-metric reading",
+          "label_ja": "クロスメトリクスの読み方",
+          "id": "concept.cross-metric-reading"
+        },
+        {
+          "type": "metric",
+          "label_en": "MemAvailable",
+          "label_ja": "MemAvailable",
+          "source": "meminfo",
+          "field": "MemAvailable"
+        }
+      ]
+    },
+    {
+      "id": "meminfo.MemAvailable",
+      "kind": "metric",
+      "title_en": "MemAvailable (Resource)",
+      "title_ja": "MemAvailable（リソース定義）",
+      "body_en": "Resource-defined override article for MemAvailable.\n\nThis demonstrates i18n-friendly content management with stable IDs.",
+      "body_ja": "MemAvailable のリソース側オーバーライド記事です。\n\n安定IDで i18n 対応記事を管理できることを示します。",
+      "links": [
+        {
+          "type": "metric",
+          "label_en": "SwapFree",
+          "label_ja": "SwapFree",
+          "source": "meminfo",
+          "field": "SwapFree"
+        },
+        {
+          "type": "article",
+          "label_en": "Pressure Stall Information",
+          "label_ja": "PSI プレッシャー",
+          "id": "concept.pressure-stall"
+        }
+      ]
+    }
+  ]
+}
