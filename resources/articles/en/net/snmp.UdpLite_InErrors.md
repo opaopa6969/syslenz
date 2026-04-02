@@ -1,0 +1,19 @@
+# UdpLite_InErrors
+
+[日本語版](../../ja/net/snmp.UdpLite_InErrors.md)
+
+---
+
+Part of the **[net/snmp.UdpLite](../UdpLite.md)** group — see the group article for protocol context.
+
+`UdpLite_InErrors` — UDP-Lite datagrams that could not be delivered.
+
+**Source:** `/proc/net/snmp`  
+**Unit:** cumulative count
+
+---
+
+## See also
+
+- `net/snmp.UdpLite` — protocol group article
+- `sourceguide.net/snmp` — full source overview

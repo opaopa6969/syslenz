@@ -1,0 +1,19 @@
+# Udp_MemErrors
+
+[English version](../../en/net/snmp.Udp_MemErrors.md)
+
+---
+
+**[net/snmp.Udp](../Udp.md)** グループの一部です。
+
+`Udp_MemErrors` — メモリ割り当て失敗で廃棄されたUDPデータグラム。
+
+**ソース:** `/proc/net/snmp`  
+**単位:** 累積カウント
+
+---
+
+## 関連項目
+
+- `net/snmp.Udp` — プロトコルグループ記事
+- `sourceguide.net/snmp` — ソース全体の概要
