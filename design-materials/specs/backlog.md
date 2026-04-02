@@ -617,3 +617,90 @@ BL-060 (parse_content分離) ─→ BL-061 (fixture テスト)
   - [ ] net/dev セクションに "RX/s", "TX/s" 列が表示される
   - [ ] スナップショットが 2 つ以上ある場合にレートが計算される
   - [ ] 1 スナップショットのみの場合は "-" と表示される
+
+### BL-080: Article schema + resolver 実装 (Metric/Group/Concept)
+- **Priority**: P1
+- **Category**: Core
+- **Effort**: M (3-8h)
+- **Depends on**: なし
+- **Gap**: G-EDU-18-2, G-EDU-18-5
+- **Files**: `src/article.rs` (新規), `src/main.rs`
+- **Description**: EducationArticle と resolver を実装。`*_min/*_max/*_count` を group 記事に集約し、未定義時は fallback 記事を返す。
+- **Acceptance Criteria**:
+  - [ ] `source+field` から article が一意に解決される
+  - [ ] group 解決ルールが動作する
+  - [ ] fallback 記事が常に返る
+  - **Status**: Implemented via `src/article.*`, resource loaders, and `resources/articles` markdown corpus (current load + export tools).
+
+### BL-081: TUI Article Overlay MVP (`A`)
+- **Priority**: P1
+- **Category**: UI
+- **Effort**: M (3-8h)
+- **Depends on**: BL-080
+- **Gap**: G-EDU-18-1, G-EDU-18-3
+- **Files**: `src/ui/app.rs`, `src/ui/render.rs`, `src/main.rs`
+- **Description**: `A` キーで記事オーバーレイを開閉。本文スクロール、閉じる操作、SEE ALSO選択を実装。
+- **Acceptance Criteria**:
+  - [ ] `A` で overlay が開閉する
+  - [ ] `j/k`, `PgUp/PgDn` でスクロールできる
+  - [ ] `Esc/q` で閉じる
+  - **Status**: TUI overlay completed (see `src/ui/*` updates, key handlers `A`, navigation, scroll, links).
+
+### BL-082: SEE ALSO jump 実装 (metric/article)
+- **Priority**: P1
+- **Category**: UI
+- **Effort**: M (3-8h)
+- **Depends on**: BL-081
+- **Gap**: G-EDU-18-3
+- **Files**: `src/ui/app.rs`, `src/article.rs`
+- **Description**: overlay 内リンク選択と `Enter` による遷移を実装。metric は Detail へ、article は overlay 内遷移。
+- **Acceptance Criteria**:
+  - [ ] metric link で source/field にフォーカス遷移する
+  - [ ] article link で別記事へ遷移する
+  - **Status**: SEE ALSO navigation available via `src/ui/app.rs`/`render.rs` with jump helpers.
+
+### BL-083: Web Article Overlay parity
+- **Priority**: P1
+- **Category**: UI
+- **Effort**: L (1-2d)
+- **Depends on**: BL-080
+- **Gap**: G-EDU-18-4
+- **Files**: `src/web.rs`
+- **Description**: Web に記事オーバーレイを実装。`/api/article` 追加、`A` ショートカット、SEE ALSO クリック遷移を提供。
+- **Acceptance Criteria**:
+  - [ ] Webで `A` またはボタンから記事表示できる
+  - [ ] SEE ALSO クリックで metric/article ジャンプする
+  - [ ] 未定義メトリクスで fallback 記事が表示される
+  - **Status**: Web overlay + SSE controls implemented, includes API `/api/article`, buttons/shortcuts for article display and axis/refresh toggles.
+
+### BL-084: Article Authoring Guide + Quality Gate
+- **Priority**: P1
+- **Category**: Docs
+- **Effort**: M (3-8h)
+- **Depends on**: BL-080
+- **Gap**: G-EDU-18-6
+- **Files**: `docs/` (新規ガイド), `tests/` (整合チェック)
+- **Description**: 記事テンプレート・命名規約・レビュー基準を明文化し、リンク切れ/重複ID/言語欠落を検出するテストを追加。
+- **Acceptance Criteria**:
+  - [ ] 記事作成ガイドが存在する
+  - [ ] CIで整合チェックが実行される
+  - **Status**: Base guide drafted in `docs/` updates; translation/state validation pending (no automated checks yet).
+
+### BL-085: Top 50 Metrics Article Pack
+- **Priority**: P1
+- **Category**: Docs
+- **Effort**: XL (3-5d)
+- **Depends on**: BL-084
+- **Gap**: G-EDU-18-6
+- **Files**: `docs/articles/en/*`, `docs/articles/ja/*`
+- **Description**: 高頻度メトリクス 50 本 + 主要グループ記事を作成し、初学者〜上級者向けに運用知識を提供する。
+- **Acceptance Criteria**:
+  - [ ] 50本以上の metric/group article が揃う
+  - [ ] EN/JA 両言語が揃う
+  - **Status**: Content expansion ongoing; current corpus includes 680 articles via `resources/articles-md`, covering source guides + many metrics (coverage 100% with mostly source guides). Additional high-priority metrics still queued.
+
+- BL-090: Provide Japanese-localized descriptions for residual English vmstat/meminfo/pressure sections (Casebook, archetype, manifest lines) so Japanese mode always shows Japanese text.
+- BL-091: Add toggleable real-time refresh and axis scaling controls to both TUI and Web dashboards (new keys/buttons + binding logic).
+- BL-092: Keep a modal overlay open long enough to scroll/copy row contents; add explicit open/close actions instead of immediate enter-as-toggle.
+- BL-093: Surface flag/enum annotations for numeric metrics (bit meanings + enumerations) in overlay views via a metadata lookup per field.
+- BL-094: Replace single-snapshot metrics with optional streaming/ring-buffer mode so graphs can pause and scroll history; include UX for toggling live vs paused state.

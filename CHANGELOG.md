@@ -27,6 +27,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **DGE 018** -- education feature expansion (diagnostics jump, tips, breadcrumbs, tutorial)
 - **DGE 019** -- SDK + Grafana + MetricKind design session
 
+## [1.3.1] - 2026-04-02 "Article Overlay + Live Controls"
+
+### Added
+- Article-annotated resolver + markdown-per-article resources (680 ids) with CLI export/import helpers and Web/TUI overlays.
+- Article overlay navigation (SEE ALSO links, overlay modal + drawer) for both TUI `A` key and Web `A` button, with `sourceguide.*` fallback coverage.
+- Web dashboard controls: `AXIS` badge/key toggles Chart.js axes, `RT` badge/key pauses/resumes SSE streams, and Web docs cover the new flow.
+- TUI dashboard history axis mode (`S` key) plus `c`/`A`/`?` key guides updated accordingly.
+
+### Changed
+- Version bump to 1.3.1 to capture the new education overlay + dashboard UX updates.
+
 ## [1.3.0] - 2026-03-29 "See More, Learn More"
 
 ### Added

@@ -329,6 +329,14 @@ fn make_bar(pct: u64, width: usize) -> String {
     format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty))
 }
 
+fn adjust_history_for_axis(values: Vec<u64>, zero_axis: bool) -> Vec<u64> {
+    if !zero_axis || values.is_empty() {
+        return values;
+    }
+    let baseline = *values.iter().min().unwrap_or(&0);
+    values.into_iter().map(|v| v - baseline).collect()
+}
+
 impl App {
     /// Build the main content ViewData from the current app state.
     pub fn build_view_data(&self) -> ViewData {
@@ -351,7 +359,11 @@ impl App {
         let (en, ja) = self.tutorial_text();
         let body = if self.locale == Locale::Ja { ja } else { en };
         let title = if self.locale == Locale::Ja {
-            format!("syslenz チュートリアル ({}/{})", step + 1, Self::TUTORIAL_STEPS)
+            format!(
+                "syslenz チュートリアル ({}/{})",
+                step + 1,
+                Self::TUTORIAL_STEPS
+            )
         } else {
             format!("syslenz Tutorial ({}/{})", step + 1, Self::TUTORIAL_STEPS)
         };
@@ -396,7 +408,11 @@ impl App {
             View::Dashboard => i18n::t(l, T::VIEW_DASHBOARD),
             View::Welcome => i18n::t(l, T::VIEW_WELCOME),
             View::Diagnostics => {
-                if l == Locale::Ja { "診断" } else { "DIAGNOSTICS" }
+                if l == Locale::Ja {
+                    "診断"
+                } else {
+                    "DIAGNOSTICS"
+                }
             }
             View::Overview => i18n::t(l, T::VIEW_OVERVIEW),
             View::Detail => i18n::t(l, T::VIEW_DETAIL),
@@ -404,10 +420,18 @@ impl App {
             View::TableView => i18n::t(l, T::VIEW_TABLE),
             View::Graph => i18n::t(l, T::VIEW_GRAPH),
             View::CategoryGuide => {
-                if l == Locale::Ja { "カテゴリガイド" } else { "CATEGORY GUIDE" }
+                if l == Locale::Ja {
+                    "カテゴリガイド"
+                } else {
+                    "CATEGORY GUIDE"
+                }
             }
             View::Tutorial => {
-                if l == Locale::Ja { "チュートリアル" } else { "TUTORIAL" }
+                if l == Locale::Ja {
+                    "チュートリアル"
+                } else {
+                    "TUTORIAL"
+                }
             }
         };
 
@@ -433,8 +457,7 @@ impl App {
         }
 
         let source_name = self.current_source_name().to_string();
-        let source_desc =
-            i18n::source_description(self.locale, &source_name).to_string();
+        let source_desc = i18n::source_description(self.locale, &source_name).to_string();
 
         let field_info = self
             .current_entry_fields()
@@ -444,8 +467,7 @@ impl App {
         let (field_name, fallback_desc) =
             field_info.unwrap_or_else(|| (String::new(), String::new()));
 
-        let i18n_desc =
-            i18n::field_description(self.locale, &source_name, &field_name);
+        let i18n_desc = i18n::field_description(self.locale, &source_name, &field_name);
 
         let field_desc = match (self.help_level, i18n_desc) {
             (HelpLevel::Normal, Some((normal, _, _))) => normal.to_string(),
@@ -563,10 +585,7 @@ impl App {
             })
             .map(|f| {
                 if let FieldValue::Table(ref data) = f.value {
-                    data.iter()
-                        .take(6)
-                        .map(|row| row.clone())
-                        .collect()
+                    data.iter().take(6).map(|row| row.clone()).collect()
                 } else {
                     vec![]
                 }
@@ -575,69 +594,91 @@ impl App {
 
         // BL-076: Compute rates from previous snapshot
         let prev_net_table = self.snapshots.last().and_then(|snap| {
-            snap.entries.get("net/dev").and_then(|e| {
-                e.fields.iter().find(|f| matches!(f.value, FieldValue::Table(_)))
-            }).and_then(|f| {
-                if let FieldValue::Table(ref data) = f.value {
-                    Some(data.clone())
-                } else {
-                    None
-                }
-            })
+            snap.entries
+                .get("net/dev")
+                .and_then(|e| {
+                    e.fields
+                        .iter()
+                        .find(|f| matches!(f.value, FieldValue::Table(_)))
+                })
+                .and_then(|f| {
+                    if let FieldValue::Table(ref data) = f.value {
+                        Some(data.clone())
+                    } else {
+                        None
+                    }
+                })
         });
 
         let time_delta_secs = self.snapshots.last().map(|prev| {
-            let cur_dur = self.current.timestamp
-                .duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default();
-            let prev_dur = prev.timestamp
-                .duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default();
+            let cur_dur = self
+                .current
+                .timestamp
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default();
+            let prev_dur = prev
+                .timestamp
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default();
             let delta = cur_dur.as_secs_f64() - prev_dur.as_secs_f64();
             if delta > 0.0 { delta } else { 1.0 }
         });
 
-        let net_rows: Vec<Vec<String>> = current_net_rows.iter().map(|row| {
-            // Row layout: [iface, rx_bytes, rx_pkts, tx_bytes, tx_pkts]
-            let iface = row.first().cloned().unwrap_or_default();
-            let rx_bytes_str = row.get(1).cloned().unwrap_or_default();
-            let tx_bytes_str = row.get(3).cloned().unwrap_or_default();
+        let net_rows: Vec<Vec<String>> = current_net_rows
+            .iter()
+            .map(|row| {
+                // Row layout: [iface, rx_bytes, rx_pkts, tx_bytes, tx_pkts]
+                let iface = row.first().cloned().unwrap_or_default();
+                let rx_bytes_str = row.get(1).cloned().unwrap_or_default();
+                let tx_bytes_str = row.get(3).cloned().unwrap_or_default();
 
-            // Find the matching previous row by interface name
-            let (rx_rate, tx_rate) = if let (Some(prev_rows), Some(dt)) = (&prev_net_table, time_delta_secs) {
-                let prev_row = prev_rows.iter().find(|r| r.first().map(|s| s.as_str()) == Some(iface.as_str()));
-                if let Some(prev) = prev_row {
-                    let parse_net_bytes = |s: &str| -> u64 {
-                        // Handle formatted strings like "1.2 GiB", "500.0 MiB", "1024 B"
-                        let s = s.trim();
-                        if let Some(rest) = s.strip_suffix("GiB") {
-                            (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0 * 1024.0) as u64
-                        } else if let Some(rest) = s.strip_suffix("MiB") {
-                            (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0) as u64
-                        } else if let Some(rest) = s.strip_suffix("KiB") {
-                            (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0) as u64
-                        } else if let Some(rest) = s.strip_suffix(" B") {
-                            rest.trim().parse::<u64>().unwrap_or(0)
-                        } else {
-                            // Try raw number
-                            s.replace(',', "").parse::<u64>().unwrap_or(0)
-                        }
-                    };
-                    let cur_rx = parse_net_bytes(&rx_bytes_str);
-                    let prev_rx = parse_net_bytes(prev.get(1).map(|s| s.as_str()).unwrap_or("0"));
-                    let cur_tx = parse_net_bytes(&tx_bytes_str);
-                    let prev_tx = parse_net_bytes(prev.get(3).map(|s| s.as_str()).unwrap_or("0"));
+                // Find the matching previous row by interface name
+                let (rx_rate, tx_rate) = if let (Some(prev_rows), Some(dt)) =
+                    (&prev_net_table, time_delta_secs)
+                {
+                    let prev_row = prev_rows
+                        .iter()
+                        .find(|r| r.first().map(|s| s.as_str()) == Some(iface.as_str()));
+                    if let Some(prev) = prev_row {
+                        let parse_net_bytes = |s: &str| -> u64 {
+                            // Handle formatted strings like "1.2 GiB", "500.0 MiB", "1024 B"
+                            let s = s.trim();
+                            if let Some(rest) = s.strip_suffix("GiB") {
+                                (rest.trim().parse::<f64>().unwrap_or(0.0)
+                                    * 1024.0
+                                    * 1024.0
+                                    * 1024.0) as u64
+                            } else if let Some(rest) = s.strip_suffix("MiB") {
+                                (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0) as u64
+                            } else if let Some(rest) = s.strip_suffix("KiB") {
+                                (rest.trim().parse::<f64>().unwrap_or(0.0) * 1024.0) as u64
+                            } else if let Some(rest) = s.strip_suffix(" B") {
+                                rest.trim().parse::<u64>().unwrap_or(0)
+                            } else {
+                                // Try raw number
+                                s.replace(',', "").parse::<u64>().unwrap_or(0)
+                            }
+                        };
+                        let cur_rx = parse_net_bytes(&rx_bytes_str);
+                        let prev_rx =
+                            parse_net_bytes(prev.get(1).map(|s| s.as_str()).unwrap_or("0"));
+                        let cur_tx = parse_net_bytes(&tx_bytes_str);
+                        let prev_tx =
+                            parse_net_bytes(prev.get(3).map(|s| s.as_str()).unwrap_or("0"));
 
-                    let rx_delta = cur_rx.saturating_sub(prev_rx) as f64;
-                    let tx_delta = cur_tx.saturating_sub(prev_tx) as f64;
-                    (format_rate(rx_delta / dt), format_rate(tx_delta / dt))
+                        let rx_delta = cur_rx.saturating_sub(prev_rx) as f64;
+                        let tx_delta = cur_tx.saturating_sub(prev_tx) as f64;
+                        (format_rate(rx_delta / dt), format_rate(tx_delta / dt))
+                    } else {
+                        ("-".to_string(), "-".to_string())
+                    }
                 } else {
                     ("-".to_string(), "-".to_string())
-                }
-            } else {
-                ("-".to_string(), "-".to_string())
-            };
+                };
 
-            vec![iface, rx_bytes_str, rx_rate, tx_bytes_str, tx_rate]
-        }).collect();
+                vec![iface, rx_bytes_str, rx_rate, tx_bytes_str, tx_rate]
+            })
+            .collect();
 
         // Compute bar graph data for memory
         let mem_total = get_bytes_value(self, "meminfo", "MemTotal");
@@ -710,6 +751,7 @@ impl App {
                     })
             })
             .collect();
+        let load_history = adjust_history_for_axis(load_history, self.dash_zero_axis);
 
         // Sparkline history: memory usage %
         let mem_history: Vec<u64> = self
@@ -743,6 +785,7 @@ impl App {
                 Some(pct)
             })
             .collect();
+        let mem_history = adjust_history_for_axis(mem_history, self.dash_zero_axis);
 
         // P-A1: Diagnostic badge — run analyze once, extract count & worst severity
         let diag_findings = crate::diagnostics::analyze(&self.current, l, &self.diagnostic_runbooks);
@@ -893,13 +936,10 @@ impl App {
                         } else {
                             f.name.clone()
                         };
-                        let alert_sev = alert::field_alert_severity(
-                            &self.active_alerts,
-                            &source_name,
-                            &f.name,
-                        )
-                        .unwrap_or("")
-                        .to_string();
+                        let alert_sev =
+                            alert::field_alert_severity(&self.active_alerts, &source_name, &f.name)
+                                .unwrap_or("")
+                                .to_string();
                         FieldRow {
                             name: name_display,
                             value: f.value.display(),
@@ -967,7 +1007,7 @@ impl App {
                     headers: vec![],
                     rows: vec![],
                     scroll: 0,
-                }
+                };
             }
         };
 
@@ -995,7 +1035,14 @@ impl App {
             "partitions" => vec!["Name", "Size", "Major", "Minor"],
             "net/dev" => vec!["Interface", "RX Bytes", "RX Pkts", "TX Bytes", "TX Pkts"],
             "diskstats" => {
-                vec!["Device", "Reads", "Read Bytes", "Writes", "Written", "InFlight"]
+                vec![
+                    "Device",
+                    "Reads",
+                    "Read Bytes",
+                    "Writes",
+                    "Written",
+                    "InFlight",
+                ]
             }
             "processes" => vec!["PID", "Name", "State", "RSS", "Threads", "UID"],
             "swaps" => vec!["Filename", "Type", "Size", "Used", "Priority"],
@@ -1040,12 +1087,7 @@ impl App {
             vec![]
         };
 
-        let title = format!(
-            "{} / {} ({} rows)",
-            source_name,
-            field.name,
-            rows.len()
-        );
+        let title = format!("{} / {} ({} rows)", source_name, field.name, rows.len());
 
         TableViewData {
             title,
@@ -1067,15 +1109,14 @@ impl App {
                     max: 0.0,
                     avg: 0.0,
                     current: 0.0,
-                }
+                };
             }
         };
 
         let mut values: Vec<f64> = Vec::new();
         for snap in &self.snapshots {
             if let Some(entry) = snap.entries.get(&source_name) {
-                if let Some(field) = entry.fields.iter().find(|f| f.name == field_name)
-                {
+                if let Some(field) = entry.fields.iter().find(|f| f.name == field_name) {
                     if let Some(v) = extract_numeric(&field.value) {
                         values.push(v);
                     }
@@ -1091,14 +1132,8 @@ impl App {
             }
         }
 
-        let min = values
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min);
-        let max = values
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max);
+        let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let avg = if values.is_empty() {
             0.0
         } else {
@@ -1169,8 +1204,7 @@ impl App {
 
         let l = self.locale;
         let all_cats = Category::all();
-        let selected =
-            self.selected_category.min(all_cats.len().saturating_sub(1));
+        let selected = self.selected_category.min(all_cats.len().saturating_sub(1));
 
         let categories: Vec<CategoryItem> = all_cats
             .iter()

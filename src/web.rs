@@ -4,16 +4,19 @@
 //! using Server-Sent Events for real-time streaming.
 
 #[cfg(feature = "web")]
+use crate::article;
+#[cfg(feature = "web")]
 use crate::i18n::Locale;
 #[cfg(feature = "web")]
 use crate::proc::Snapshot;
 
 #[cfg(feature = "web")]
 use axum::{
+    Router,
     extract::{Query, State},
     response::{
-        sse::{Event, Sse},
         Html, IntoResponse, Json,
+        sse::{Event, Sse},
     },
     http::StatusCode,
     routing::{get, post},
@@ -26,9 +29,9 @@ use std::time::Duration;
 #[cfg(feature = "web")]
 use tokio::sync::broadcast;
 #[cfg(feature = "web")]
-use tokio_stream::wrappers::BroadcastStream;
-#[cfg(feature = "web")]
 use tokio_stream::StreamExt;
+#[cfg(feature = "web")]
+use tokio_stream::wrappers::BroadcastStream;
 
 #[cfg(feature = "web")]
 struct AppState {
@@ -93,6 +96,7 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             .route("/settings", get(settings_page_handler))
             .route("/api/v1/settings", get(settings_api_handler))
             .route("/api/v1/settings/alerts", post(settings_alerts_handler))
+            .route("/api/article", get(article_handler))
             .with_state(state);
 
         let addr = format!("0.0.0.0:{}", port);
@@ -139,10 +143,8 @@ async fn sse_handler(
     let stream = BroadcastStream::new(rx)
         .filter_map(|result: Result<String, _>| result.ok())
         .map(|json| Ok(Event::default().data(json)));
-    Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(10))
-    )
+    Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(10)))
 }
 
 #[cfg(feature = "web")]
@@ -239,7 +241,7 @@ fn build_minimal_app(
 
     App {
         snapshots: history,
-        current: snapshot,
+        current: snapshot.clone(),
         diffs: Vec::new(),
         view,
         focus: Focus::Content,
@@ -282,6 +284,10 @@ fn build_minimal_app(
         view_history: Vec::new(),
         selected_diagnostic: 0,
         selected_related_metric: None,
+        article_overlay: None,
+        article_content_lines: 0,
+        article_visible_height: 0,
+        dash_zero_axis: false,
     }
 }
 
@@ -399,15 +405,64 @@ async fn field_help_handler(
 }
 
 #[cfg(feature = "web")]
+#[derive(serde::Deserialize)]
+struct ArticleQuery {
+    source: Option<String>,
+    field: Option<String>,
+    id: Option<String>,
+    locale: Option<String>,
+}
+
+#[cfg(feature = "web")]
+async fn article_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ArticleQuery>,
+) -> impl IntoResponse {
+    let locale = params
+        .locale
+        .as_deref()
+        .map(Locale::from_str)
+        .unwrap_or(state.locale);
+
+    let mut found = true;
+    let article_ref = if let Some(id) = params.id.as_deref() {
+        if let Some(article) = article::find_article_by_id(id) {
+            article
+        } else {
+            found = false;
+            article::fallback_article()
+        }
+    } else if let (Some(source), Some(field)) = (params.source.as_deref(), params.field.as_deref())
+    {
+        let resolved_id = article::resolve_article_id(source, field);
+        if resolved_id == article::fallback_article().id {
+            let direct_id = format!("{source}.{field}");
+            found = article::find_article_by_id(&direct_id).is_some();
+        }
+        article::resolve_article(source, field)
+    } else {
+        found = false;
+        article::fallback_article()
+    };
+
+    let mut api = article::to_api_article(article_ref, locale);
+    api.found = found;
+    Json(api)
+}
+
+#[cfg(feature = "web")]
 fn build_html(lang: &str) -> String {
     let initial_locale = if lang == "ja" { "ja" } else { "en" };
-    format!(r##"<!DOCTYPE html>
+    format!(
+        r##"<!DOCTYPE html>
 <html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>syslenz</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 :root{{
@@ -489,6 +544,35 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
 #help-overlay.show{{display:block}}
 .help-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:4px 20px}}
 
+/* Article overlay */
+#article-overlay{{display:none;position:fixed;inset:6vh 6vw;background:var(--bg-dark);border:2px solid var(--blue);border-radius:10px;z-index:140;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.45)}}
+#article-overlay.show{{display:flex;flex-direction:column}}
+#article-overlay .head{{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px}}
+#article-overlay .title{{color:var(--blue);font-weight:bold;font-size:14px}}
+#article-overlay .meta{{color:var(--fg-dim);font-size:11px}}
+#article-overlay .body{{flex:1;overflow-y:auto;padding:14px;font-size:13px;line-height:1.65}}
+#article-overlay .md-content h1,#article-overlay .md-content h2,#article-overlay .md-content h3{{color:var(--blue);margin:10px 0 6px 0}}
+#article-overlay .md-content h4,#article-overlay .md-content h5{{color:var(--yellow);margin:10px 0 6px 0}}
+#article-overlay .md-content p{{margin:0 0 8px 0}}
+#article-overlay .md-content ul,#article-overlay .md-content ol{{margin:0 0 10px 20px}}
+#article-overlay .md-content li{{margin:2px 0}}
+#article-overlay .md-content code{{background:var(--bg-hl);padding:1px 4px;border-radius:4px;color:var(--cyan)}}
+#article-overlay .md-content pre{{background:var(--bg-hl);padding:10px;border-radius:8px;overflow:auto;margin:8px 0}}
+#article-overlay .md-content pre code{{background:transparent;padding:0}}
+#article-overlay .md-content blockquote{{border-left:3px solid var(--border);padding-left:10px;color:var(--fg-dim);margin:8px 0}}
+#article-overlay .body h4{{color:var(--yellow);font-size:12px;margin:12px 0 6px 0}}
+#article-overlay .body pre{{white-space:pre-wrap;font-family:inherit}}
+#article-overlay .article-toc{{border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:10px;margin-bottom:12px}}
+#article-overlay .article-toc .toc-title{{color:var(--yellow);font-size:11px;font-weight:bold;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}}
+#article-overlay .article-toc .toc-item{{display:block;width:100%;text-align:left;padding:4px 6px;background:transparent;border:none;color:var(--cyan);font:inherit;font-size:12px;cursor:pointer;border-radius:6px}}
+#article-overlay .article-toc .toc-item:hover{{background:var(--bg-hl)}}
+#article-overlay .article-toc .toc-item.l3{{padding-left:18px;color:var(--fg)}}
+#article-overlay .links{{display:flex;flex-direction:column;gap:4px;margin-top:8px}}
+#article-overlay .link{{padding:4px 8px;border-radius:6px;border:1px solid transparent;cursor:pointer;color:var(--cyan);font-size:12px}}
+#article-overlay .link:hover{{background:var(--bg-hl)}}
+#article-overlay .link.active{{background:var(--yellow);color:var(--bg-dark);font-weight:bold}}
+#article-overlay .foot{{padding:8px 12px;border-top:1px solid var(--border);font-size:11px;color:var(--fg-dim)}}
+
 /* Graph panel */
 #graph-overlay{{display:none;position:fixed;bottom:0;left:220px;right:0;height:250px;background:var(--bg-dark);border-top:2px solid var(--blue);padding:12px 20px;z-index:90}}
 #graph-overlay.show{{display:block}}
@@ -545,12 +629,26 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
       <span class="badge" id="btn-dash" onclick="S.setView('dashboard')">D</span>
       <span class="badge" id="btn-classic" onclick="S.setView('detail')">O</span>
       <span class="badge" id="btn-diag" onclick="S.setView('diagnostics')">X</span>
+      <span class="badge" id="btn-article" onclick="S.toggleArticleForSelection()">A</span>
+      <span class="badge" id="btn-refresh" onclick="S.toggleAutoRefresh()">RT</span>
+      <span class="badge" id="btn-axis" onclick="S.toggleAxisMode()">AXIS</span>
       <span class="badge" id="btn-help" onclick="S.cycleHelp()">?</span>
       <span class="badge" id="btn-lang" onclick="S.toggleLang()">EN</span>
     </div>
   </div>
   <div id="content"></div>
   <div id="help-overlay"></div>
+  <div id="article-overlay">
+    <div class="head">
+      <div>
+        <div class="title" id="article-title">Article</div>
+        <div class="meta" id="article-meta"></div>
+      </div>
+      <span class="badge" onclick="closeArticleOverlay()">Esc</span>
+    </div>
+    <div class="body" id="article-body"></div>
+    <div class="foot" id="article-foot"></div>
+  </div>
   <div id="graph-overlay"><h3>Graph: <span id="graph-title-field"></span></h3><div class="graph-canvas-wrap"><canvas id="graph-canvas"></canvas></div></div>
   <div id="statusbar">
     <div class="left">
@@ -559,7 +657,7 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
       <span id="sb-source">-</span>
     </div>
     <div class="right">
-      <span id="sb-keys">? Help | D Dashboard | O Classic | X Diag | L Lang</span>
+      <span id="sb-keys">? Help | A Article | D Dashboard | O Classic | X Diag | L Lang</span>
     </div>
   </div>
 </div>
@@ -592,6 +690,7 @@ const I = {{
       ['Enter', 'Drill in (detail view)'],
       ['Backspace', 'Go back'],
       ['d', 'Diff view'],
+      ['A', 'Article overlay'],
       ['/', 'Search sources'],
       ['?', 'Help panel (cycle levels)'],
       ['L', 'Toggle language (EN/JA)'],
@@ -602,8 +701,16 @@ const I = {{
       ['g', 'Toggle graph for selected field'],
       ['Tab', 'Switch focus sidebar/content'],
       ['Home/End', 'Jump to first/last'],
-      ['a', 'Toggle auto-refresh'],
+      ['r', 'Toggle real-time updates'],
+      ['s', 'Toggle axis scaling'],
     ],
+    axis_auto: 'Axis (auto range)',
+    axis_zero: 'Axis (zero baseline)',
+    axis_toggle: 'Toggle axis scaling',
+    real_time_on: 'Real-time updates resumed',
+    real_time_off: 'Real-time updates paused',
+    real_time_resume_label: 'Pause real-time updates',
+    real_time_pause_label: 'Resume real-time updates',
   }},
   ja: {{
     title: 'syslenz - システム情報ビューア',
@@ -629,6 +736,7 @@ const I = {{
       ['Enter', 'ドリルイン（詳細表示）'],
       ['BS', '戻る'],
       ['d', '差分ビュー'],
+      ['A', '記事オーバーレイ'],
       ['/', 'ソース検索'],
       ['?', 'ヘルプパネル（レベル切替）'],
       ['L', '言語切り替え (EN/JA)'],
@@ -639,8 +747,16 @@ const I = {{
       ['g', '選択フィールドのグラフ表示'],
       ['Tab', 'サイドバー/コンテンツ切替'],
       ['Home/End', '先頭/末尾へ'],
-      ['a', '自動更新の切替'],
+      ['r', 'リアルタイム更新の切替'],
+      ['s', '軸スケールの切替'],
     ],
+    axis_auto: '軸: 自動レンジ',
+    axis_zero: '軸: ゼロ基点',
+    axis_toggle: '軸スケール切替',
+    real_time_on: 'リアルタイム更新を再開しました',
+    real_time_off: 'リアルタイム更新を停止しました',
+    real_time_resume_label: 'リアルタイム更新を停止',
+    real_time_pause_label: 'リアルタイム更新を再開',
   }}
 }};
 
@@ -663,6 +779,7 @@ const S = {{
   graphField: null,
   graphData: [],
   chart: null,
+  axisZero: false,
   evtSource: null,
   connected: false,
   dashCharts: {{}},
@@ -670,6 +787,12 @@ const S = {{
   autoGraphChart: null,
   selectedCategory: 0,
   categoryScroll: 0,
+  articleOverlay: {{
+    open: false,
+    loading: false,
+    article: null,
+    selectedLink: 0,
+  }},
 
   t(key) {{ return I[this.locale][key] || key; }},
 
@@ -691,6 +814,18 @@ const S = {{
     render();
   }},
 
+  toggleAutoRefresh() {{
+    this.autoRefresh = !this.autoRefresh;
+    toast(this.autoRefresh ? I[this.locale].real_time_on : I[this.locale].real_time_off);
+    renderTopbar();
+  }},
+
+  toggleAxisMode() {{
+    this.axisZero = !this.axisZero;
+    toast(this.axisZero ? I[this.locale].axis_zero : I[this.locale].axis_auto);
+    render();
+  }},
+
   cycleHelp() {{
     this.helpLevel = (this.helpLevel + 1) % 4;
     renderHelp();
@@ -701,6 +836,14 @@ const S = {{
     this.graphData = [];
     if (this.chart) {{ this.chart.destroy(); this.chart = null; }}
     document.getElementById('graph-overlay').classList.remove('show');
+  }},
+
+  async toggleArticleForSelection() {{
+    if (this.articleOverlay.open) {{
+      closeArticleOverlay();
+      return;
+    }}
+    await openArticleForSelection();
   }},
 
   currentSourceName() {{
@@ -746,6 +889,15 @@ function extractNumeric(v) {{
 function escapeHtml(s) {{
   if (typeof s !== 'string') return String(s);
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+
+function slugifyHeading(text) {{
+  const s = String(text || '').trim().toLowerCase()
+    .replace(/[^\p{{L}}\p{{N}}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return s;
 }}
 
 function getField(snap, source, name) {{
@@ -916,6 +1068,7 @@ function render() {{
   renderTopbar();
   renderStatusbar();
   renderHelp();
+  renderArticleOverlay();
   updateGraphData();
 }}
 
@@ -951,10 +1104,22 @@ function renderTopbar() {{
   document.getElementById('view-label').textContent = viewNames[S.view] || S.view;
   document.getElementById('time-display').textContent = S.snapshot ? new Date(S.snapshot.timestamp).toLocaleTimeString() : '--:--:--';
   // highlight active view button
-  ['btn-dash','btn-classic','btn-diag'].forEach(id => document.getElementById(id).classList.remove('active'));
+  ['btn-dash','btn-classic','btn-diag','btn-article'].forEach(id => document.getElementById(id).classList.remove('active'));
   if (S.view === 'dashboard') document.getElementById('btn-dash').classList.add('active');
   else if (S.view === 'detail' || S.view === 'diff') document.getElementById('btn-classic').classList.add('active');
   else if (S.view === 'diagnostics') document.getElementById('btn-diag').classList.add('active');
+  if (S.articleOverlay.open) document.getElementById('btn-article').classList.add('active');
+  const refreshBtn = document.getElementById('btn-refresh');
+  if (refreshBtn) {{
+    refreshBtn.classList.toggle('active', S.autoRefresh);
+    refreshBtn.title = S.autoRefresh ? I[S.locale].real_time_resume_label : I[S.locale].real_time_pause_label;
+  }}
+  const axisBtn = document.getElementById('btn-axis');
+  if (axisBtn) {{
+    axisBtn.classList.toggle('active', S.axisZero);
+    axisBtn.textContent = S.axisZero ? I[S.locale].axis_zero : I[S.locale].axis_auto;
+    axisBtn.title = I[S.locale].axis_toggle;
+  }}
 }}
 
 function renderStatusbar() {{
@@ -1058,9 +1223,14 @@ function initDashCharts() {{
   Object.values(S.dashCharts).forEach(c => {{ if (c) c.destroy(); }});
   S.dashCharts = {{}};
 
+  const yAxisOptions = {{
+    display: true,
+    ticks: {{ color: '#565f89', font: {{ size: 10 }} }},
+    beginAtZero: S.axisZero,
+  }};
   const chartOpts = {{
     responsive: true, maintainAspectRatio: false,
-    scales: {{ x: {{ display: true, ticks: {{ color: '#565f89', maxTicksLimit: 8, font: {{ size: 10 }} }} }}, y: {{ ticks: {{ color: '#565f89', font: {{ size: 10 }} }} }} }},
+    scales: {{ x: {{ display: true, ticks: {{ color: '#565f89', maxTicksLimit: 8, font: {{ size: 10 }} }} }}, y: yAxisOptions }},
     plugins: {{ legend: {{ labels: {{ color: '#c0caf5', font: {{ size: 10 }} }} }} }},
     animation: {{ duration: 300 }}
   }};
@@ -1404,6 +1574,209 @@ function renderHelp() {{
   el.innerHTML = html;
 }}
 
+async function fetchArticle(params) {{
+  const qs = new URLSearchParams(params);
+  qs.set('locale', S.locale);
+  const resp = await fetch('/api/article?' + qs.toString());
+  if (!resp.ok) return null;
+  return await resp.json();
+}}
+
+async function openArticleForSelection() {{
+  const src = S.currentSourceName();
+  const entry = S.snapshot && S.snapshot.entries[src];
+  const field = entry && entry.fields[S.selectedField] ? entry.fields[S.selectedField].name : '';
+  S.articleOverlay.loading = true;
+  S.articleOverlay.open = true;
+  S.articleOverlay.selectedLink = 0;
+  renderArticleOverlay();
+
+  const article = await fetchArticle({{ source: src, field }});
+  if (!article) {{
+    closeArticleOverlay();
+    return;
+  }}
+  S.articleOverlay.loading = false;
+  S.articleOverlay.article = article;
+  S.articleOverlay.selectedLink = 0;
+  renderArticleOverlay();
+}}
+
+async function openArticleById(id) {{
+  if (!id) return;
+  S.articleOverlay.loading = true;
+  renderArticleOverlay();
+  const article = await fetchArticle({{ id }});
+  if (!article) {{
+    closeArticleOverlay();
+    return;
+  }}
+  S.articleOverlay.loading = false;
+  S.articleOverlay.article = article;
+  S.articleOverlay.selectedLink = 0;
+  renderArticleOverlay();
+}}
+
+function closeArticleOverlay() {{
+  S.articleOverlay.open = false;
+  S.articleOverlay.loading = false;
+  S.articleOverlay.article = null;
+  S.articleOverlay.selectedLink = 0;
+  const el = document.getElementById('article-overlay');
+  if (el) el.classList.remove('show');
+  renderTopbar();
+}}
+
+function jumpToMetric(source, field) {{
+  if (!source || !field) return;
+  updateSourceKeys();
+  const idx = S.filteredKeys.indexOf(source);
+  if (idx < 0) return;
+  S.view = 'detail';
+  S.focus = 'content';
+  S.selectedSource = idx;
+  S.selectedField = 0;
+  const entry = S.snapshot && S.snapshot.entries[source];
+  if (entry) {{
+    const fidx = entry.fields.findIndex(f => f.name === field);
+    if (fidx >= 0) S.selectedField = fidx;
+  }}
+  closeArticleOverlay();
+  render();
+}}
+
+function activateArticleLink(link) {{
+  if (!link) return;
+  if (link.type === 'metric') {{
+    jumpToMetric(link.source, link.field);
+    return;
+  }}
+  if (link.type === 'article') {{
+    openArticleById(link.id);
+  }}
+}}
+
+function renderArticleOverlay() {{
+  const wrap = document.getElementById('article-overlay');
+  if (!wrap) return;
+  if (!S.articleOverlay.open) {{
+    wrap.classList.remove('show');
+    return;
+  }}
+  wrap.classList.add('show');
+  renderTopbar();
+
+  const title = document.getElementById('article-title');
+  const meta = document.getElementById('article-meta');
+  const body = document.getElementById('article-body');
+  const foot = document.getElementById('article-foot');
+
+  if (S.articleOverlay.loading) {{
+    title.textContent = S.locale === 'ja' ? '記事を読み込み中...' : 'Loading article...';
+    meta.textContent = '';
+    body.innerHTML = '<p style="color:var(--fg-dim)">...</p>';
+    foot.textContent = '';
+    return;
+  }}
+
+  const article = S.articleOverlay.article;
+  if (!article) {{
+    body.innerHTML = '';
+    foot.textContent = '';
+    return;
+  }}
+
+  title.textContent = article.title || 'Article';
+  meta.textContent = '[' + (article.kind || '').toLowerCase() + '] ' + (article.id || '');
+  let bodyHtml = '';
+  if (typeof marked !== 'undefined') {{
+    marked.setOptions({{
+      gfm: true,
+      breaks: true,
+    }});
+    const rendered = marked.parse(article.body || '');
+    if (typeof DOMPurify !== 'undefined') {{
+      bodyHtml = DOMPurify.sanitize(rendered);
+    }} else {{
+      bodyHtml = rendered;
+    }}
+  }} else {{
+    // Fallback: keep text readable with simple linebreak-rich rendering
+    const lines = escapeHtml(article.body || '').split('\n').map(l => l || '&nbsp;');
+    bodyHtml = '<pre style="margin:0;white-space:pre-wrap">' + lines.join('\n') + '</pre>';
+  }}
+  let tocHtml = '';
+  try {{
+    const host = document.createElement('div');
+    host.innerHTML = bodyHtml;
+    const headings = Array.from(host.querySelectorAll('h2, h3'));
+    const used = {{}};
+    headings.forEach((h, i) => {{
+      const label = (h.textContent || '').trim();
+      let base = slugifyHeading(label);
+      if (!base) base = 'section-' + (i + 1);
+      let id = base;
+      let n = 2;
+      while (used[id]) {{
+        id = base + '-' + n;
+        n += 1;
+      }}
+      used[id] = true;
+      h.id = id;
+    }});
+
+    const items = headings
+      .map(h => {{
+        const label = (h.textContent || '').trim();
+        if (!label) return '';
+        const cls = h.tagName === 'H3' ? 'toc-item l3' : 'toc-item';
+        return '<button class="' + cls + '" data-anchor="' + escapeHtml(h.id) + '">' + escapeHtml(label) + '</button>';
+      }})
+      .filter(Boolean);
+    bodyHtml = host.innerHTML;
+    if (items.length > 0) {{
+      const tocTitle = S.locale === 'ja' ? '目次' : 'Contents';
+      tocHtml = '<div class="article-toc"><div class="toc-title">' + tocTitle + '</div>' + items.join('') + '</div>';
+    }}
+  }} catch (_e) {{
+    // no-op
+  }}
+
+  let html = tocHtml + '<div class="md-content">' + bodyHtml + '</div>';
+  const links = Array.isArray(article.links) ? article.links : [];
+  if (links.length > 0) {{
+    html += '<h4>SEE ALSO</h4><div class="links">';
+    links.forEach((link, idx) => {{
+      const active = idx === S.articleOverlay.selectedLink ? ' active' : '';
+      html += '<div class="link' + active + '" data-link-idx="' + idx + '">' +
+        escapeHtml(link.label || '') + '</div>';
+    }});
+    html += '</div>';
+  }}
+  body.innerHTML = html;
+  body.querySelectorAll('[data-anchor]').forEach(node => {{
+    node.onclick = () => {{
+      const id = node.dataset.anchor;
+      if (!id) return;
+      const target = document.getElementById(id);
+      if (!target) return;
+      target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+    }};
+  }});
+  body.querySelectorAll('[data-link-idx]').forEach(node => {{
+    node.onclick = () => {{
+      const idx = parseInt(node.dataset.linkIdx, 10);
+      S.articleOverlay.selectedLink = idx;
+      renderArticleOverlay();
+      activateArticleLink(links[idx]);
+    }};
+  }});
+
+  foot.textContent = S.locale === 'ja'
+    ? 'j/k: スクロール  PgUp/PgDn: ページ  Tab/Shift+Tab: 関連項目  Enter: 移動  A/Esc/q: 閉じる'
+    : 'j/k: scroll  PgUp/PgDn: page  Tab/Shift+Tab: related  Enter: jump  A/Esc/q: close';
+}}
+
 // ---- Graph ----
 function toggleFieldGraph(source, fieldName) {{
   if (S.graphField === fieldName) {{ S.closeGraph(); return; }}
@@ -1472,13 +1845,66 @@ document.addEventListener('keydown', (e) => {{
 
   const key = e.key;
 
+  // Article overlay keys (highest priority while open)
+  if (S.articleOverlay.open) {{
+    const body = document.getElementById('article-body');
+    const article = S.articleOverlay.article;
+    const links = article && Array.isArray(article.links) ? article.links : [];
+    if (key === 'Escape' || key === 'q' || key === 'A') {{
+      e.preventDefault();
+      closeArticleOverlay();
+      return;
+    }}
+    if (key === 'j' || key === 'ArrowDown') {{
+      e.preventDefault();
+      if (body) body.scrollTop += 28;
+      return;
+    }}
+    if (key === 'k' || key === 'ArrowUp') {{
+      e.preventDefault();
+      if (body) body.scrollTop -= 28;
+      return;
+    }}
+    if (key === 'PageDown') {{
+      e.preventDefault();
+      if (body) body.scrollTop += Math.max(120, Math.floor(body.clientHeight * 0.8));
+      return;
+    }}
+    if (key === 'PageUp') {{
+      e.preventDefault();
+      if (body) body.scrollTop -= Math.max(120, Math.floor(body.clientHeight * 0.8));
+      return;
+    }}
+    if (key === 'Tab') {{
+      e.preventDefault();
+      if (links.length > 0) {{
+        const delta = e.shiftKey ? -1 : 1;
+        let next = S.articleOverlay.selectedLink + delta;
+        if (next < 0) next = links.length - 1;
+        if (next >= links.length) next = 0;
+        S.articleOverlay.selectedLink = next;
+        renderArticleOverlay();
+      }}
+      return;
+    }}
+    if (key === 'Enter') {{
+      e.preventDefault();
+      if (links.length > 0) activateArticleLink(links[S.articleOverlay.selectedLink]);
+      return;
+    }}
+    return;
+  }}
+
   // Global keys
   if (key === '/') {{ e.preventDefault(); S.searching = true; searchBox.focus(); return; }}
+  if (key === 'A') {{ e.preventDefault(); S.toggleArticleForSelection(); return; }}
   if (key === 'D') {{ e.preventDefault(); S.setView('dashboard'); return; }}
   if (key === 'O') {{ e.preventDefault(); S.setView('classic'); return; }}
   if (key === 'W') {{ e.preventDefault(); S.setView('welcome'); return; }}
   if (key === 'X') {{ e.preventDefault(); S.setView('diagnostics'); return; }}
   if (key === 'C') {{ e.preventDefault(); S.setView('category'); return; }}
+  if (key === 'r' || key === 'R') {{ e.preventDefault(); S.toggleAutoRefresh(); return; }}
+  if (key === 's' || key === 'S') {{ e.preventDefault(); S.toggleAxisMode(); return; }}
   if (key === '?') {{ e.preventDefault(); S.cycleHelp(); return; }}
   if (key === 'L') {{ e.preventDefault(); S.toggleLang(); return; }}
   if (key === 'd') {{ e.preventDefault(); S.setView('diff'); return; }}

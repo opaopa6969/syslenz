@@ -88,6 +88,11 @@ The Web UI serves a single-page application with a dashboard similar to the TUI:
 - **Disk usage** for the root filesystem
 - **Process summary** with state counts
 
+### Interactive controls
+
+- `RT` badge (or `r` key) toggles the SSE stream updates to pause/resume the real-time dashboard snapshots.
+- `AXIS` badge (or `s` key) switches the dashboard line charts between an auto-fitting range and a zero-based axis.
+
 The page auto-updates every second via Server-Sent Events (SSE) -- no manual refresh needed.
 
 ### ViewData Unified UI (v1.1.0)

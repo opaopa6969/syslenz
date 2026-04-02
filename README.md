@@ -41,6 +41,10 @@ SSH in, run `syslenz`, see everything. No agents, no config, no setup. Export JS
 
 Every field has a human-readable description at 4 detail levels. Press `?` to cycle through them. The Category Guide connects sources into narratives like "Where did all my RAM go?" and "The Life of a Packet."
 
+### For the educator: Article Overlay + live controls
+
+Every metric now links to a dedicated Article Overlay (TUI `A` / Web `A`) with SEE ALSO navigation, source guides, and concept stories. Dashboard controls (`s` for axis mode, `RT` badge/`r` key for real-time stream) keep the learning view stable while you pause or scope the chart axes.
+
 ### For the security auditor: compliance-ready snapshots
 
 Capture full system state as JSON, compare across hosts, track changes over time. Kernel modules, open connections, cgroup policies, mounted filesystems -- all in one export. See [Audit Examples](docs/audit-examples.md).

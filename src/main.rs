@@ -1,39 +1,45 @@
 mod alert;
+mod article;
+mod article_concepts;
+mod article_groups;
+mod article_metrics;
+mod article_metrics_generated;
+mod article_sources;
 mod common_metric;
 mod config;
 mod diagnostics;
 mod education;
 mod history;
 mod metric_kind;
-mod serve;
-mod prometheus;
-mod proc;
-mod sys;
-mod net;
-mod ui;
 mod export;
-mod remote;
 mod i18n;
+mod net;
 mod otel;
 mod plugin;
+mod proc;
+mod prometheus;
+mod remote;
+mod serve;
+mod sys;
+mod ui;
 #[cfg(feature = "web")]
 mod web;
 #[cfg(feature = "x11widget")]
 mod x11_widget;
 
+use crate::i18n::T;
+use anyhow::Result;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use ratatui::prelude::*;
 use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use anyhow::Result;
-use std::fs;
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::prelude::*;
 use ui::app::App;
 
 fn main() -> Result<()> {
@@ -41,25 +47,71 @@ fn main() -> Result<()> {
 
     // --export <file.json>
     if let Some(pos) = args.iter().position(|a| a == "--export") {
-        let path = args.get(pos + 1).expect("--export requires a file path argument");
+        let path = args
+            .get(pos + 1)
+            .expect("--export requires a file path argument");
         let snapshot = proc::Snapshot::capture()?;
         export::export_snapshot(&snapshot, Path::new(path))?;
         eprintln!("Snapshot exported to {}", path);
         return Ok(());
     }
 
+    // --export-article-resources <dir>
+    if let Some(pos) = args.iter().position(|a| a == "--export-article-resources") {
+        let dir = args
+            .get(pos + 1)
+            .expect("--export-article-resources requires a directory argument");
+        std::fs::create_dir_all(dir)?;
+        let (index_json, en_json, ja_json) = article::export_split_resources_json()?;
+        let index_path = Path::new(dir).join("index.json");
+        let en_path = Path::new(dir).join("en.json");
+        let ja_path = Path::new(dir).join("ja.json");
+        std::fs::write(&index_path, index_json)?;
+        std::fs::write(&en_path, en_json)?;
+        std::fs::write(&ja_path, ja_json)?;
+        eprintln!("Exported article resources:");
+        eprintln!("  {}", index_path.display());
+        eprintln!("  {}", en_path.display());
+        eprintln!("  {}", ja_path.display());
+        return Ok(());
+    }
+
+    // --export-article-markdown-resources <dir>
+    if let Some(pos) = args
+        .iter()
+        .position(|a| a == "--export-article-markdown-resources")
+    {
+        let dir = args
+            .get(pos + 1)
+            .expect("--export-article-markdown-resources requires a directory argument");
+        let count = article::export_markdown_resources(Path::new(dir))?;
+        eprintln!(
+            "Exported markdown article resources to {} ({} articles)",
+            dir, count
+        );
+        return Ok(());
+    }
+
     // --export-series <dir> --interval <secs> --count <n>
     if let Some(pos) = args.iter().position(|a| a == "--export-series") {
-        let dir = args.get(pos + 1).expect("--export-series requires a directory argument");
-        let interval_pos = args.iter().position(|a| a == "--interval")
+        let dir = args
+            .get(pos + 1)
+            .expect("--export-series requires a directory argument");
+        let interval_pos = args
+            .iter()
+            .position(|a| a == "--interval")
             .expect("--export-series requires --interval <secs>");
-        let interval_secs: u64 = args.get(interval_pos + 1)
+        let interval_secs: u64 = args
+            .get(interval_pos + 1)
             .expect("--interval requires a value")
             .parse()
             .expect("--interval must be a number");
-        let count_pos = args.iter().position(|a| a == "--count")
+        let count_pos = args
+            .iter()
+            .position(|a| a == "--count")
             .expect("--export-series requires --count <n>");
-        let count: usize = args.get(count_pos + 1)
+        let count: usize = args
+            .get(count_pos + 1)
             .expect("--count requires a value")
             .parse()
             .expect("--count must be a number");
@@ -67,7 +119,8 @@ fn main() -> Result<()> {
         std::fs::create_dir_all(dir)?;
         for i in 0..count {
             let snapshot = proc::Snapshot::capture()?;
-            let ts = snapshot.timestamp
+            let ts = snapshot
+                .timestamp
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
@@ -103,7 +156,9 @@ fn main() -> Result<()> {
 
     // --serve [bind_addr] — TCP server mode (for Docker containers)
     if args.iter().any(|a| a == "--serve") {
-        let bind = args.iter().position(|a| a == "--serve")
+        let bind = args
+            .iter()
+            .position(|a| a == "--serve")
             .and_then(|pos| args.get(pos + 1))
             .filter(|s| !s.starts_with("--"))
             .map(|s| s.as_str())
@@ -113,7 +168,9 @@ fn main() -> Result<()> {
 
     // --prometheus [bind_addr] — Prometheus metrics HTTP server
     if args.iter().any(|a| a == "--prometheus") {
-        let bind = args.iter().position(|a| a == "--prometheus")
+        let bind = args
+            .iter()
+            .position(|a| a == "--prometheus")
             .and_then(|pos| args.get(pos + 1))
             .filter(|s| !s.starts_with("--"))
             .map(|s| s.as_str())
@@ -123,17 +180,23 @@ fn main() -> Result<()> {
 
     // --otel [endpoint] [--otel-level core|full]
     if args.iter().any(|a| a == "--otel") {
-        let endpoint = args.iter().position(|a| a == "--otel")
+        let endpoint = args
+            .iter()
+            .position(|a| a == "--otel")
             .and_then(|pos| args.get(pos + 1))
             .filter(|s| !s.starts_with("--"))
             .map(|s| s.as_str())
             .unwrap_or("http://localhost:4317");
-        let interval = args.iter().position(|a| a == "--interval")
+        let interval = args
+            .iter()
+            .position(|a| a == "--interval")
             .and_then(|pos| args.get(pos + 1))
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(5);
         // BL-073: --otel-level core|full
-        let level = args.iter().position(|a| a == "--otel-level")
+        let level = args
+            .iter()
+            .position(|a| a == "--otel-level")
             .and_then(|pos| args.get(pos + 1))
             .map(|s| otel::OtelLevel::from_str(s))
             .unwrap_or(otel::OtelLevel::Full);
@@ -148,11 +211,15 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "--web") {
         #[cfg(feature = "web")]
         {
-            let port = args.iter().position(|a| a == "--web")
+            let port = args
+                .iter()
+                .position(|a| a == "--web")
                 .and_then(|pos| args.get(pos + 1))
                 .and_then(|s| s.parse::<u16>().ok())
                 .unwrap_or(3000);
-            let locale = args.iter().position(|a| a == "--lang")
+            let locale = args
+                .iter()
+                .position(|a| a == "--lang")
                 .and_then(|pos| args.get(pos + 1))
                 .map(|s| i18n::Locale::from_str(s))
                 .unwrap_or(i18n::Locale::En);
@@ -160,7 +227,9 @@ fn main() -> Result<()> {
         }
         #[cfg(not(feature = "web"))]
         {
-            eprintln!("Web UI support is not compiled in. Rebuild with: cargo build --features web");
+            eprintln!(
+                "Web UI support is not compiled in. Rebuild with: cargo build --features web"
+            );
             return Ok(());
         }
     }
@@ -173,7 +242,9 @@ fn main() -> Result<()> {
         }
         #[cfg(not(feature = "x11widget"))]
         {
-            eprintln!("X11 widget support is not compiled in. Rebuild with: cargo build --features x11widget");
+            eprintln!(
+                "X11 widget support is not compiled in. Rebuild with: cargo build --features x11widget"
+            );
             return Ok(());
         }
     }
@@ -189,26 +260,32 @@ fn main() -> Result<()> {
     };
 
     // --classic flag (start in classic Overview mode)
-    let start_classic = args.iter().any(|a| a == "--classic")
-        || cfg.general.default_view == "classic";
+    let start_classic =
+        args.iter().any(|a| a == "--classic") || cfg.general.default_view == "classic";
 
     // BL-074: --tutorial flag
     let start_tutorial = args.iter().any(|a| a == "--tutorial");
 
     // --ssh <user@host> (supports multiple)
-    let ssh_hosts: Vec<String> = args.iter().enumerate()
+    let ssh_hosts: Vec<String> = args
+        .iter()
+        .enumerate()
         .filter(|(_, a)| *a == "--ssh")
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
 
     // --docker <container_name> (supports multiple)
-    let docker_containers: Vec<String> = args.iter().enumerate()
+    let docker_containers: Vec<String> = args
+        .iter()
+        .enumerate()
         .filter(|(_, a)| *a == "--docker")
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
 
     // --connect <host:port> (supports multiple)
-    let connect_addrs: Vec<String> = args.iter().enumerate()
+    let connect_addrs: Vec<String> = args
+        .iter()
+        .enumerate()
         .filter(|(_, a)| *a == "--connect")
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
@@ -218,10 +295,11 @@ fn main() -> Result<()> {
     let docker_container = docker_containers.first().cloned();
     let connect_addr = connect_addrs.first().cloned();
 
-
     // --import <file.json>
     let imported_snapshot = if let Some(pos) = args.iter().position(|a| a == "--import") {
-        let path = args.get(pos + 1).expect("--import requires a file path argument");
+        let path = args
+            .get(pos + 1)
+            .expect("--import requires a file path argument");
         let path = Path::new(path);
         // Try importing as series first, fall back to single snapshot
         match export::import_series(path) {
@@ -275,7 +353,8 @@ fn main() -> Result<()> {
     let mut extra_hosts: Vec<(String, String)> = Vec::new(); // (label, type:target)
     let mut skip_first_ssh = ssh_host.is_some();
     let mut skip_first_docker = docker_container.is_some() && ssh_host.is_none();
-    let mut skip_first_connect = connect_addr.is_some() && ssh_host.is_none() && docker_container.is_none();
+    let mut skip_first_connect =
+        connect_addr.is_some() && ssh_host.is_none() && docker_container.is_none();
     for h in &ssh_hosts {
         if skip_first_ssh {
             skip_first_ssh = false;
@@ -297,7 +376,19 @@ fn main() -> Result<()> {
         }
         extra_hosts.push((format!("tcp:{}", a), format!("tcp:{}", a)));
     }
-    let result = run(&mut terminal, imported_snapshot, ssh_host, docker_container, connect_addr, locale, start_classic, start_tutorial, alert_rules, diagnostic_runbooks, extra_hosts);
+    let result = run(
+        &mut terminal,
+        imported_snapshot,
+        ssh_host,
+        docker_container,
+        connect_addr,
+        locale,
+        start_classic,
+        start_tutorial,
+        alert_rules,
+        diagnostic_runbooks,
+        extra_hosts,
+    );
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -350,7 +441,8 @@ fn run(
 
     // Set up multi-host if there are extra hosts
     if !extra_hosts.is_empty() {
-        let mut additional: Vec<(String, Option<std::sync::mpsc::Receiver<proc::Snapshot>>)> = Vec::new();
+        let mut additional: Vec<(String, Option<std::sync::mpsc::Receiver<proc::Snapshot>>)> =
+            Vec::new();
         for (label, target) in &extra_hosts {
             let rx = if target.starts_with("ssh:") {
                 let host = &target[4..];
@@ -380,14 +472,18 @@ fn run(
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press { continue; }
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
 
                 // Search mode input
                 if app.searching {
                     match key.code {
                         KeyCode::Enter => app.apply_search(),
                         KeyCode::Esc => app.cancel_search(),
-                        KeyCode::Backspace => { app.search_query.pop(); }
+                        KeyCode::Backspace => {
+                            app.search_query.pop();
+                        }
                         KeyCode::Char(c) => app.search_query.push(c),
                         _ => {}
                     }
@@ -399,7 +495,35 @@ fn run(
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => app.tutorial_finish(),
                         KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => app.tutorial_next(),
-                        KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => app.tutorial_prev(),
+                        KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                            app.tutorial_prev()
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // Article overlay key handling (priority while open)
+                if app.article_overlay.is_some() {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('A') => {
+                            app.close_article_overlay();
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => app.article_scroll_up(),
+                        KeyCode::Down | KeyCode::Char('j') => app.article_scroll_down(),
+                        KeyCode::PageUp => app.article_scroll_page_up(),
+                        KeyCode::PageDown => app.article_scroll_page_down(),
+                        KeyCode::Tab => app.article_next_link(),
+                        KeyCode::BackTab => app.article_prev_link(),
+                        KeyCode::Enter => app.article_activate_selected_link(),
+                        KeyCode::Char(c) if c.is_ascii_digit() => {
+                            let n = if c == '0' {
+                                10
+                            } else {
+                                (c as u8 - b'0') as usize
+                            };
+                            app.article_activate_link_by_number(n);
+                        }
                         _ => {}
                     }
                     continue;
@@ -429,7 +553,13 @@ fn run(
                     KeyCode::PageDown => app.scroll_page_down(),
                     KeyCode::Char('/') => {
                         // Search requires Classic mode (sidebar)
-                        if matches!(app.view, ui::app::View::Dashboard | ui::app::View::Welcome | ui::app::View::Diagnostics | ui::app::View::CategoryGuide) {
+                        if matches!(
+                            app.view,
+                            ui::app::View::Dashboard
+                                | ui::app::View::Welcome
+                                | ui::app::View::Diagnostics
+                                | ui::app::View::CategoryGuide
+                        ) {
                             app.view = ui::app::View::Overview;
                             app.focus = ui::app::Focus::Sidebar;
                         }
@@ -449,8 +579,20 @@ fn run(
                         app.view = ui::app::View::Diff;
                         app.focus = ui::app::Focus::Content;
                     }
-                    KeyCode::Char('r') => { app.refresh()?; }
+                    KeyCode::Char('r') => {
+                        app.refresh()?;
+                    }
                     KeyCode::Char('a') => app.auto_refresh = !app.auto_refresh,
+                    KeyCode::Char('S') => {
+                        app.toggle_dashboard_axis();
+                        let axis_state = if app.dash_zero_axis {
+                            i18n::t(app.locale, T::AXIS_ZERO)
+                        } else {
+                            i18n::t(app.locale, T::AXIS_AUTO)
+                        };
+                        app.status_message =
+                            Some(format!("{}: {}", i18n::t(app.locale, T::AXIS), axis_state));
+                    }
                     KeyCode::Char('L') => app.locale = app.locale.next(),
                     KeyCode::Char('?') => {
                         app.help_level = app.help_level.next();
@@ -477,17 +619,18 @@ fn run(
                         app.view = ui::app::View::CategoryGuide;
                         app.focus = ui::app::Focus::Content;
                     }
+                    KeyCode::Char('A') => {
+                        app.toggle_article_overlay();
+                    }
                     KeyCode::Char('c') => {
                         // Copy current field value to clipboard
                         if let Some(text) = app.get_copyable_text() {
                             if copy_to_clipboard(&text) {
-                                app.status_message = Some(
-                                    if app.locale == i18n::Locale::Ja {
-                                        format!("コピー: {}", truncate(&text, 40))
-                                    } else {
-                                        format!("Copied: {}", truncate(&text, 40))
-                                    }
-                                );
+                                app.status_message = Some(if app.locale == i18n::Locale::Ja {
+                                    format!("コピー: {}", truncate(&text, 40))
+                                } else {
+                                    format!("Copied: {}", truncate(&text, 40))
+                                });
                             }
                         }
                     }
@@ -526,15 +669,15 @@ fn run(
                         app.start_graph();
                     }
                     KeyCode::Char('e') => {
-                        let ts = app.current.timestamp
+                        let ts = app
+                            .current
+                            .timestamp
                             .duration_since(std::time::SystemTime::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
                         let filename = format!("syslenz_snapshot_{}.json", ts);
-                        if let Err(e) = export::export_snapshot(
-                            &app.current,
-                            Path::new(&filename),
-                        ) {
+                        if let Err(e) = export::export_snapshot(&app.current, Path::new(&filename))
+                        {
                             app.status_message = Some(format!("Export failed: {}", e));
                         } else {
                             app.status_message = Some(format!("Exported {}", filename));
@@ -542,7 +685,13 @@ fn run(
                     }
                     KeyCode::Tab => {
                         // If in a fullwidth view, switch to Classic mode first
-                        if matches!(app.view, ui::app::View::Dashboard | ui::app::View::Welcome | ui::app::View::Diagnostics | ui::app::View::CategoryGuide) {
+                        if matches!(
+                            app.view,
+                            ui::app::View::Dashboard
+                                | ui::app::View::Welcome
+                                | ui::app::View::Diagnostics
+                                | ui::app::View::CategoryGuide
+                        ) {
                             app.view = ui::app::View::Overview;
                             app.focus = ui::app::Focus::Sidebar;
                         } else {
@@ -708,7 +857,12 @@ fn uninstall_service(args: &[String]) -> Result<()> {
 
 fn copy_to_clipboard(text: &str) -> bool {
     // Try xclip, then xsel, then wl-copy (Wayland), then pbcopy (macOS)
-    for cmd in &["xclip -selection clipboard", "xsel --clipboard --input", "wl-copy", "pbcopy"] {
+    for cmd in &[
+        "xclip -selection clipboard",
+        "xsel --clipboard --input",
+        "wl-copy",
+        "pbcopy",
+    ] {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if let Ok(mut child) = Command::new(parts[0])
             .args(&parts[1..])

@@ -1,6 +1,7 @@
 use crate::alert::{self, AlertEvent, AlertRule};
+use crate::article;
 use crate::i18n::Locale;
-use crate::proc::{diff_snapshots, DiffItem, FieldValue, Snapshot};
+use crate::proc::{DiffItem, FieldValue, Snapshot, diff_snapshots};
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::time::{Instant, SystemTime};
@@ -105,6 +106,12 @@ pub enum View {
     Tutorial,
 }
 
+pub struct ArticleOverlayState {
+    pub article_id: String,
+    pub scroll: usize,
+    pub selected_link: usize,
+}
+
 pub struct App {
     // === Active view state (mirrors the active host) ===
     pub snapshots: Vec<Snapshot>,
@@ -152,6 +159,8 @@ pub struct App {
     pub active_alerts: Vec<AlertEvent>,
     /// Diagnostic runbook URL mappings from config
     pub diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
+    /// Dashboard axis scaling mode (false = auto range, true = zero baseline)
+    pub dash_zero_axis: bool,
 
     // === BL-030: Multi-host state (HostState per host) ===
     /// Per-host state containers. `hosts[0]` is always localhost or the primary host.
@@ -172,6 +181,12 @@ pub struct App {
     pub selected_diagnostic: usize,
     /// When viewing related_metrics picker, which metric is selected.
     pub selected_related_metric: Option<usize>,
+    /// Optional long-form article overlay state.
+    pub article_overlay: Option<ArticleOverlayState>,
+    /// Total line count of article content (set by render)
+    pub article_content_lines: usize,
+    /// Visible line count of article panel (set by render)
+    pub article_visible_height: usize,
 }
 
 impl App {
@@ -232,14 +247,18 @@ impl App {
             view_history: Vec::new(),
             selected_diagnostic: 0,
             selected_related_metric: None,
+            article_overlay: None,
+            article_content_lines: 0,
+            article_visible_height: 0,
+            dash_zero_axis: false,
         })
     }
 
     pub fn from_remote(host: &str, rx: mpsc::Receiver<Snapshot>) -> anyhow::Result<Self> {
         // Block until we receive the first snapshot
-        let current = rx.recv().map_err(|_| anyhow::anyhow!(
-            "Failed to receive initial snapshot from '{}'", host
-        ))?;
+        let current = rx
+            .recv()
+            .map_err(|_| anyhow::anyhow!("Failed to receive initial snapshot from '{}'", host))?;
         let source_keys: Vec<String> = current.entries.keys().cloned().collect();
         let now = Instant::now();
         let conn_status = ConnectionStatus::Connected { last_seen: now };
@@ -297,11 +316,17 @@ impl App {
             view_history: Vec::new(),
             selected_diagnostic: 0,
             selected_related_metric: None,
+            article_overlay: None,
+            article_content_lines: 0,
+            article_visible_height: 0,
+            dash_zero_axis: false,
         })
     }
 
     pub fn from_imported(snapshots: Vec<Snapshot>) -> anyhow::Result<Self> {
-        let current = snapshots.last().cloned()
+        let current = snapshots
+            .last()
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!("No snapshots to import"))?;
         let source_keys: Vec<String> = current.entries.keys().cloned().collect();
         let previous = if snapshots.len() > 1 {
@@ -363,13 +388,20 @@ impl App {
             view_history: Vec::new(),
             selected_diagnostic: 0,
             selected_related_metric: None,
+            article_overlay: None,
+            article_content_lines: 0,
+            article_visible_height: 0,
+            dash_zero_axis: false,
         })
     }
 
     /// Initialize multi-host monitoring. Call after creating the App.
     /// `additional_hosts` is a list of (label, receiver) pairs beyond the primary host.
     /// The App's `hosts[0]` is already set by the constructor.
-    pub fn init_multi_host(&mut self, additional_hosts: Vec<(String, Option<mpsc::Receiver<Snapshot>>)>) {
+    pub fn init_multi_host(
+        &mut self,
+        additional_hosts: Vec<(String, Option<mpsc::Receiver<Snapshot>>)>,
+    ) {
         if additional_hosts.is_empty() {
             return;
         }
@@ -382,7 +414,10 @@ impl App {
                     entries: BTreeMap::new(),
                 })
             } else {
-                Snapshot { timestamp: SystemTime::now(), entries: BTreeMap::new() }
+                Snapshot {
+                    timestamp: SystemTime::now(),
+                    entries: BTreeMap::new(),
+                }
             };
             let conn_status = if rx.is_some() {
                 ConnectionStatus::Connecting
@@ -436,7 +471,11 @@ impl App {
 
         // Update remote_host for status bar display
         let label = &self.hosts[index].label;
-        self.remote_host = if label == "localhost" || label == "local" { None } else { Some(label.clone()) };
+        self.remote_host = if label == "localhost" || label == "local" {
+            None
+        } else {
+            Some(label.clone())
+        };
 
         true
     }
@@ -476,14 +515,17 @@ impl App {
             match latest {
                 Some(s) => {
                     // Update connection status: we got data
-                    self.hosts[self.active_host].connection_status =
-                        ConnectionStatus::Connected { last_seen: Instant::now() };
+                    self.hosts[self.active_host].connection_status = ConnectionStatus::Connected {
+                        last_seen: Instant::now(),
+                    };
                     self.connection_status = self.hosts[self.active_host].connection_status.clone();
                     s
                 }
                 None => {
                     // No new data — check if we should mark as disconnected
-                    if let ConnectionStatus::Connected { last_seen } = &self.hosts[self.active_host].connection_status {
+                    if let ConnectionStatus::Connected { last_seen } =
+                        &self.hosts[self.active_host].connection_status
+                    {
                         if last_seen.elapsed().as_secs() > 10 {
                             let status = ConnectionStatus::Disconnected {
                                 last_seen: *last_seen,
@@ -534,15 +576,13 @@ impl App {
         }
 
         // Evaluate alerts
-        let prev_firing: Vec<usize> = self.active_alerts.iter()
+        let prev_firing: Vec<usize> = self
+            .active_alerts
+            .iter()
             .filter(|a| a.firing)
             .map(|a| a.rule_index)
             .collect();
-        self.active_alerts = alert::evaluate_alerts(
-            &self.current,
-            &self.alert_rules,
-            &prev_firing,
-        );
+        self.active_alerts = alert::evaluate_alerts(&self.current, &self.alert_rules, &prev_firing);
 
         // BL-071: Execute external actions for newly-firing alerts
         alert::execute_actions(&self.alert_rules, &self.active_alerts, &prev_firing);
@@ -579,11 +619,14 @@ impl App {
                         if self.hosts[i].snapshots.len() > self.hosts[i].max_snapshots {
                             self.hosts[i].snapshots.remove(0);
                         }
-                        self.hosts[i].connection_status =
-                            ConnectionStatus::Connected { last_seen: Instant::now() };
+                        self.hosts[i].connection_status = ConnectionStatus::Connected {
+                            last_seen: Instant::now(),
+                        };
                     } else {
                         // Check for disconnect on non-active hosts too
-                        if let ConnectionStatus::Connected { last_seen } = &self.hosts[i].connection_status {
+                        if let ConnectionStatus::Connected { last_seen } =
+                            &self.hosts[i].connection_status
+                        {
                             if last_seen.elapsed().as_secs() > 10 {
                                 self.hosts[i].connection_status = ConnectionStatus::Disconnected {
                                     last_seen: *last_seen,
@@ -598,6 +641,10 @@ impl App {
 
         self.last_refresh = Instant::now();
         Ok(())
+    }
+
+    pub fn toggle_dashboard_axis(&mut self) {
+        self.dash_zero_axis = !self.dash_zero_axis;
     }
 
     pub fn current_entry_fields(&self) -> Option<&Vec<crate::proc::Field>> {
@@ -673,7 +720,8 @@ impl App {
                     self.table_scroll += 1;
                 }
                 View::CategoryGuide => {
-                    let max_scroll = self.category_content_lines
+                    let max_scroll = self
+                        .category_content_lines
                         .saturating_sub(self.category_visible_height);
                     if self.category_scroll < max_scroll {
                         self.category_scroll += 1;
@@ -848,7 +896,8 @@ impl App {
         match self.view {
             View::CategoryGuide => {
                 let page = self.category_visible_height.max(1);
-                let max_scroll = self.category_content_lines
+                let max_scroll = self
+                    .category_content_lines
                     .saturating_sub(self.category_visible_height);
                 self.category_scroll = (self.category_scroll + page).min(max_scroll);
             }
@@ -856,7 +905,8 @@ impl App {
         }
         if self.help_level != HelpLevel::Off {
             let page = self.help_visible_height.max(1);
-            let max_scroll = self.help_content_lines
+            let max_scroll = self
+                .help_content_lines
                 .saturating_sub(self.help_visible_height);
             self.help_scroll = (self.help_scroll + page).min(max_scroll);
         }
@@ -1081,13 +1131,175 @@ impl App {
         self.tutorial_step = None;
         self.view = View::Dashboard;
         self.focus = Focus::Content;
-        self.status_message = Some(
-            if self.locale == Locale::Ja {
-                "チュートリアル完了! 自由に操作してください".to_string()
-            } else {
-                "Tutorial complete! Explore freely".to_string()
+        self.status_message = Some(if self.locale == Locale::Ja {
+            "チュートリアル完了! 自由に操作してください".to_string()
+        } else {
+            "Tutorial complete! Explore freely".to_string()
+        });
+    }
+
+    pub fn open_article_for_selection(&mut self) {
+        let source = self.current_source_name().to_string();
+        let field = self
+            .current_entry_fields()
+            .and_then(|fields| fields.get(self.selected_field))
+            .map(|f| f.name.clone());
+
+        let article_id = if let Some(field_name) = field {
+            article::resolve_article_id(&source, &field_name)
+        } else {
+            article::fallback_article().id.to_string()
+        };
+
+        self.article_overlay = Some(ArticleOverlayState {
+            article_id,
+            scroll: 0,
+            selected_link: 0,
+        });
+    }
+
+    pub fn toggle_article_overlay(&mut self) {
+        if self.article_overlay.is_some() {
+            self.close_article_overlay();
+        } else {
+            self.open_article_for_selection();
+        }
+    }
+
+    pub fn close_article_overlay(&mut self) {
+        self.article_overlay = None;
+    }
+
+    pub fn article_scroll_up(&mut self) {
+        if let Some(overlay) = self.article_overlay.as_mut() {
+            overlay.scroll = overlay.scroll.saturating_sub(1);
+        }
+    }
+
+    pub fn article_scroll_down(&mut self) {
+        if let Some(overlay) = self.article_overlay.as_mut() {
+            let max_scroll = self
+                .article_content_lines
+                .saturating_sub(self.article_visible_height);
+            if overlay.scroll < max_scroll {
+                overlay.scroll += 1;
             }
-        );
+        }
+    }
+
+    pub fn article_scroll_page_up(&mut self) {
+        if let Some(overlay) = self.article_overlay.as_mut() {
+            let page = self.article_visible_height.max(1);
+            overlay.scroll = overlay.scroll.saturating_sub(page);
+        }
+    }
+
+    pub fn article_scroll_page_down(&mut self) {
+        if let Some(overlay) = self.article_overlay.as_mut() {
+            let page = self.article_visible_height.max(1);
+            let max_scroll = self
+                .article_content_lines
+                .saturating_sub(self.article_visible_height);
+            overlay.scroll = (overlay.scroll + page).min(max_scroll);
+        }
+    }
+
+    pub fn article_next_link(&mut self) {
+        if let Some(overlay) = self.article_overlay.as_mut() {
+            let article = article::find_article_by_id(&overlay.article_id)
+                .unwrap_or_else(article::fallback_article);
+            if !article.links.is_empty() {
+                overlay.selected_link = (overlay.selected_link + 1) % article.links.len();
+            }
+        }
+    }
+
+    pub fn article_prev_link(&mut self) {
+        if let Some(overlay) = self.article_overlay.as_mut() {
+            let article = article::find_article_by_id(&overlay.article_id)
+                .unwrap_or_else(article::fallback_article);
+            if !article.links.is_empty() {
+                overlay.selected_link = if overlay.selected_link == 0 {
+                    article.links.len() - 1
+                } else {
+                    overlay.selected_link - 1
+                };
+            }
+        }
+    }
+
+    fn jump_to_metric(&mut self, source: &str, field: &str) {
+        if let Some(source_idx) = self.source_keys.iter().position(|k| k == source) {
+            self.selected_source = source_idx;
+            self.selected_field = 0;
+            self.field_scroll = 0;
+            self.table_scroll = 0;
+            self.focus = Focus::Content;
+            self.view = View::Detail;
+            self.came_from_dashboard = false;
+
+            if let Some(entry) = self.current.entries.get(source) {
+                if let Some(field_idx) = entry.fields.iter().position(|f| f.name == field) {
+                    self.selected_field = field_idx;
+                }
+            }
+        } else {
+            self.status_message = Some(if self.locale == Locale::Ja {
+                format!(
+                    "{} / {} は現在のスナップショットにありません",
+                    source, field
+                )
+            } else {
+                format!(
+                    "{}/{} is not present in the current snapshot",
+                    source, field
+                )
+            });
+        }
+    }
+
+    pub fn article_activate_selected_link(&mut self) {
+        let Some(overlay) = self.article_overlay.as_ref() else {
+            return;
+        };
+        let article = article::find_article_by_id(&overlay.article_id)
+            .unwrap_or_else(article::fallback_article);
+        let Some(link) = article.links.get(overlay.selected_link).copied() else {
+            return;
+        };
+
+        match link {
+            article::ArticleLink::Metric { source, field, .. } => {
+                self.jump_to_metric(source, field);
+                self.close_article_overlay();
+            }
+            article::ArticleLink::Article { id, .. } => {
+                self.article_overlay = Some(ArticleOverlayState {
+                    article_id: id.to_string(),
+                    scroll: 0,
+                    selected_link: 0,
+                });
+            }
+        }
+    }
+
+    pub fn article_activate_link_by_number(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let Some(overlay) = self.article_overlay.as_mut() else {
+            return;
+        };
+        let article = article::find_article_by_id(&overlay.article_id)
+            .unwrap_or_else(article::fallback_article);
+        if article.links.is_empty() {
+            return;
+        }
+        let idx = n - 1;
+        if idx < article.links.len() {
+            overlay.selected_link = idx;
+            self.article_activate_selected_link();
+        }
     }
 
     /// Get tutorial step text (English and Japanese).
@@ -1277,12 +1489,19 @@ impl App {
             }
             View::Dashboard => {
                 // Copy the whole dashboard section as text
-                let source = Self::DASHBOARD_SOURCES
-                    .get(self.selected_dashboard_section)?;
+                let source = Self::DASHBOARD_SOURCES.get(self.selected_dashboard_section)?;
                 let entry = self.current.entries.get(*source)?;
-                let lines: Vec<String> = entry.fields.iter()
-                    .map(|f| format!("{}: {} {}", f.name, f.value.display(),
-                        f.unit.as_deref().unwrap_or("")))
+                let lines: Vec<String> = entry
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{}: {} {}",
+                            f.name,
+                            f.value.display(),
+                            f.unit.as_deref().unwrap_or("")
+                        )
+                    })
                     .collect();
                 Some(format!("[{}]\n{}", source, lines.join("\n")))
             }
@@ -1292,9 +1511,17 @@ impl App {
                 if findings.is_empty() {
                     Some("No diagnostic findings.".to_string())
                 } else {
-                    let lines: Vec<String> = findings.iter()
-                        .map(|f| format!("[{}] {} — {}\n  {}",
-                            f.severity.label(self.locale), f.title, f.detail, f.suggestion))
+                    let lines: Vec<String> = findings
+                        .iter()
+                        .map(|f| {
+                            format!(
+                                "[{}] {} — {}\n  {}",
+                                f.severity.label(self.locale),
+                                f.title,
+                                f.detail,
+                                f.suggestion
+                            )
+                        })
                         .collect();
                     Some(lines.join("\n\n"))
                 }
@@ -1314,10 +1541,12 @@ mod tests {
     fn make_snapshot(fields: Vec<(&str, &str, FieldValue)>) -> Snapshot {
         let mut entries = BTreeMap::new();
         for (source, name, value) in fields {
-            let entry = entries.entry(source.to_string()).or_insert_with(|| ProcEntry {
-                source: format!("/proc/{}", source),
-                fields: Vec::new(),
-            });
+            let entry = entries
+                .entry(source.to_string())
+                .or_insert_with(|| ProcEntry {
+                    source: format!("/proc/{}", source),
+                    fields: Vec::new(),
+                });
             entry.fields.push(Field {
                 name: name.to_string(),
                 value,
@@ -1325,7 +1554,10 @@ mod tests {
                 description: String::new(),
             });
         }
-        Snapshot { timestamp: SystemTime::now(), entries }
+        Snapshot {
+            timestamp: SystemTime::now(),
+            entries,
+        }
     }
 
     // BL-030: HostState struct exists and holds per-host data
@@ -1353,7 +1585,10 @@ mod tests {
         let app = App::new().unwrap();
         assert_eq!(app.hosts.len(), 1);
         assert_eq!(app.hosts[0].label, "localhost");
-        assert!(matches!(app.hosts[0].connection_status, ConnectionStatus::Local));
+        assert!(matches!(
+            app.hosts[0].connection_status,
+            ConnectionStatus::Local
+        ));
         assert!(!app.is_multi_host());
     }
 
@@ -1370,8 +1605,18 @@ mod tests {
     fn connection_status_labels() {
         assert_eq!(ConnectionStatus::Local.label(), "local");
         let now = Instant::now();
-        assert_eq!(ConnectionStatus::Connected { last_seen: now }.label(), "connected");
-        assert_eq!(ConnectionStatus::Disconnected { last_seen: now, since: now }.label(), "disconnected");
+        assert_eq!(
+            ConnectionStatus::Connected { last_seen: now }.label(),
+            "connected"
+        );
+        assert_eq!(
+            ConnectionStatus::Disconnected {
+                last_seen: now,
+                since: now
+            }
+            .label(),
+            "disconnected"
+        );
         assert_eq!(ConnectionStatus::Connecting.label(), "connecting");
     }
 
@@ -1424,9 +1669,7 @@ mod tests {
     // BL-032: alert evaluation with matching rule fires
     #[test]
     fn alert_fires_on_threshold() {
-        let snap = make_snapshot(vec![
-            ("loadavg", "load_1min", FieldValue::Float(12.0)),
-        ]);
+        let snap = make_snapshot(vec![("loadavg", "load_1min", FieldValue::Float(12.0))]);
         let rules = vec![crate::alert::AlertRule {
             source: "loadavg".to_string(),
             field: "load_1min".to_string(),
@@ -1445,9 +1688,7 @@ mod tests {
     // BL-032: alert does not fire when below threshold
     #[test]
     fn alert_does_not_fire_below_threshold() {
-        let snap = make_snapshot(vec![
-            ("loadavg", "load_1min", FieldValue::Float(2.0)),
-        ]);
+        let snap = make_snapshot(vec![("loadavg", "load_1min", FieldValue::Float(2.0))]);
         let rules = vec![crate::alert::AlertRule {
             source: "loadavg".to_string(),
             field: "load_1min".to_string(),
@@ -1466,9 +1707,11 @@ mod tests {
     // BL-032: debounce — previously firing rule does not duplicate
     #[test]
     fn alert_debounce() {
-        let snap = make_snapshot(vec![
-            ("meminfo", "MemAvailable", FieldValue::Bytes(100_000_000)),
-        ]);
+        let snap = make_snapshot(vec![(
+            "meminfo",
+            "MemAvailable",
+            FieldValue::Bytes(100_000_000),
+        )]);
         let rules = vec![crate::alert::AlertRule {
             source: "meminfo".to_string(),
             field: "MemAvailable".to_string(),
@@ -1483,7 +1726,11 @@ mod tests {
         assert_eq!(events1.len(), 1);
         assert!(events1[0].firing);
         // Second evaluation with prev_firing
-        let prev_firing: Vec<usize> = events1.iter().filter(|e| e.firing).map(|e| e.rule_index).collect();
+        let prev_firing: Vec<usize> = events1
+            .iter()
+            .filter(|e| e.firing)
+            .map(|e| e.rule_index)
+            .collect();
         let events2 = crate::alert::evaluate_alerts(&snap, &rules, &prev_firing);
         // Still one event, still firing — not duplicated
         let firing2: Vec<_> = events2.iter().filter(|e| e.firing).collect();
@@ -1514,9 +1761,7 @@ mod tests {
     #[test]
     fn multi_host_switch() {
         let mut app = App::new().unwrap();
-        app.init_multi_host(vec![
-            ("ssh:host1".to_string(), None),
-        ]);
+        app.init_multi_host(vec![("ssh:host1".to_string(), None)]);
         assert_eq!(app.active_host, 0);
         assert!(app.switch_host(1));
         assert_eq!(app.active_host, 1);

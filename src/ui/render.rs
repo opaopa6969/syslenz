@@ -1,18 +1,19 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table},
-    Frame,
+    widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table},
 };
 
-use crate::alert;
-use crate::i18n::{self, T};
-use crate::proc::FieldValue;
 use super::app::{App, View};
 use super::view_data::{
     DashboardData, DetailData, DiagnosticsData, ViewColor, ViewData, WelcomeData,
 };
+use crate::alert;
+use crate::article;
+use crate::i18n::{self, T};
+use crate::proc::FieldValue;
 
 /// Convert a ViewColor to a ratatui Color.
 fn view_color_to_color(vc: &ViewColor) -> Color {
@@ -64,8 +65,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Determine chunk indices based on what's shown
     let tab_bar_chunk = if show_tab_bar { Some(0) } else { None };
     let main_chunk_idx = if show_tab_bar { 1 } else { 0 };
-    let help_chunk_idx = if help_height > 0 { main_chunk_idx + 1 } else { 0 };
-    let status_chunk_idx = if help_height > 0 { help_chunk_idx + 1 } else { main_chunk_idx + 1 };
+    let help_chunk_idx = if help_height > 0 {
+        main_chunk_idx + 1
+    } else {
+        0
+    };
+    let status_chunk_idx = if help_height > 0 {
+        help_chunk_idx + 1
+    } else {
+        main_chunk_idx + 1
+    };
 
     // Draw tab bar if multi-host
     if let Some(tab_idx) = tab_bar_chunk {
@@ -76,7 +85,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let view_data = app.build_view_data();
 
     // Dashboard, Welcome, Tutorial etc are full-width (no sidebar)
-    let is_fullwidth = matches!(app.view, View::Dashboard | View::Welcome | View::Diagnostics | View::CategoryGuide | View::Tutorial);
+    let is_fullwidth = matches!(
+        app.view,
+        View::Dashboard | View::Welcome | View::Diagnostics | View::CategoryGuide | View::Tutorial
+    );
 
     let main_area = chunks[main_chunk_idx];
 
@@ -94,7 +106,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(22), // sidebar
-                Constraint::Min(40),   // content
+                Constraint::Min(40),    // content
             ])
             .split(main_area);
 
@@ -103,20 +115,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         match view_data {
             ViewData::Detail(ref data) => {
                 // Check if selected field is numeric — auto-show graph
-                let has_numeric_field = app.current_entry_fields()
+                let has_numeric_field = app
+                    .current_entry_fields()
                     .and_then(|fields| fields.get(app.selected_field))
-                    .is_some_and(|f| matches!(f.value,
-                        FieldValue::Bytes(_) | FieldValue::Integer(_) |
-                        FieldValue::Float(_) | FieldValue::Duration(_)));
+                    .is_some_and(|f| {
+                        matches!(
+                            f.value,
+                            FieldValue::Bytes(_)
+                                | FieldValue::Integer(_)
+                                | FieldValue::Float(_)
+                                | FieldValue::Duration(_)
+                        )
+                    });
 
                 if has_numeric_field && app.snapshots.len() >= 2 {
                     // Split: detail on top, auto-graph on bottom
                     let content_split = Layout::default()
                         .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Percentage(60),
-                            Constraint::Percentage(40),
-                        ])
+                        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
                         .split(main_chunks[1]);
                     draw_detail(f, data, app.locale, content_split[0]);
                     draw_auto_graph(f, app, content_split[1]);
@@ -136,6 +152,204 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         draw_status_bar(f, app, chunks[status_chunk_idx]);
     }
+
+    if app.article_overlay.is_some() {
+        draw_article_overlay(f, app, f.area());
+    }
+}
+
+fn draw_article_overlay(f: &mut Frame, app: &mut App, area: Rect) {
+    let (article_id, mut selected_link, requested_scroll) = {
+        let Some(state) = app.article_overlay.as_ref() else {
+            return;
+        };
+        (state.article_id.clone(), state.selected_link, state.scroll)
+    };
+    let article =
+        article::find_article_by_id(&article_id).unwrap_or_else(article::fallback_article);
+    let popup = centered_rect(85, 80, area);
+
+    let kind_label = match (article.kind, app.locale) {
+        (article::ArticleKind::Metric, crate::i18n::Locale::Ja) => "metric",
+        (article::ArticleKind::Group, crate::i18n::Locale::Ja) => "group",
+        (article::ArticleKind::Concept, crate::i18n::Locale::Ja) => "concept",
+        (article::ArticleKind::Metric, crate::i18n::Locale::En) => "metric",
+        (article::ArticleKind::Group, crate::i18n::Locale::En) => "group",
+        (article::ArticleKind::Concept, crate::i18n::Locale::En) => "concept",
+    };
+
+    if article.links.is_empty() {
+        selected_link = 0;
+    } else if selected_link >= article.links.len() {
+        selected_link = article.links.len() - 1;
+    }
+    if let Some(state) = app.article_overlay.as_mut() {
+        state.selected_link = selected_link;
+    }
+
+    let has_links = !article.links.is_empty() && popup.width > 54;
+    let columns = if has_links {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(32)])
+            .split(popup)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20)])
+            .split(popup)
+    };
+    let content_area = columns[0];
+    let links_area = if has_links { Some(columns[1]) } else { None };
+
+    let mut body_lines: Vec<Line> = Vec::new();
+    body_lines.push(Line::from(Span::styled(
+        article.title(app.locale),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )));
+    body_lines.push(Line::from(Span::styled(
+        format!("[{}] {}", kind_label, article.id),
+        Style::default().fg(Color::DarkGray),
+    )));
+    body_lines.push(Line::from(""));
+
+    for line in article.body(app.locale).lines() {
+        body_lines.push(Line::from(Span::raw(line.to_string())));
+    }
+    if !has_links {
+        body_lines.push(Line::from(""));
+        body_lines.push(Line::from(Span::styled(
+            if app.locale == crate::i18n::Locale::Ja {
+                "j/k: スクロール  PgUp/PgDn: ページ  Tab/Shift+Tab: 関連項目  Enter: 移動  1-9/0: 直接ジャンプ  A/Esc/q: 閉じる"
+            } else {
+                "j/k: scroll  PgUp/PgDn: page  Tab/Shift+Tab: related  Enter: jump  1-9/0: direct jump  A/Esc/q: close"
+            },
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let total_lines = body_lines.len();
+    let visible_height = content_area.height.saturating_sub(2) as usize;
+    app.article_content_lines = total_lines;
+    app.article_visible_height = visible_height;
+
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let scroll = requested_scroll.min(max_scroll);
+    if let Some(state) = app.article_overlay.as_mut() {
+        state.scroll = scroll;
+    }
+
+    let title = if total_lines > visible_height {
+        format!(" Article [{} / {}] ", scroll + 1, total_lines)
+    } else {
+        " Article ".to_string()
+    };
+
+    let paragraph = Paragraph::new(body_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .scroll((scroll as u16, 0));
+
+    f.render_widget(Clear, popup);
+    f.render_widget(paragraph, content_area);
+
+    if let Some(right) = links_area {
+        let mut link_lines: Vec<Line> = Vec::new();
+        link_lines.push(Line::from(Span::styled(
+            "SEE ALSO",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        link_lines.push(Line::from(""));
+        if article.links.is_empty() {
+            link_lines.push(Line::from(Span::styled(
+                if app.locale == crate::i18n::Locale::Ja {
+                    "(none)"
+                } else {
+                    "(none)"
+                },
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for (idx, link) in article.links.iter().enumerate() {
+                let is_selected = idx == selected_link;
+                let marker = if is_selected { ">" } else { " " };
+                let num_hint = if idx < 9 {
+                    format!("[{}]", idx + 1)
+                } else if idx == 9 {
+                    "[0]".to_string()
+                } else {
+                    "   ".to_string()
+                };
+                let label = link.label(app.locale);
+                let style = if is_selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
+                link_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} {} ", marker, num_hint),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(label.to_string(), style),
+                ]));
+            }
+        }
+        link_lines.push(Line::from(""));
+        let help = if app.locale == crate::i18n::Locale::Ja {
+            "Tab/Shift+Tab: 選択\nEnter: 移動\n1-9/0: 直接ジャンプ\nA/Esc/q: 閉じる"
+        } else {
+            "Tab/Shift+Tab: select\nEnter: jump\n1-9/0: direct jump\nA/Esc/q: close"
+        };
+        for h in help.lines() {
+            link_lines.push(Line::from(Span::styled(
+                h,
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        let links_paragraph = Paragraph::new(link_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Links ")
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(links_paragraph, right);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
 }
 
 fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
@@ -149,7 +363,7 @@ fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             ConnectionStatus::Local => "",
             ConnectionStatus::Connected { .. } => "\u{25CF}", // filled circle
             ConnectionStatus::Disconnected { .. } => "\u{25CB}", // empty circle
-            ConnectionStatus::Connecting => "\u{25D4}", // half circle
+            ConnectionStatus::Connecting => "\u{25D4}",       // half circle
         };
         let label_text = if conn_indicator.is_empty() {
             format!(" [{}:{}] ", fkey, host.label)
@@ -164,7 +378,10 @@ fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             };
             spans.push(Span::styled(
                 label_text,
-                Style::default().fg(Color::Black).bg(bg).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
             ));
         } else {
             let fg = match &host.connection_status {
@@ -205,7 +422,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             // Check if this source has active alerts
             let alert_severity = alert::source_max_severity(&app.active_alerts, key);
             let style = if i == selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if alert_severity == Some("critical") {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else if alert_severity == Some("warning") {
@@ -225,8 +444,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let title = format!(" /proc ({}) ", app.source_keys.len());
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(list, area);
 }
 
@@ -234,8 +452,8 @@ fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, ar
     let title = format!(" {} — {} ", data.source_name, data.source_path);
 
     if data.fields.is_empty() {
-        let p = Paragraph::new("No data")
-            .block(Block::default().borders(Borders::ALL).title(title));
+        let p =
+            Paragraph::new("No data").block(Block::default().borders(Borders::ALL).title(title));
         f.render_widget(p, area);
         return;
     }
@@ -258,7 +476,9 @@ fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, ar
         .map(|(i, field)| {
             let is_selected = i == data.selected_field;
             let style = if is_selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -297,11 +517,13 @@ fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, ar
 
             Row::new(vec![
                 Cell::from(format!("{}{}", alert_prefix, name_display)).style(style),
-                Cell::from(field.value.clone()).style(Style::default().fg(value_color).add_modifier(value_modifier)),
-                Cell::from(field.unit.clone())
-                    .style(Style::default().fg(Color::DarkGray)),
-                Cell::from(field.description.clone())
-                    .style(Style::default().fg(Color::DarkGray)),
+                Cell::from(field.value.clone()).style(
+                    Style::default()
+                        .fg(value_color)
+                        .add_modifier(value_modifier),
+                ),
+                Cell::from(field.unit.clone()).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(field.description.clone()).style(Style::default().fg(Color::DarkGray)),
             ])
         })
         .collect();
@@ -328,8 +550,12 @@ fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, ar
             i18n::t(locale, T::UNIT),
             i18n::t(locale, T::DESCRIPTION),
         ])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .bottom_margin(1),
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .bottom_margin(1),
     );
 
     f.render_widget(table, area);
@@ -338,7 +564,11 @@ fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, ar
 fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
     if app.diffs.is_empty() {
         let p = Paragraph::new(i18n::t(app.locale, T::NO_CHANGES))
-            .block(Block::default().borders(Borders::ALL).title(format!(" {} ", i18n::t(app.locale, T::DIFF))))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" {} ", i18n::t(app.locale, T::DIFF))),
+            )
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(p, area);
         return;
@@ -360,7 +590,11 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
 
     let offset = app.diff_offset();
     let title = if offset > 1 {
-        format!(" Diff (T-{}, {} changes) [/] navigate ", offset, app.diffs.len())
+        format!(
+            " Diff (T-{}, {} changes) [/] navigate ",
+            offset,
+            app.diffs.len()
+        )
     } else {
         format!(" Diff ({} changes) [/] navigate ", app.diffs.len())
     };
@@ -383,21 +617,31 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
             "",
             i18n::t(app.locale, T::NEW),
         ])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .bottom_margin(1),
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .bottom_margin(1),
     );
 
     f.render_widget(table, area);
 }
 
 fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
-    let Some(fields) = app.current_entry_fields() else { return };
+    let Some(fields) = app.current_entry_fields() else {
+        return;
+    };
 
     // Find the table field (prefer the one at selected_field, else first table)
     let table_field = fields
         .get(app.selected_field)
         .filter(|f| matches!(f.value, FieldValue::Table(_)))
-        .or_else(|| fields.iter().find(|f| matches!(f.value, FieldValue::Table(_))));
+        .or_else(|| {
+            fields
+                .iter()
+                .find(|f| matches!(f.value, FieldValue::Table(_)))
+        });
 
     let Some(field) = table_field else {
         let p = Paragraph::new(" No table data in this source")
@@ -411,7 +655,14 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
             "mounts" => vec!["Device", "Mountpoint", "FSType", "Options"],
             "partitions" => vec!["Name", "Size", "Major", "Minor"],
             "net/dev" => vec!["Interface", "RX Bytes", "RX Pkts", "TX Bytes", "TX Pkts"],
-            "diskstats" => vec!["Device", "Reads", "Read Bytes", "Writes", "Written", "InFlight"],
+            "diskstats" => vec![
+                "Device",
+                "Reads",
+                "Read Bytes",
+                "Writes",
+                "Written",
+                "InFlight",
+            ],
             "processes" => vec!["PID", "Name", "State", "RSS", "Threads", "UID"],
             "swaps" => vec!["Filename", "Type", "Size", "Used", "Priority"],
             "modules" => vec!["Name", "Size", "Used By", "State"],
@@ -427,15 +678,25 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
             "cgroups" => vec!["Name", "Hierarchy", "NumCGroups", "Enabled"],
             _ => {
                 let ncols = data.first().map(|r| r.len()).unwrap_or(4);
-                (0..ncols).map(|i| match i {
-                    0 => "Col1", 1 => "Col2", 2 => "Col3", 3 => "Col4",
-                    4 => "Col5", 5 => "Col6", 6 => "Col7", _ => "Col",
-                }).collect()
+                (0..ncols)
+                    .map(|i| match i {
+                        0 => "Col1",
+                        1 => "Col2",
+                        2 => "Col3",
+                        3 => "Col4",
+                        4 => "Col5",
+                        5 => "Col6",
+                        6 => "Col7",
+                        _ => "Col",
+                    })
+                    .collect()
             }
         };
 
         let visible_rows = (area.height as usize).saturating_sub(5);
-        let start = app.table_scroll.min(data.len().saturating_sub(visible_rows));
+        let start = app
+            .table_scroll
+            .min(data.len().saturating_sub(visible_rows));
 
         let rows: Vec<Row> = data
             .iter()
@@ -466,7 +727,11 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
             .block(Block::default().borders(Borders::ALL).title(title))
             .header(
                 Row::new(header_titles)
-                    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    .style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .bottom_margin(1),
             );
 
@@ -495,23 +760,22 @@ fn draw_tutorial(f: &mut Frame, data: &super::view_data::TutorialData, area: Rec
 
     // Body text
     for line in data.body.lines() {
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::raw(line),
-        ]));
+        lines.push(Line::from(vec![Span::raw("  "), Span::raw(line)]));
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("  {}", data.nav_hint),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        format!("  {}", data.nav_hint),
+        Style::default().fg(Color::DarkGray),
+    )]));
 
     let p = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(title)
-            .border_style(Style::default().fg(Color::Cyan)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
         .alignment(ratatui::layout::Alignment::Left);
     f.render_widget(p, area);
 }
@@ -563,8 +827,12 @@ fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale,
     keys_text.push(Line::from(""));
 
     let p = Paragraph::new(keys_text)
-        .block(Block::default().borders(Borders::ALL).title(title)
-            .border_style(Style::default().fg(Color::Cyan)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
         .alignment(ratatui::layout::Alignment::Left);
     f.render_widget(p, area);
 }
@@ -595,17 +863,22 @@ fn textwrap_simple(text: &str, max_width: usize) -> Vec<String> {
 
 fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
     // Detect locale from network headers (first header is "IF" for Japanese)
-    let is_ja = data.network.headers.first().map(|h| h == "IF").unwrap_or(false);
+    let is_ja = data
+        .network
+        .headers
+        .first()
+        .map(|h| h == "IF")
+        .unwrap_or(false);
 
     // Split into sections
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // loadavg + uptime
-            Constraint::Length(5),  // meminfo (bar graphs)
-            Constraint::Length(5),  // CPU stat (bar graphs)
-            Constraint::Length(9),  // net/dev
-            Constraint::Length(3),  // disk + temp + fd
+            Constraint::Length(3), // loadavg + uptime
+            Constraint::Length(5), // meminfo (bar graphs)
+            Constraint::Length(5), // CPU stat (bar graphs)
+            Constraint::Length(9), // net/dev
+            Constraint::Length(3), // disk + temp + fd
             Constraint::Min(4),    // sparkline graphs
         ])
         .split(area);
@@ -614,7 +887,12 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
     let sec0_style = section_style(data.selected_section == 0);
     let mut load_spans = vec![
         Span::styled(" Load: ", Style::default().fg(Color::Yellow)),
-        Span::styled(&data.load.load1, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &data.load.load1,
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" / "),
         Span::styled(&data.load.load5, Style::default().fg(Color::Yellow)),
         Span::raw(" / "),
@@ -652,14 +930,34 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         Line::from(vec![
             Span::styled(" RAM  ", Style::default().fg(Color::Yellow)),
             Span::styled(&data.mem_bar, bar_color(data.mem_used_pct)),
-            Span::styled(format!(" {}%", data.mem_used_pct), bar_color(data.mem_used_pct)),
-            Span::styled(format!("  {} / {}", format_bytes_short(data.mem_used_bytes), format_bytes_short(data.mem_total_bytes)), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(" {}%", data.mem_used_pct),
+                bar_color(data.mem_used_pct),
+            ),
+            Span::styled(
+                format!(
+                    "  {} / {}",
+                    format_bytes_short(data.mem_used_bytes),
+                    format_bytes_short(data.mem_total_bytes)
+                ),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" Swap ", Style::default().fg(Color::Yellow)),
             Span::styled(&data.swap_bar, bar_color(data.swap_used_pct)),
-            Span::styled(format!(" {}%", data.swap_used_pct), bar_color(data.swap_used_pct)),
-            Span::styled(format!("  {} / {}", format_bytes_short(data.swap_used_bytes), format_bytes_short(data.swap_total_bytes)), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(" {}%", data.swap_used_pct),
+                bar_color(data.swap_used_pct),
+            ),
+            Span::styled(
+                format!(
+                    "  {} / {}",
+                    format_bytes_short(data.swap_used_bytes),
+                    format_bytes_short(data.swap_total_bytes)
+                ),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" Cache: ", Style::default().fg(Color::DarkGray)),
@@ -668,10 +966,12 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
             Span::raw(&data.buffers),
         ]),
     ];
-    let mem_p = Paragraph::new(mem_lines)
-        .block(Block::default().borders(Borders::ALL)
+    let mem_p = Paragraph::new(mem_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
             .title(if is_ja { " メモリ " } else { " Memory " })
-            .border_style(sec1_style));
+            .border_style(sec1_style),
+    );
     f.render_widget(mem_p, sections[1]);
 
     // Section 2: CPU stat with usage bars
@@ -680,15 +980,31 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         Line::from(vec![
             Span::styled(" CPU  ", Style::default().fg(Color::Yellow)),
             Span::styled(&data.cpu_bar, bar_color(data.cpu_used_pct)),
-            Span::styled(format!(" {}%", data.cpu_used_pct), bar_color(data.cpu_used_pct)),
+            Span::styled(
+                format!(" {}%", data.cpu_used_pct),
+                bar_color(data.cpu_used_pct),
+            ),
         ]),
         Line::from(vec![
             Span::styled("  usr:", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}%", data.cpu_user_pct), Style::default().fg(Color::Blue)),
+            Span::styled(
+                format!("{}%", data.cpu_user_pct),
+                Style::default().fg(Color::Blue),
+            ),
             Span::styled("  sys:", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}%", data.cpu_sys_pct), Style::default().fg(Color::Magenta)),
+            Span::styled(
+                format!("{}%", data.cpu_sys_pct),
+                Style::default().fg(Color::Magenta),
+            ),
             Span::styled("  iow:", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}%", data.cpu_io_pct), Style::default().fg(if data.cpu_io_pct > 10 { Color::Red } else { Color::DarkGray })),
+            Span::styled(
+                format!("{}%", data.cpu_io_pct),
+                Style::default().fg(if data.cpu_io_pct > 10 {
+                    Color::Red
+                } else {
+                    Color::DarkGray
+                }),
+            ),
         ]),
         Line::from(vec![
             Span::styled("  ctx:", Style::default().fg(Color::DarkGray)),
@@ -697,30 +1013,56 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
             Span::raw(&data.procs_running),
         ]),
     ];
-    let cpu_p = Paragraph::new(cpu_lines)
-        .block(Block::default().borders(Borders::ALL)
+    let cpu_p = Paragraph::new(cpu_lines).block(
+        Block::default()
+            .borders(Borders::ALL)
             .title(" CPU ")
-            .border_style(sec2_style));
+            .border_style(sec2_style),
+    );
     f.render_widget(cpu_p, sections[2]);
 
     // Section 3: Network (net/dev table)
     let sec3_style = section_style(data.selected_section == 3);
-    let net_rows: Vec<Row> = data.network.rows.iter().map(|row| {
-        let cells: Vec<Cell> = row.iter().map(|c| Cell::from(c.as_str())).collect();
-        Row::new(cells)
-    }).collect();
+    let net_rows: Vec<Row> = data
+        .network
+        .rows
+        .iter()
+        .map(|row| {
+            let cells: Vec<Cell> = row.iter().map(|c| Cell::from(c.as_str())).collect();
+            Row::new(cells)
+        })
+        .collect();
 
     let net_headers: Vec<&str> = data.network.headers.iter().map(|s| s.as_str()).collect();
-    let net_table = Table::new(net_rows, vec![
-        Constraint::Length(12), Constraint::Length(12), Constraint::Length(12),
-        Constraint::Length(12), Constraint::Min(12),
-    ])
-    .block(Block::default().borders(Borders::ALL)
-        .title(if is_ja { " ネットワーク " } else { " Network " })
-        .border_style(sec3_style))
-    .header(Row::new(net_headers)
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-        .bottom_margin(1));
+    let net_table = Table::new(
+        net_rows,
+        vec![
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Min(12),
+        ],
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(if is_ja {
+                " ネットワーク "
+            } else {
+                " Network "
+            })
+            .border_style(sec3_style),
+    )
+    .header(
+        Row::new(net_headers)
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .bottom_margin(1),
+    );
     f.render_widget(net_table, sections[3]);
 
     // Section 4: Disk + Temperature + FD (summary line)
@@ -733,25 +1075,47 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         Span::styled(" Disk: ", Style::default().fg(Color::Yellow)),
         Span::styled(
             format!("{}%", disk_pct),
-            Style::default().fg(if disk_pct.parse::<f64>().unwrap_or(0.0) > 80.0 { Color::Red } else { Color::Green }),
+            Style::default().fg(if disk_pct.parse::<f64>().unwrap_or(0.0) > 80.0 {
+                Color::Red
+            } else {
+                Color::Green
+            }),
         ),
         Span::raw("    "),
         Span::styled(" Temp: ", Style::default().fg(Color::Yellow)),
         Span::styled(
-            if *temp == "-" { "N/A".to_string() } else { format!("{}C", temp) },
-            Style::default().fg(if temp.parse::<f64>().unwrap_or(0.0) > 75.0 { Color::Red } else { Color::Cyan }),
+            if *temp == "-" {
+                "N/A".to_string()
+            } else {
+                format!("{}C", temp)
+            },
+            Style::default().fg(if temp.parse::<f64>().unwrap_or(0.0) > 75.0 {
+                Color::Red
+            } else {
+                Color::Cyan
+            }),
         ),
         Span::raw("    "),
         Span::styled(" FD: ", Style::default().fg(Color::Yellow)),
         Span::styled(
             format!("{}%", fd_pct),
-            Style::default().fg(if fd_pct.parse::<f64>().unwrap_or(0.0) > 80.0 { Color::Red } else { Color::Green }),
+            Style::default().fg(if fd_pct.parse::<f64>().unwrap_or(0.0) > 80.0 {
+                Color::Red
+            } else {
+                Color::Green
+            }),
         ),
     ]);
-    let p = Paragraph::new(sys_line)
-        .block(Block::default().borders(Borders::ALL)
-            .title(if is_ja { " ディスク / 温度 / FD " } else { " Disk / Temp / FD " })
-            .border_style(sec4_style));
+    let p = Paragraph::new(sys_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(if is_ja {
+                " ディスク / 温度 / FD "
+            } else {
+                " Disk / Temp / FD "
+            })
+            .border_style(sec4_style),
+    );
     f.render_widget(p, sections[4]);
 
     // Section 5: Sparkline graphs (load + memory history)
@@ -759,10 +1123,7 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         let graph_area = sections[5];
         let graph_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ])
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(graph_area);
 
         // Load history sparkline
@@ -772,8 +1133,12 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
             format!(" Load ({} pts) ", data.load_history.len())
         };
         let load_sparkline = ratatui::widgets::Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title(load_title)
-                .border_style(Style::default().fg(Color::DarkGray)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(load_title)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            )
             .data(&data.load_history)
             .style(Style::default().fg(Color::Yellow));
         f.render_widget(load_sparkline, graph_chunks[0]);
@@ -785,8 +1150,12 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
             format!(" Memory % ({} pts) ", data.mem_history.len())
         };
         let mem_sparkline = ratatui::widgets::Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title(mem_title)
-                .border_style(Style::default().fg(Color::DarkGray)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(mem_title)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            )
             .data(&data.mem_history)
             .style(Style::default().fg(Color::Green));
         f.render_widget(mem_sparkline, graph_chunks[1]);
@@ -795,7 +1164,8 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
 
 fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
     let source_key = app.current_source_name();
-    let field_name = app.current_entry_fields()
+    let field_name = app
+        .current_entry_fields()
         .and_then(|fields| fields.get(app.selected_field))
         .map(|f| f.name.clone())
         .unwrap_or_default();
@@ -833,8 +1203,7 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
     }
 
     if values.is_empty() {
-        let p = Paragraph::new(" Collecting data...")
-            .block(Block::default().borders(Borders::ALL));
+        let p = Paragraph::new(" Collecting data...").block(Block::default().borders(Borders::ALL));
         f.render_widget(p, area);
         return;
     }
@@ -847,10 +1216,14 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
     let sparkline_data: Vec<u64> = if range < f64::EPSILON {
         vec![50; values.len()]
     } else {
-        values.iter().map(|v| ((v - min_v) / range * 100.0) as u64).collect()
+        values
+            .iter()
+            .map(|v| ((v - min_v) / range * 100.0) as u64)
+            .collect()
     };
 
-    let title = format!(" {} ▸ min:{} max:{} cur:{} ({}) ",
+    let title = format!(
+        " {} ▸ min:{} max:{} cur:{} ({}) ",
         field_name,
         format_bytes_short(min_v as u64),
         format_bytes_short(max_v as u64),
@@ -859,25 +1232,37 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
     );
 
     let sparkline = ratatui::widgets::Sparkline::default()
-        .block(Block::default().borders(Borders::ALL).title(title)
-            .border_style(Style::default().fg(Color::DarkGray)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
         .data(&sparkline_data)
         .style(Style::default().fg(Color::Cyan));
     f.render_widget(sparkline, area);
 }
 
 fn bar_color(pct: u64) -> Style {
-    if pct > 90 { Style::default().fg(Color::Red).add_modifier(Modifier::BOLD) }
-    else if pct > 70 { Style::default().fg(Color::Yellow) }
-    else { Style::default().fg(Color::Green) }
+    if pct > 90 {
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    } else if pct > 70 {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Green)
+    }
 }
 
 fn format_bytes_short(bytes: u64) -> String {
     const GIB: u64 = 1024 * 1024 * 1024;
     const MIB: u64 = 1024 * 1024;
-    if bytes >= GIB { format!("{:.1}G", bytes as f64 / GIB as f64) }
-    else if bytes >= MIB { format!("{:.0}M", bytes as f64 / MIB as f64) }
-    else { format!("{}K", bytes / 1024) }
+    if bytes >= GIB {
+        format!("{:.1}G", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.0}M", bytes as f64 / MIB as f64)
+    } else {
+        format!("{}K", bytes / 1024)
+    }
 }
 
 fn section_style(selected: bool) -> Style {
@@ -968,7 +1353,11 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect
     .block(Block::default().borders(Borders::ALL).title(title.clone()))
     .header(
         Row::new(header_texts)
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
             .bottom_margin(1),
     );
 
@@ -1000,14 +1389,16 @@ fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
 
     let l = app.locale;
     let categories = Category::all();
-    let selected = app.selected_category.min(categories.len().saturating_sub(1));
+    let selected = app
+        .selected_category
+        .min(categories.len().saturating_sub(1));
 
     // Split: left panel (category list) and right panel (content)
     let panels = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(22),  // ~20% for category list
-            Constraint::Min(40),     // rest for content
+            Constraint::Length(22), // ~20% for category list
+            Constraint::Min(40),    // rest for content
         ])
         .split(area);
 
@@ -1018,13 +1409,18 @@ fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|(i, cat)| {
             let marker = if i == selected { ">" } else { " " };
             let style = if i == selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", marker), Style::default().fg(Color::Cyan)),
-                Span::styled(format!("[{}] ", cat.icon()), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!("[{}] ", cat.icon()),
+                    Style::default().fg(Color::Yellow),
+                ),
                 Span::styled(cat.name(l), style),
             ]))
         })
@@ -1035,9 +1431,12 @@ fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         " Categories "
     };
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(list_title)
-            .border_style(Style::default().fg(Color::Cyan)));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(list_title)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
     f.render_widget(list, panels[0]);
 
     // Right panel: content for selected category
@@ -1048,19 +1447,30 @@ fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Section helper
     let section_title = |title_en: &str, title_ja: &str| -> Line {
-        let t = if l == crate::i18n::Locale::Ja { title_ja } else { title_en };
+        let t = if l == crate::i18n::Locale::Ja {
+            title_ja
+        } else {
+            title_en
+        };
         Line::from(Span::styled(
             format!("  === {} ===", t),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ))
     };
 
     // Related sources
     let sources = cat.related_sources();
-    let sources_label = if l == crate::i18n::Locale::Ja { "関連ソース: " } else { "Related sources: " };
-    let mut source_spans = vec![
-        Span::styled(format!("  {}", sources_label), Style::default().fg(Color::DarkGray)),
-    ];
+    let sources_label = if l == crate::i18n::Locale::Ja {
+        "関連ソース: "
+    } else {
+        "Related sources: "
+    };
+    let mut source_spans = vec![Span::styled(
+        format!("  {}", sources_label),
+        Style::default().fg(Color::DarkGray),
+    )];
     for (i, s) in sources.iter().enumerate() {
         if i > 0 {
             source_spans.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
@@ -1141,13 +1551,21 @@ fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
 
     let title = format!(
         " {} — {} {}",
-        if l == crate::i18n::Locale::Ja { "カテゴリガイド" } else { "Category Guide" },
+        if l == crate::i18n::Locale::Ja {
+            "カテゴリガイド"
+        } else {
+            "Category Guide"
+        },
         cat.name(l),
         scroll_indicator,
     );
     let p = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(title)
-            .border_style(Style::default().fg(Color::Cyan)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
         .wrap(ratatui::widgets::Wrap { trim: false })
         .scroll((scroll as u16, 0));
     f.render_widget(p, panels[1]);
@@ -1158,24 +1576,76 @@ fn draw_category_guide(f: &mut Frame, app: &mut App, area: Rect) {
 fn style_education_line(text: &str) -> Line<'static> {
     // Source names to highlight
     const SOURCES: &[&str] = &[
-        "meminfo", "vmstat", "swaps", "buddyinfo", "pressure", "zoneinfo",
-        "slabinfo", "pagetypeinfo", "stat", "loadavg", "cpuinfo", "schedstat",
-        "softirqs", "interrupts", "net/dev", "net/tcp", "net/udp", "net/unix",
-        "net/arp", "net/route", "net/sockstat", "net/snmp", "net/netstat",
-        "net/wireless", "diskstats", "df", "mounts", "partitions", "locks",
-        "processes", "file-nr",
+        "meminfo",
+        "vmstat",
+        "swaps",
+        "buddyinfo",
+        "pressure",
+        "zoneinfo",
+        "slabinfo",
+        "pagetypeinfo",
+        "stat",
+        "loadavg",
+        "cpuinfo",
+        "schedstat",
+        "softirqs",
+        "interrupts",
+        "net/dev",
+        "net/tcp",
+        "net/udp",
+        "net/unix",
+        "net/arp",
+        "net/route",
+        "net/sockstat",
+        "net/snmp",
+        "net/netstat",
+        "net/wireless",
+        "diskstats",
+        "df",
+        "mounts",
+        "partitions",
+        "locks",
+        "processes",
+        "file-nr",
     ];
     // Field names to highlight
     const FIELDS: &[&str] = &[
-        "MemTotal", "MemFree", "MemAvailable", "Cached", "Buffers", "SwapUsed",
-        "SwapFree", "SwapTotal", "SReclaimable", "SUnreclaim",
-        "pgmajfault", "si", "so",
-        "load1", "load5", "load15", "cpu_user", "cpu_system", "cpu_idle",
-        "cpu_iowait", "cpu_steal", "context_switches",
-        "memory_some_avg10", "cpu_some_avg10",
-        "rx_errors", "rx_drop", "tx_errors", "tx_drop",
-        "TCPRetransSegs", "InReceives", "OutRequests", "InErrors",
-        "TIME_WAIT", "CLOSE_WAIT", "ESTABLISHED", "SYN_RECV",
+        "MemTotal",
+        "MemFree",
+        "MemAvailable",
+        "Cached",
+        "Buffers",
+        "SwapUsed",
+        "SwapFree",
+        "SwapTotal",
+        "SReclaimable",
+        "SUnreclaim",
+        "pgmajfault",
+        "si",
+        "so",
+        "load1",
+        "load5",
+        "load15",
+        "cpu_user",
+        "cpu_system",
+        "cpu_idle",
+        "cpu_iowait",
+        "cpu_steal",
+        "context_switches",
+        "memory_some_avg10",
+        "cpu_some_avg10",
+        "rx_errors",
+        "rx_drop",
+        "tx_errors",
+        "tx_drop",
+        "TCPRetransSegs",
+        "InReceives",
+        "OutRequests",
+        "InErrors",
+        "TIME_WAIT",
+        "CLOSE_WAIT",
+        "ESTABLISHED",
+        "SYN_RECV",
         "RSS",
     ];
 
@@ -1233,7 +1703,10 @@ fn style_education_line(text: &str) -> Line<'static> {
         }
 
         if best_len == 0 {
-            spans.push(Span::styled(remaining.clone(), Style::default().fg(Color::White)));
+            spans.push(Span::styled(
+                remaining.clone(),
+                Style::default().fg(Color::White),
+            ));
             break;
         }
 
@@ -1244,7 +1717,11 @@ fn style_education_line(text: &str) -> Line<'static> {
             ));
         }
 
-        let color = if best_is_source { Color::Cyan } else { Color::Yellow };
+        let color = if best_is_source {
+            Color::Cyan
+        } else {
+            Color::Yellow
+        };
         spans.push(Span::styled(
             remaining[best_pos..best_pos + best_len].to_string(),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -1266,8 +1743,10 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
     let locale = app.locale;
 
     let get_bytes = |src: &str, fld: &str| -> Option<u64> {
-        snap.entries.get(src)?
-            .fields.iter()
+        snap.entries
+            .get(src)?
+            .fields
+            .iter()
             .find(|f| f.name == fld)
             .and_then(|f| match f.value {
                 FieldValue::Bytes(v) => Some(v),
@@ -1276,8 +1755,10 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
     };
 
     let get_float = |src: &str, fld: &str| -> Option<f64> {
-        snap.entries.get(src)?
-            .fields.iter()
+        snap.entries
+            .get(src)?
+            .fields
+            .iter()
             .find(|f| f.name == fld)
             .and_then(|f| match f.value {
                 FieldValue::Float(v) => Some(v),
@@ -1287,8 +1768,10 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
     };
 
     let get_integer = |src: &str, fld: &str| -> Option<i64> {
-        snap.entries.get(src)?
-            .fields.iter()
+        snap.entries
+            .get(src)?
+            .fields
+            .iter()
             .find(|f| f.name == fld)
             .and_then(|f| match f.value {
                 FieldValue::Integer(v) => Some(v),
@@ -1304,9 +1787,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
                 let pct = (avail as f64 / total as f64) * 100.0;
                 if pct < 20.0 {
                     return Some(if locale == crate::i18n::Locale::Ja {
-                        format!("現在メモリが圧迫されています ({:.1}%)。Cached と SwapFree を確認してください", pct)
+                        format!(
+                            "現在メモリが圧迫されています ({:.1}%)。Cached と SwapFree を確認してください",
+                            pct
+                        )
                     } else {
-                        format!("Memory is currently under pressure ({:.1}%). Check Cached and SwapFree", pct)
+                        format!(
+                            "Memory is currently under pressure ({:.1}%). Check Cached and SwapFree",
+                            pct
+                        )
                     });
                 }
             }
@@ -1319,9 +1808,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
                 .unwrap_or(1) as f64;
             if cpu_count > 0.0 && load1 > cpu_count {
                 return Some(if locale == crate::i18n::Locale::Ja {
-                    format!("負荷 {:.1} が CPU 数 ({}) を超過。プロセスがキュー待ち", load1, cpu_count as i64)
+                    format!(
+                        "負荷 {:.1} が CPU 数 ({}) を超過。プロセスがキュー待ち",
+                        load1, cpu_count as i64
+                    )
                 } else {
-                    format!("Load {:.1} exceeds CPU count ({}). Processes are queuing", load1, cpu_count as i64)
+                    format!(
+                        "Load {:.1} exceeds CPU count ({}). Processes are queuing",
+                        load1, cpu_count as i64
+                    )
                 });
             }
             None
@@ -1330,9 +1825,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
             let iowait = get_float("stat", "cpu_iowait")?;
             if iowait > 10.0 {
                 return Some(if locale == crate::i18n::Locale::Ja {
-                    format!("I/O 待ち {:.1}% — ディスクボトルネックの可能性。diskstats と pressure を確認", iowait)
+                    format!(
+                        "I/O 待ち {:.1}% — ディスクボトルネックの可能性。diskstats と pressure を確認",
+                        iowait
+                    )
                 } else {
-                    format!("I/O wait {:.1}% — possible disk bottleneck. Check diskstats and pressure", iowait)
+                    format!(
+                        "I/O wait {:.1}% — possible disk bottleneck. Check diskstats and pressure",
+                        iowait
+                    )
                 });
             }
             None
@@ -1344,9 +1845,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
                 let pct_free = (free as f64 / total as f64) * 100.0;
                 if pct_free < 50.0 {
                     return Some(if locale == crate::i18n::Locale::Ja {
-                        format!("スワップ残量 {:.1}%。メモリ不足によりスワッピングが進行中", pct_free)
+                        format!(
+                            "スワップ残量 {:.1}%。メモリ不足によりスワッピングが進行中",
+                            pct_free
+                        )
                     } else {
-                        format!("Swap {:.1}% remaining. Swapping is active due to memory pressure", pct_free)
+                        format!(
+                            "Swap {:.1}% remaining. Swapping is active due to memory pressure",
+                            pct_free
+                        )
                     });
                 }
             }
@@ -1367,9 +1874,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
             let usage = get_float("file-nr", "fd_usage_pct")?;
             if usage > 50.0 {
                 return Some(if locale == crate::i18n::Locale::Ja {
-                    format!("FD 使用率 {:.1}%。枯渇するとプロセスがファイルやソケットを開けな���なります", usage)
+                    format!(
+                        "FD 使用率 {:.1}%。枯渇するとプロセスがファイルやソケットを開けな���なります",
+                        usage
+                    )
                 } else {
-                    format!("FD usage {:.1}%. Exhaustion prevents opening files or sockets", usage)
+                    format!(
+                        "FD usage {:.1}%. Exhaustion prevents opening files or sockets",
+                        usage
+                    )
                 });
             }
             None
@@ -1378,9 +1891,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
             let temp = get_float("thermal", "max_temp")?;
             if temp > 70.0 {
                 return Some(if locale == crate::i18n::Locale::Ja {
-                    format!("CPU 温度 {:.0}\u{00B0}C。サーマルスロットリングに注意", temp)
+                    format!(
+                        "CPU 温度 {:.0}\u{00B0}C。サーマルスロットリングに注意",
+                        temp
+                    )
                 } else {
-                    format!("CPU temperature {:.0}\u{00B0}C. Watch for thermal throttling", temp)
+                    format!(
+                        "CPU temperature {:.0}\u{00B0}C. Watch for thermal throttling",
+                        temp
+                    )
                 });
             }
             None
@@ -1390,12 +1909,18 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
             let entry = snap.entries.get("net/tcp")?;
             let conn_field = entry.fields.iter().find(|f| f.name == "connections")?;
             if let FieldValue::Table(rows) = &conn_field.value {
-                let close_wait = rows.iter().filter(|r| r.len() >= 4 && r[3] == "CLOSE_WAIT").count();
+                let close_wait = rows
+                    .iter()
+                    .filter(|r| r.len() >= 4 && r[3] == "CLOSE_WAIT")
+                    .count();
                 if close_wait > 10 {
                     return Some(if locale == crate::i18n::Locale::Ja {
                         format!("CLOSE_WAIT {}件 — ソケットリークの可能性", close_wait)
                     } else {
-                        format!("{} CLOSE_WAIT connections — possible socket leak", close_wait)
+                        format!(
+                            "{} CLOSE_WAIT connections — possible socket leak",
+                            close_wait
+                        )
                     });
                 }
             }
@@ -1405,9 +1930,15 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
             let pswpout = get_integer("vmstat", "pswpout")?;
             if pswpout > 0 {
                 return Some(if locale == crate::i18n::Locale::Ja {
-                    format!("スワップアウト活動中 ({} ページ)。メモリ圧力が存在", pswpout)
+                    format!(
+                        "スワップアウト活動中 ({} ページ)。メモリ圧力が存在",
+                        pswpout
+                    )
                 } else {
-                    format!("Active swap-out ({} pages). Memory pressure exists", pswpout)
+                    format!(
+                        "Active swap-out ({} pages). Memory pressure exists",
+                        pswpout
+                    )
                 });
             }
             None
@@ -1418,7 +1949,10 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
                 return Some(if locale == crate::i18n::Locale::Ja {
                     format!("OOM Killer が {}回発動。過去にメモリ枯渇が発生", oom)
                 } else {
-                    format!("OOM Killer invoked {} time(s). Past memory exhaustion occurred", oom)
+                    format!(
+                        "OOM Killer invoked {} time(s). Past memory exhaustion occurred",
+                        oom
+                    )
                 });
             }
             None
@@ -1434,28 +1968,29 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
     let source_desc = i18n::source_description(app.locale, source_name);
 
     // Get field name and i18n description override
-    let field_info = app.current_entry_fields()
+    let field_info = app
+        .current_entry_fields()
         .and_then(|fields| fields.get(app.selected_field))
         .map(|f| (f.name.clone(), f.description.clone()));
 
-    let (field_name, fallback_desc) = field_info
-        .unwrap_or_else(|| ("".to_string(), "".to_string()));
+    let (field_name, fallback_desc) =
+        field_info.unwrap_or_else(|| ("".to_string(), "".to_string()));
 
     // Look up i18n field description (normal, detailed, extra)
     let i18n_desc = i18n::field_description(app.locale, source_name, &field_name);
 
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled(
-                format!(" {} ", source_name),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("— {}", source_desc),
-                Style::default().fg(Color::White),
-            ),
-        ]),
-    ];
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!(" {} ", source_name),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("— {}", source_desc),
+            Style::default().fg(Color::White),
+        ),
+    ])];
 
     if !field_name.is_empty() {
         let (desc_text, is_fallback) = match (app.help_level, i18n_desc) {
@@ -1472,12 +2007,12 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
             )));
         }
 
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {} ", field_name),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("  {} ", field_name),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
 
         // Split multi-line descriptions
         for desc_line in desc_text.split('\n') {
@@ -1486,14 +2021,14 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 Style::default().fg(Color::White)
             };
-            lines.push(Line::from(Span::styled(
-                format!("  {}", desc_line),
-                style,
-            )));
+            lines.push(Line::from(Span::styled(format!("  {}", desc_line), style)));
         }
 
         // Contextual hint based on current value
-        if matches!(app.help_level, HelpLevel::Detailed | HelpLevel::ExtraDetailed) {
+        if matches!(
+            app.help_level,
+            HelpLevel::Detailed | HelpLevel::ExtraDetailed
+        ) {
             let contextual_hint = get_contextual_hint(app, source_name, &field_name);
             if let Some(hint) = contextual_hint {
                 lines.push(Line::from(Span::styled(
@@ -1504,13 +2039,18 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
         }
 
         // SEE ALSO section for Detailed and ExtraDetailed
-        if matches!(app.help_level, HelpLevel::Detailed | HelpLevel::ExtraDetailed) {
+        if matches!(
+            app.help_level,
+            HelpLevel::Detailed | HelpLevel::ExtraDetailed
+        ) {
             let related = i18n::see_also(app.locale, source_name, &field_name);
             if !related.is_empty() {
                 lines.push(Line::from(Span::raw("")));
                 lines.push(Line::from(Span::styled(
                     "  SEE ALSO:",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for (src, fld, reason) in &related {
                     lines.push(Line::from(Span::styled(
@@ -1564,10 +2104,19 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         String::new()
     };
-    let title = format!(" {} [{}]{} (? cycle) ", i18n::t(app.locale, T::HELP), level_label, scroll_indicator);
+    let title = format!(
+        " {} [{}]{} (? cycle) ",
+        i18n::t(app.locale, T::HELP),
+        level_label,
+        scroll_indicator
+    );
     let p = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(title)
-            .border_style(Style::default().fg(Color::DarkGray)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
         .wrap(ratatui::widgets::Wrap { trim: false })
         .scroll((scroll as u16, 0));
     f.render_widget(p, area);
@@ -1578,22 +2127,39 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // If searching, show search input instead of normal status bar
     if app.searching {
-        let label = if l == crate::i18n::Locale::Ja { " 検索: " } else { " Search: " };
+        let label = if l == crate::i18n::Locale::Ja {
+            " 検索: "
+        } else {
+            " Search: "
+        };
         let search_line = Line::from(vec![
-            Span::styled(label, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                label,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 &app.search_query,
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("█", Style::default().fg(Color::Cyan)), // cursor
             Span::styled(
-                if l == crate::i18n::Locale::Ja { "  (Enter で確定, Esc でキャンセル)" } else { "  (Enter to apply, Esc to cancel)" },
+                if l == crate::i18n::Locale::Ja {
+                    "  (Enter で確定, Esc でキャンセル)"
+                } else {
+                    "  (Enter to apply, Esc to cancel)"
+                },
                 Style::default().fg(Color::DarkGray),
             ),
         ]);
-        let p = Paragraph::new(search_line)
-            .block(Block::default().borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)));
+        let p = Paragraph::new(search_line).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow)),
+        );
         f.render_widget(p, area);
         return;
     }
@@ -1603,18 +2169,53 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let snapshot_count = app.snapshots.len();
 
     let view_name = match app.view {
-        View::Dashboard => if l == crate::i18n::Locale::Ja { "ダッシュボード" } else { "DASHBOARD" },
-        View::Welcome => if l == crate::i18n::Locale::Ja { "ようこそ" } else { "WELCOME" },
-        View::Diagnostics => if l == crate::i18n::Locale::Ja { "診断" } else { "DIAGNOSTICS" },
+        View::Dashboard => {
+            if l == crate::i18n::Locale::Ja {
+                "ダッシュボード"
+            } else {
+                "DASHBOARD"
+            }
+        }
+        View::Welcome => {
+            if l == crate::i18n::Locale::Ja {
+                "ようこそ"
+            } else {
+                "WELCOME"
+            }
+        }
+        View::Diagnostics => {
+            if l == crate::i18n::Locale::Ja {
+                "診断"
+            } else {
+                "DIAGNOSTICS"
+            }
+        }
         View::Overview => i18n::t(l, T::VIEW_OVERVIEW),
         View::Detail => i18n::t(l, T::VIEW_DETAIL),
         View::Diff => i18n::t(l, T::VIEW_DIFF),
         View::TableView => i18n::t(l, T::VIEW_TABLE),
         View::Graph => i18n::t(l, T::VIEW_GRAPH),
-        View::CategoryGuide => if l == crate::i18n::Locale::Ja { "カテゴリガイド" } else { "CATEGORY GUIDE" },
-        View::Tutorial => if l == crate::i18n::Locale::Ja { "チュートリアル" } else { "TUTORIAL" },
+        View::CategoryGuide => {
+            if l == crate::i18n::Locale::Ja {
+                "カテゴリガイド"
+            } else {
+                "CATEGORY GUIDE"
+            }
+        }
+        View::Tutorial => {
+            if l == crate::i18n::Locale::Ja {
+                "チュートリアル"
+            } else {
+                "TUTORIAL"
+            }
+        }
     };
 
+    let axis_state = if app.dash_zero_axis {
+        i18n::t(l, T::AXIS_ZERO)
+    } else {
+        i18n::t(l, T::AXIS_AUTO)
+    };
     let status = Line::from(vec![
         Span::styled(" j/k ", Style::default().fg(Color::Yellow)),
         Span::raw(format!("{}  ", i18n::t(l, T::SOURCE))),
@@ -1626,6 +2227,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(format!("{}  ", i18n::t(l, T::DIFF))),
         Span::styled("/ ", Style::default().fg(Color::Yellow)),
         Span::raw(format!("{}  ", i18n::t(l, T::SEARCH))),
+        Span::styled("s ", Style::default().fg(Color::Yellow)),
+        Span::raw(format!("{}  ", i18n::t(l, T::AXIS))),
+        Span::styled("A ", Style::default().fg(Color::Yellow)),
+        Span::raw("ARTICLE  "),
         Span::styled("? ", Style::default().fg(Color::Yellow)),
         Span::raw(format!("{}  ", i18n::t(l, T::HELP))),
         Span::styled("L ", Style::default().fg(Color::Yellow)),
@@ -1639,22 +2244,47 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                         let secs_ago = last_seen.elapsed().as_secs();
                         format!("Connected ({}s ago)", secs_ago)
                     }
-                    super::app::ConnectionStatus::Disconnected { last_seen, since: _ } => {
+                    super::app::ConnectionStatus::Disconnected {
+                        last_seen,
+                        since: _,
+                    } => {
                         let secs_ago = last_seen.elapsed().as_secs();
                         format!("DISCONNECTED (last: {}s ago)", secs_ago)
                     }
                     super::app::ConnectionStatus::Connecting => "Connecting...".to_string(),
                     super::app::ConnectionStatus::Local => "local".to_string(),
                 };
-                format!(" {} | {}{} | {} {} | [{}] {} ", refresh_indicator, elapsed, i18n::t(l, T::AGO), snapshot_count, i18n::t(l, T::SNAPS), host, conn_label)
+                format!(
+                    " {} | {}{} | {} {} | [{}] {} ",
+                    refresh_indicator,
+                    elapsed,
+                    i18n::t(l, T::AGO),
+                    snapshot_count,
+                    i18n::t(l, T::SNAPS),
+                    host,
+                    conn_label
+                )
             } else {
-                format!(" {} | {}{} | {} {} ", refresh_indicator, elapsed, i18n::t(l, T::AGO), snapshot_count, i18n::t(l, T::SNAPS))
+                format!(
+                    " {} | {}{} | {} {} ",
+                    refresh_indicator,
+                    elapsed,
+                    i18n::t(l, T::AGO),
+                    snapshot_count,
+                    i18n::t(l, T::SNAPS)
+                )
             },
             Style::default().fg(Color::DarkGray),
         ),
         Span::styled(
             format!(" [{}] [{}] ", view_name, l.name()),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {}: {} ", i18n::t(l, T::AXIS), axis_state),
+            Style::default().fg(Color::Magenta),
         ),
     ]);
 
@@ -1665,7 +2295,9 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         if warn_count > 0 {
             spans.push(Span::styled(
                 format!(" [!{} WARN]", warn_count),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         if crit_count > 0 {
@@ -1689,7 +2321,9 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         let offset = app.diff_offset();
         spans.push(Span::styled(
             format!(" T-{}", offset),
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
         ));
         Line::from(spans)
     } else {
@@ -1708,7 +2342,6 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         status
     };
 
-    let p = Paragraph::new(status)
-        .block(Block::default().borders(Borders::ALL));
+    let p = Paragraph::new(status).block(Block::default().borders(Borders::ALL));
     f.render_widget(p, area);
 }
