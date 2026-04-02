@@ -1,170 +1,134 @@
 # MemAvailable
 
-## NAME
-`meminfo.MemAvailable` - metric signal from `meminfo` (MemAvailable)
+[日本語版](../ja/meminfo.MemAvailable.md)
 
-## WHY NOW
-Read this when meminfo headroom and reclaimability behavior around `MemAvailable` is noisy and you need a fast, defensible decision.
-If you cannot tell headroom erosion around `MemAvailable` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`MemAvailable` is the kernel's estimate of how much memory is available to start a new application without using swap. Added in kernel 3.14, it answers the question that `MemFree` cannot: "how much memory can I actually use right now?"
 
-## Metric Snapshot
-- ID: `meminfo.MemAvailable`
-- Source: `meminfo`
-- Field: `MemAvailable`
-- Domain: memory capacity and reclaim headroom
-- Signal family: capacity headroom and allocator pressure
+The key insight is that Linux treats file cache as disposable. When a process needs memory, the kernel can reclaim cache pages on the fly — so cache isn't "used" in any meaningful sense. `MemAvailable` = free memory + reclaimable cache + reclaimable slab.
 
-## Operational Meaning (MemInfo Lens)
-This field is strongest for separating meminfo headroom signal around `MemAvailable` from side-effect noise when free/reclaimable trends diverge.
+```
+  Total RAM: 16 GB
+  ┌──────────────────────────────────────────┐
+  │ App memory (AnonPages)    4 GB  ← locked │
+  │ File cache (Cached)       8 GB  ← can reclaim
+  │ Kernel / slab             1 GB  ← partially reclaimable
+  │ MemFree                   3 GB  ← truly idle
+  └──────────────────────────────────────────┘
+                              ↑
+  MemAvailable ≈ 3 + 8 + 0.5 ≈ 11 GB
+```
 
-## Field Episode (MemInfo Lens)
-Headroom looked sufficient in one chart, but correlated fields showed steady erosion toward unstable territory.
+---
 
-For `MemAvailable`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+## Why does it matter?
 
-## Reading Protocol (MemInfo Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `meminfo` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+**MemAvailable is the single most useful memory health indicator** for day-to-day monitoring. When it drops:
 
-## Decision Heuristic (MemInfo Family)
-If mitigation changes user latency but not this field trend, re-check the assumed causal layer.
+- **Below ~20% of MemTotal**: swap pressure begins. The kernel starts moving anonymous pages to swap to make room.
+- **Below ~5%**: the OOM killer becomes likely. It will pick a process and kill it — often one you didn't expect.
+- **At 0**: the kernel is in crisis. New allocations fail; the system becomes unresponsive.
 
-## Failure Patterns To Avoid (MemInfo Family)
-- Root-cause declaration from one meminfo headroom/reclaimability snapshot.
-- Ignoring post-mitigation recovery shape in meminfo timeline.
-- Confusing cross-layer meminfo correlation with causation.
+The drop is often gradual and silent. An application leaking memory 10 MB/hour won't trigger alerts for hours — until it's too late.
 
-## Action Loop
-1. State a falsifiable hypothesis for `MemAvailable`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+---
 
-## Unix Internals Lens
+## How to read it
 
-This field is a manifestation of **memory accounting surfaces (MemAvailable)**.
+```sh
+# Quick check — are you healthy?
+free -h
+# Look at "available" column, not "free"
 
-- Kernel path (MemAvailable): allocator, page cache, slab, reclaim boundaries.
-- Typical trigger (MemAvailable): cache growth/shrink, allocation bursts, background reclaim.
-- Cross-check (MemAvailable): vmstat reclaim counters and pressure metrics.
+# Watch it over time
+watch -n 5 'grep -E "MemAvailable|MemTotal|SwapFree" /proc/meminfo'
 
-## Casebook (MemInfo Family)
+# As a percentage
+awk '/MemAvailable/{a=$2} /MemTotal/{t=$2} END{printf "%.1f%%\n", a/t*100}' /proc/meminfo
+```
 
-### Incident Slice 1 (MemInfo)
-Case C (`MemAvailable`): Reversible mitigation provided faster learning than invasive change.
+| MemAvailable / MemTotal | Status |
+|-------------------------|--------|
+| > 40% | Healthy |
+| 20–40% | Watch for trends |
+| 10–20% | Elevated pressure — investigate |
+| < 10% | Danger — act now |
+| < 5% | OOM imminent |
 
-### Incident Slice 2 (MemInfo)
-Case A (`MemAvailable`): First anomaly came from this field trend, not absolute value.
+**Alert threshold recommendation**: alert at < 15%, page at < 5%.
 
-### Incident Slice 3 (MemInfo)
-Case B (`MemAvailable`): Cross-source correlation reversed the initial diagnosis.
+---
 
-## Failure Branches (MemInfo Family)
-- Branch 1: Symptom improves but meminfo trend does not. -> Revisit meminfo causal layer assumption.
-- Branch 2: meminfo trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve meminfo evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check meminfo headroom and retry feedback loops.
+## A real episode
 
-## Runbook Drill (MemInfo Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+It was 3 AM on a Tuesday. A Node.js app was running a session cache in memory — each user login stored a few KB of JSON. The load had grown slowly over months. Nobody noticed the session expiry was broken: sessions were never evicted.
 
-## MAN Notes (MemInfo Lens)
-- This section mirrors man-page flow for meminfo analysis: definition -> headroom context -> failure branches -> evidence order.
-- Prefer explicit timestamps and meminfo headroom notes; narratives drift without headroom context.
-- If uncertain, follow SEE ALSO links before changing production meminfo-related memory knobs.
+At 2:47 AM, `MemAvailable` hit 4%. The kernel started swapping anonymous pages. Response times spiked from 50ms to 4 seconds. At 3:02 AM, the OOM killer fired and took down the database sidecar — not the Node.js app — because the sidecar had the highest RSS at that moment.
 
-## Deep Appendix: Counterfactuals and Review Prompts (MemInfo Family)
+The on-call engineer woke to "database connection refused" alerts, not "memory low" alerts. They spent 45 minutes debugging the wrong thing.
 
-### Counterfactual Questions (MemInfo)
-- If traffic had stayed constant, would meminfo headroom transitions still move this field the same way?
-- If this field had remained flat, which non-meminfo signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which meminfo-linked user metric would have crossed first?
-- If only one layer could be instrumented, which meminfo-adjacent layer would preserve most explanatory power?
+The lesson: monitor `MemAvailable` as a percentage of `MemTotal`, set an alert threshold before it gets critical, and don't wait for the OOM killer to tell you there's a problem.
 
-### Timeline Template (MemInfo Incident)
-- T-10m: baseline snapshot with meminfo headroom annotation
-- T-5m: first meminfo headroom or reclaimability anomaly candidate
-- T0: user symptom confirmed with meminfo-side context
-- T+3m: first hypothesis written with meminfo headroom assumption
-- T+6m: cross-source validation including scheduler or pressure
-- T+10m: mitigation applied with rollback guard in meminfo path
-- T+15m: trend reaction checked for meminfo headroom stabilization
-- T+30m: recovery confidence decision with meminfo and pressure confirmation
+---
 
-### Evidence Quality Rubric (MemInfo)
-- Strong: ordered, cross-layer, and meminfo headroom-consistent trend evidence
-- Medium: correlated movement without clear meminfo headroom/reclaimability boundary
-- Weak: isolated value with no meminfo headroom/reclaimability context
+## What to do when it's low
 
-### Postmortem Questions (MemInfo)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+**Step 1: Quantify the pressure.**
+```sh
+awk '/MemAvailable/{a=$2} /MemTotal/{t=$2} END{printf "%.1f%%\n", a/t*100}' /proc/meminfo
+```
 
-### Anti-Drift Checklist (MemInfo)
-- Keep one baseline note per environment, workload phase, and meminfo headroom profile.
-- Revalidate meminfo-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with meminfo+pressure context.
-- Link this article to at least two neighboring meminfo or memory-path articles in your runbook.
+**Step 2: Is swap being used?**
+```sh
+grep SwapFree /proc/meminfo
+# Also check actual swap activity:
+vmstat 1 5 | awk '{print $7, $8}'  # si (swap-in) and so (swap-out)
+```
+If `so` is non-zero, your system is actively swapping — that's latency you're paying right now.
 
-## Incident Forensics
+**Step 3: Who is consuming the memory?**
+```sh
+# Top memory consumers by RSS
+ps aux --sort=-%mem | head -20
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first headroom or reclaimability inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one pressure or vmstat signal to test cross-layer consistency.
+# Check if AnonPages is high (real app memory, not cache)
+grep AnonPages /proc/meminfo
+```
 
-### Decision Record
-- Primary claim: meminfo.MemAvailable indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: MemAvailable was treated as evidence in a chain, not a singleton verdict.
+If `AnonPages` is large and growing, an application is leaking or not releasing memory. If `Cached` is large, reclaim may resolve it automatically — but verify with step 2.
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around meminfo inflection windows.
-- Syscall lens: Syscall: identify allocation and memory-touching call bursts aligned with meminfo transitions.
-- Scheduler lens: Scheduler: verify whether headroom-side waiting inflated wake latency during meminfo shifts.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around meminfo shifts.
-- Field anchor: MemAvailable
-- Source anchor: meminfo
+**Step 4: Force cache drop (non-destructive, for testing only).**
+```sh
+sync && echo 3 > /proc/sys/vm/drop_caches
+# This drops page cache + dentries + inodes. MemAvailable will spike briefly.
+# Do NOT do this in production routinely — it hurts performance.
+```
 
-## Source Drillbook (MemInfo Family)
+**Step 5: If a leak is confirmed, restart the leaking service** or add memory to the host. Kernel tuning does not fix a leak.
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+---
 
-### Debrief Questions
-- Which meminfo-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about headroom versus side effect?
-- What meminfo instrumentation change would accelerate this drill next time?
+## Common mistakes
 
-### Anchor (MemInfo)
-Field under practice: MemAvailable
+**Watching `MemFree` instead of `MemAvailable`.** `MemFree` is almost always low on a busy Linux box. `MemAvailable` is what matters.
 
-## Failure Archetype Matrix
-- Archetype A: silent meminfo headroom erosion while utilization appears safe.
-- Archetype B: meminfo reserve/reclaimability oscillation causing short recoveries and relapses.
-- Archetype C: meminfo headroom phase shift with delayed user-impact visibility.
-- Field in focus: MemAvailable
+**Panicking when cache is large.** `Cached` consuming 60% of RAM is healthy — it means your filesystem cache is working hard. Check `MemAvailable`, not `Cached`.
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Setting alerts on absolute values.** A "MemAvailable < 1 GB" alert is useless on a 4 GB host but excessive on a 512 GB host. Always use percentages.
+
+**Ignoring the trend.** A single low reading may be a burst. `MemAvailable` falling steadily over hours is a leak. Use a time-series view.
+
+**Restarting the wrong process.** The OOM killer picks the "highest-cost" victim, not necessarily the cause. Find the actual leaker with `ps` or `/proc/<pid>/status`.
+
+---
+
+## See also
+
+- `meminfo.MemFree` — truly free pages (usually not what you want to monitor)
+- `meminfo.Cached` — file cache that makes up most of MemAvailable
+- `meminfo.AnonPages` — application heap/stack; rising here means real consumption
+- `meminfo.SwapFree` — swap headroom; if this drops alongside MemAvailable, you're in trouble
+- `pressure/memory_some_avg10` — kernel-level memory stall signal

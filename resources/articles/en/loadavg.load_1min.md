@@ -1,152 +1,144 @@
 # load_1min
 
-## NAME
-`loadavg.load_1min` - metric signal from `loadavg` (load_1min)
+[日本語版](../ja/loadavg.load_1min.md)
 
-## WHY NOW
-Read this when noisy telemetry must be turned into a concrete operational decision.
-If cause, symptom, and side effect are mixed, use this article to structure next checks.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`load_1min` is the 1-minute exponential moving average of the number of processes in the kernel's run queue — either actively running on a CPU or blocked waiting for one. It is read from the first field of `/proc/loadavg`.
 
-## Metric Snapshot
-- ID: `loadavg.load_1min`
-- Source: `loadavg`
-- Field: `load_1min`
-- Domain: runnable/blocked pressure
+Think of it as a headcount of everyone trying to use the CPU right now. On a 4-core machine, a load of 4.0 means every core is fully occupied. A load of 8.0 means twice as many processes are competing as there are cores to serve them.
 
-## Why This Metric Is Operationally Valuable
-This metric helps separate normal workload expansion from unstable behavior. It is most reliable when read with neighboring fields and time trend.
+```
+  Load average = running + waiting-for-CPU + waiting-for-I/O (Linux!)
+                 ^^^^^^^^   ^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^
+                 on CPU      in runqueue       in D state (disk/net)
 
-## Episode
-High load was misread as compute shortage; blocked I/O tasks were the real source.
+  4-core machine:
+    load 2.0  →  50% capacity used       (comfortable)
+    load 4.0  →  100% capacity used      (fully loaded)
+    load 8.0  →  200% capacity used      (overloaded — queue building)
+```
 
-In this incident pattern, this metric appears early in the evidence chain, but becomes actionable only after cross-source validation.
+**Linux-specific:** Unlike traditional Unix, Linux counts processes blocked in uninterruptible I/O wait (D state) toward the load average. This is crucial — a load of 40 with idle CPUs usually means disk or NFS is the real culprit, not compute.
 
-## Reading Strategy
-1. Check current value and direction.
-2. Compare short-term trend in Diff/Graph.
-3. Pair one sibling metric in `loadavg` plus one pressure/queue metric from another source.
-4. Map movement to user-impact hypothesis.
+---
 
-## Decision Signals
-- Low risk: load-proportional movement with fast recovery.
-- Warning: trend persists after load normalization.
-- Critical: related metrics co-move and recovery slope degrades.
+## Why does it matter?
 
-## Misread Patterns
-- Absolute-value judgment without workload context.
-- Ignoring recovery slope after mitigation.
-- Mixing symptom metrics and causal metrics.
+Load average is the most visible system health signal. It is what `uptime` shows first, what `top` puts in the header, and what most monitoring alerts fire on.
 
-## Action Loop
-1. State a falsifiable hypothesis.
-2. Apply reversible mitigation.
-3. Verify with 2-3 correlated metrics.
-4. Keep concise evidence notes for postmortem reuse.
+But it lies — or rather, it tells only part of the story. A sustained high load means the system cannot keep up with demand. A sudden spike followed by rapid recovery is usually harmless. The 1-minute value tells you what is happening right now, but without knowing your CPU count and whether the load is CPU-bound or I/O-bound, you cannot act on it.
 
-## Unix Internals Lens
+**Real failure scenario:** A web server shows load=20 on an 8-core box. On-call engineer panics and starts killing processes. The processes were actually blocked on a slow NFS mount — killing them restarts the services and floods the mount harder. Load goes to 60. The real fix was to remount with `soft,timeo=` options.
 
-This field is a manifestation of **Unix kernel execution side effects**.
+---
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+## How to read it
 
-## Systems Narrative (Process)
+```sh
+uptime
+# 10:42:33 up 3 days,  2:17,  2 users,  load average: 3.45, 2.91, 2.58
 
-This signal (loadavg.load_1min) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+cat /proc/loadavg
+# 3.45 2.91 2.58 4/312 18294
+# fields: 1min  5min  15min  running/total  last_pid
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+nproc   # or: grep -c ^processor /proc/cpuinfo
+# 8
+```
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+| load / nproc | Meaning |
+|---|---|
+| < 0.7 | Comfortable — headroom available |
+| 0.7 – 1.0 | Approaching saturation on single-core, fine on multi-core |
+| ~1.0 × nproc | Fully loaded, no headroom |
+| > 1.5 × nproc | Overloaded — requests queuing |
+| > 5 × nproc | Serious problem — check for I/O stall first |
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+**Pair with CPU iowait before concluding:**
+```sh
+# Check if load is CPU-driven or I/O-driven
+vmstat 1 5
+# Look at 'wa' column (I/O wait %) and 'r' column (runqueue length)
+# High wa + high load = I/O problem
+# High r + high load = CPU problem
+```
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+---
 
-### Practical Mentor Notes (Process)
-Treat load_1min as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+## A real episode
 
-## Incident Lab (Process)
+A media transcoding service on a 16-core machine hit load=40 during a batch job window. Alerts fired, Slack lit up, and the on-call team prepared to scale out. Someone ran `vmstat 1` and saw:
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+```
+procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 2 38   ....   ....   ....  .....    0    0  8420   140  ...  ... 3  1 91  5  0
+```
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+The `r` column showed only 2 runnable processes. The `b` column showed 38 blocked. CPUs were 91% idle. The batch job was spawning 40 ffmpeg processes, each waiting for read from a slow spinning disk RAID. Adding a faster NVMe scratch volume dropped load from 40 to 3 in under two minutes.
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+**Lesson:** When load is high but CPUs are idle, stop looking at the CPU and start looking at storage.
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+---
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+## What to do when it's high
 
-## Incident Forensics
+**Step 1: Get your CPU count.**
+```sh
+nproc
+```
+Scale everything against this number. Load of 10 on a 2-core box is a disaster. Load of 10 on a 32-core box is unremarkable.
 
-### Evidence Capture
-- Anchor analysis on time order, not magnitude alone.
-- Prefer reversible action and explicit rollback guardrails while uncertainty remains.
+**Step 2: Is it CPU or I/O?**
+```sh
+vmstat 1 3
+# 'wa' > 20% with high load → I/O bottleneck
+# 'r'  > nproc with high load → CPU bottleneck
+```
 
-### Decision Record
-- Primary claim: loadavg.load_1min indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: load_1min was treated as evidence in a chain, not a singleton verdict.
+**Step 3: Find the blocked processes (I/O path).**
+```sh
+ps aux --sort=-pcpu | head -20
+# Look for processes in D state (uninterruptible sleep)
+ps aux | awk '$8=="D"' | head -20
+```
 
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: load_1min
-- Source anchor: loadavg
+**Step 4: If I/O — check which device.**
+```sh
+iostat -x 1 5
+# Look for %util near 100% and high await values
+```
 
-## Failure Archetype Matrix
-- Archetype A: magnitude-focused reading without sequence context.
-- Archetype B: mitigation overreach under high uncertainty.
-- Archetype C: symptom-mechanism mismatch after partial recovery.
-- Field in focus: load_1min
+**Step 5: If CPU — find what's consuming it.**
+```sh
+top -H   # thread-level view
+perf top  # if available
+```
 
-## Counterfactual Branches
-1. If this signal is secondary, what primary signal should have moved first?
-2. If mitigation is rolled back, which metric should recover first and why?
-3. What source-specific observation would invalidate your current mitigation immediately?
+---
+
+## Common mistakes
+
+**Panicking at a high number without checking nproc.** Load average is meaningless without knowing core count. Always divide by `nproc` before reacting.
+
+**Assuming high load means CPU is the bottleneck.** In Linux, I/O-blocked processes count toward load. Always check `vmstat`'s `wa` and `b` columns first.
+
+**Treating load_1min as a stable signal.** The 1-minute value fluctuates. A single reading of 8.0 might be the tail of a 10-second burst. Look at load_5min and load_15min for trend.
+
+**Killing processes to reduce load.** If processes are blocked on I/O, killing them often causes service restarts that increase load. Fix the I/O source first.
+
+**Setting alerts on absolute load values.** An alert threshold of `load > 10` is meaningless across machines with different core counts. Alert on `load / nproc > 1.5` instead.
+
+---
+
+## See also
+
+- `loadavg.load_5min` — 5-minute average for trend direction
+- `loadavg.load_15min` — 15-minute average for sustained load
+- `loadavg.running_threads` — current runnable count (instantaneous)
+- `stat.cpu_iowait` — confirms whether load is I/O-driven
+- `pressure.cpu_some_avg10` — more precise CPU contention signal (PSI)
+- `pressure.io_some_avg10` — confirms I/O stall contribution to load

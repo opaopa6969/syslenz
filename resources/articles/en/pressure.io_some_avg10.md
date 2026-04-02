@@ -1,170 +1,149 @@
 # io_some_avg10
 
-## NAME
-`pressure.io_some_avg10` - metric signal from `pressure` (io_some_avg10)
+[日本語版](../ja/pressure.io_some_avg10.md)
 
-## WHY NOW
-Read this when pressure stalled-time behavior around `io_some_avg10` is noisy and you need a fast, defensible decision.
-If you cannot tell pressure stall signal around `io_some_avg10` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`io_some_avg10` measures the percentage of time in the last 10 seconds during which at least one task was stalled waiting for I/O — blocked on a read or write that hadn't completed yet. It is part of Linux PSI (Pressure Stall Information), available since kernel 4.20, and is read from `/proc/pressure/io`.
 
-## Metric Snapshot
-- ID: `pressure.io_some_avg10`
-- Source: `pressure`
-- Field: `io_some_avg10`
-- Domain: stall accumulation and backpressure
-- Signal family: stall-time accumulation
+Unlike CPU pressure, I/O pressure has a meaningful `full` metric: when `io_full_avg10` is nonzero, every task on the system was waiting for I/O simultaneously — which means the CPU was completely idle while the storage device was the only thing working.
 
-## Operational Meaning (Pressure Lens)
-This field is strongest for separating pressure stalled-time signal around `io_some_avg10` from side-effect noise when some/full trends diverge.
+```
+  io_some vs io_full:
 
-## Field Episode (Pressure Lens)
-Average pressure looked acceptable while cumulative stall time explained tail-latency degradation.
+  Task A: ████░░░░████████░░░░████  (reading from disk)
+  Task B: ████████░░░░░░░░████████  (also reading from disk)
+  Task C: ██████████████████░░░░░░  (running on CPU)
 
-For `io_some_avg10`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+  some: any window where A or B is blocked  → most of the time
+  full: window where A, B, AND C are ALL blocked simultaneously → io_full
 
-## Reading Protocol (Pressure Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `pressure` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+  io_some_avg10 catches: "someone is waiting for I/O"
+  io_full_avg10 catches: "everyone is waiting, nothing is making progress"
+```
 
-## Decision Heuristic (Pressure Family)
-If this field normalizes quickly after load drop, bias toward burst explanation; if not, investigate persistent contention.
+---
 
-## Failure Patterns To Avoid (Pressure Family)
-- Root-cause declaration from one pressure some/full snapshot.
-- Ignoring post-mitigation recovery shape in pressure timeline.
-- Confusing cross-layer pressure correlation with causation.
+## Why does it matter?
 
-## Action Loop
-1. State a falsifiable hypothesis for `io_some_avg10`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+I/O pressure is the hidden tax on almost every modern system. Storage is hundreds to thousands of times slower than RAM. When processes start serializing on disk I/O, latency compounds quickly — especially if writes are synchronous or if multiple processes share the same I/O queue.
 
-## Unix Internals Lens
+**What `io_some_avg10` detects that other metrics miss:**
 
-This field is a manifestation of **stall-time accumulation in kernel subsystems (io_some_avg10)**.
+- `iostat %util`: Shows how busy the device is, but 100% utilization on an NVMe doesn't mean processes are stalling — the queue depth might still be serving requests fast.
+- `iowait` in `vmstat`: Shows CPU idle time during I/O, but is per-CPU and misleading in multi-core systems.
+- `io_some_avg10`: Directly measures "did processes actually wait?" Not a proxy. The answer is yes or no, measured in time.
 
-- Kernel path: runnable wait, memory reclaim stalls, I/O wait chains.
-- Typical trigger (io_some_avg10): resource contention that does not always raise CPU%.
-- Cross-check (io_some_avg10): runqueue, reclaim, and queue-depth signals.
+**The full/some split reveals severity:** `io_some_avg10 = 20%` with `io_full_avg10 = 0%` means I/O pressure exists but the system is partially making progress. `io_some_avg10 = 20%` with `io_full_avg10 = 15%` means the system is frequently in a state where nothing is making progress — that's a storage bottleneck worth acting on immediately.
 
-## Casebook (Pressure Family)
+---
 
-### Incident Slice 1 (Pressure)
-Case A (utilization trap): CPU utilization looked moderate while PSI total climbed steadily. Hidden waiting, not execution, consumed SLO budget.
+## How to read it
 
-### Incident Slice 2 (Pressure)
-Case B (burst storm): Short periodic stalls were invisible in coarse dashboards but aligned perfectly with user complaints.
+```sh
+cat /proc/pressure/io
+# some avg10=8.42 avg60=6.71 avg300=3.14 total=123456789
+# full avg10=1.23 avg60=0.98 avg300=0.41 total=23456789
+```
 
-### Incident Slice 3 (Pressure)
-Case C (cross-layer confusion): Team blamed network; stall evidence showed memory contention as first mover.
+**Practical thresholds:**
 
-## Failure Branches (Pressure Family)
-- Branch 1: Symptom improves but pressure trend does not. -> Revisit pressure causal layer assumption.
-- Branch 2: pressure trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve pressure evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check pressure stall and retry feedback loops.
+| io_some_avg10 | io_full_avg10 | Interpretation |
+|---|---|---|
+| 0 – 5% | 0% | Normal I/O activity |
+| 5 – 20% | 0% | Moderate I/O pressure — monitor |
+| 20 – 50% | 0 – 2% | High pressure — investigate device and workload |
+| > 50% | 0 – 5% | Severe — I/O is a bottleneck |
+| Any | > 5% | Critical — storage is blocking entire system progress |
 
-## Runbook Drill (Pressure Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+---
 
-## MAN Notes (Pressure Lens)
-- This section mirrors man-page flow for pressure analysis: definition -> stalled-time context -> failure branches -> evidence order.
-- Prefer explicit timestamps and pressure-phase notes; narratives drift without stall-phase context.
-- If uncertain, follow SEE ALSO links before changing production pressure-related knobs.
+## A real episode
 
-## Deep Appendix: Counterfactuals and Review Prompts (Pressure Family)
+A PostgreSQL server was experiencing intermittent query timeouts — not consistent, not correlated with query complexity, just random 10–30 second timeouts that appeared a few times per hour. The database team checked connection pool exhaustion, lock waits, query plans. Nothing obvious.
 
-### Counterfactual Questions (Pressure)
-- If traffic had stayed constant, would pressure some/full transitions still move this field the same way?
-- If this field had remained flat, which non-pressure signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which pressure-linked user metric would have crossed first?
-- If only one layer could be instrumented, which pressure-adjacent layer would preserve most explanatory power?
+An ops engineer checked PSI:
+```sh
+watch -n 2 'cat /proc/pressure/io'
+```
 
-### Timeline Template (Pressure Incident)
-- T-10m: baseline snapshot with pressure some/full annotation
-- T-5m: first pressure stalled-time anomaly candidate
-- T0: user symptom confirmed with pressure-side context
-- T+3m: first hypothesis written with pressure-stall assumption
-- T+6m: cross-source validation including scheduler or capacity source
-- T+10m: mitigation applied with rollback guard in pressure path
-- T+15m: trend reaction checked for pressure stall stabilization
-- T+30m: recovery confidence decision with pressure and symptom confirmation
+```
+some avg10=52.3 avg60=41.8 avg300=22.6 total=...
+full avg10=18.7 avg60=14.2 avg300=7.1  total=...
+```
 
-### Evidence Quality Rubric (Pressure)
-- Strong: ordered, cross-layer, and pressure stalled-time-consistent trend evidence
-- Medium: correlated movement without clear pressure some/full boundary
-- Weak: isolated value with no pressure some/full context
+`io_full_avg10` at 18.7% — nearly one in five seconds, the entire system was idle waiting for I/O. That's why queries timed out: even simple lookups stalled when the storage queue was saturated.
 
-### Postmortem Questions (Pressure)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+```sh
+iostat -x 1 5
+```
 
-### Anti-Drift Checklist (Pressure)
-- Keep one baseline note per environment, workload phase, and pressure profile.
-- Revalidate pressure-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with pressure+symptom context.
-- Link this article to at least two neighboring pressure or memory-path articles in your runbook.
+The disk showed `%util=99%`, `await=280ms` (average wait time per I/O operation). The PostgreSQL data directory was on the same disk as the system logs. A logging-heavy application was writing gigabytes of logs per hour, saturating the HDD.
 
-## Incident Forensics
+Fix: Moved logs to a separate disk. `io_full_avg10` dropped to 0.2%, query timeouts disappeared.
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first stalled-time inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one source-specific capacity signal to test cross-layer consistency.
+**Lesson:** High `io_full_avg10` is one of the clearest signals that your storage is your bottleneck. Don't wait for application-level timeouts to tell you what PSI already knows.
 
-### Decision Record
-- Primary claim: pressure.io_some_avg10 indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: io_some_avg10 was treated as evidence in a chain, not a singleton verdict.
+---
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around pressure inflection windows.
-- Syscall lens: Syscall: identify blocking-call bursts aligned with pressure stalled-time transitions.
-- Scheduler lens: Scheduler: verify whether wait-to-run inflation amplified pressure stalled-time spikes.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around pressure shifts.
-- Field anchor: io_some_avg10
-- Source anchor: pressure
+## What to do when it's high
 
-## Source Drillbook (Pressure Family)
+**Step 1: Check `full` alongside `some`.**
+```sh
+cat /proc/pressure/io
+```
+If `full_avg10` > 5%, prioritize immediately — the storage device is likely saturated.
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+**Step 2: Identify the saturated device.**
+```sh
+iostat -x 1 5
+# Look for: %util near 100%, await > 20ms (HDD) or > 1ms (NVMe)
+# The device with highest await and util is the bottleneck
+```
 
-### Debrief Questions
-- Which pressure-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about stalled-time versus side effect?
-- What pressure instrumentation change would accelerate this drill next time?
+**Step 3: Find which processes are causing I/O.**
+```sh
+iotop -b -n 3 -d 5  # top I/O consumers over 15 seconds
+pidstat -d 1 5      # per-process I/O statistics
+```
 
-### Anchor (Pressure)
-Field under practice: io_some_avg10
+**Step 4: Check for synchronous writes.**
+Synchronous writes (`O_SYNC`, `fsync()`, `fdatasync()`) are a common cause of I/O stalls. Check if the application forces sync:
+```sh
+# Track fsync calls per process
+strace -e trace=fsync,fdatasync -p <pid> 2>&1 | head -20
+```
 
-## Failure Archetype Matrix
-- Archetype A: silent pressure rise where utilization appears safe but stalled time climbs.
-- Archetype B: pressure some/full oscillation causing short recoveries and relapses.
-- Archetype C: pressure phase shift with delayed user-impact visibility.
-- Field in focus: io_some_avg10
+**Step 5: Consider the write path.**
+```sh
+vmstat 1 5
+# Look at bo (blocks written per second) vs bi (blocks read)
+# If bo is consistently high, check vm.dirty_ratio thresholds
+cat /proc/vmstat | grep -E 'nr_dirty|nr_writeback'
+```
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+---
+
+## Common mistakes
+
+**Using `%iowait` from top/vmstat as a substitute for PSI.** `%iowait` is a per-CPU metric that is misleading on multi-core systems. On a 16-core machine, one CPU at 100% iowait only shows as 6.25% in the average. `io_some_avg10` has no such dilution.
+
+**Ignoring `io_full_avg10`.** Many engineers only look at `io_some_avg10`. The `full` metric is where the real damage shows. A full stall means the storage device controls all system throughput — the application cannot overlap CPU work with I/O at all.
+
+**Blaming the application when storage is the issue.** When `io_some_avg10` is high, application-level timeouts are a symptom, not the cause. Fix the storage bottleneck first; application tuning won't help if the device is saturated.
+
+**Treating NVMe the same as HDD for thresholds.** NVMe can sustain much higher `io_some_avg10` before latency becomes unacceptable because its queue depth is larger. A spinning HDD at 20% io_some is much more dangerous than an NVMe at 20%.
+
+**Not checking at the cgroup level.** In containers, `/sys/fs/cgroup/io.pressure` shows per-container I/O pressure. A container might show high `io_some_avg10` while the system-level value looks fine, if I/O limits are set on the cgroup.
+
+---
+
+## See also
+
+- `pressure.io_full_avg10` — all tasks stalled simultaneously on I/O (critical)
+- `pressure.io_some_avg60` — 1-minute view for trend confirmation
+- `diskstats.read_wait_distribution` — per-device I/O latency distribution
+- `vmstat.nr_dirty` — dirty page accumulation that causes writeback I/O storms
+- `pressure.memory_some_avg10` — memory pressure, often co-occurs during swap-induced I/O

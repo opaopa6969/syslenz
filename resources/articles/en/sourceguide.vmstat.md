@@ -1,170 +1,94 @@
-# Source Guide: vmstat
+# sourceguide: vmstat
 
-## NAME
-`sourceguide.vmstat` - source-level operational reading guide
+[日本語版](../ja/sourceguide.vmstat.md)
 
-## WHY NOW
-Read this when you need to interpret one source without losing cross-source context.
-If a single source looks convincing, use this article to validate what it cannot prove alone.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is this source?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`/proc/vmstat` is the kernel's virtual memory event log — a flat list of cumulative counters that the kernel increments each time a specific VM event occurs. Unlike `/proc/meminfo` which shows current state, `/proc/vmstat` shows *how much activity has happened* since boot.
 
-## Why This Source Exists
-`vmstat` is a protocol-oriented telemetry surface. It helps connect socket behavior, packet lifecycle, and user-visible latency.
+The counters cover page reclaim, page faults, swap I/O, writeback, compaction, and more. There are often 200+ fields on a modern kernel. Most are zero on a healthy system; that's exactly why the ones that aren't deserve attention.
 
-## Episode From Operations
-A service looked healthy at CPU and memory level, but protocol-level counters in this source exposed retry and state-transition anomalies that explained intermittent timeouts.
+```
+  /proc/vmstat: cumulative event counters (never reset)
+  ┌─────────────────────────────────────────────────────┐
+  │  nr_dirty          = 1842     (current snapshot)    │
+  │  pgmajfault        = 38210    (since boot)          │
+  │  pswpin            = 0        (pages swapped in)    │
+  │  pswpout           = 0        (pages swapped out)   │
+  │  nr_writeback      = 0        (currently flushing)  │
+  └─────────────────────────────────────────────────────┘
+  
+  To get rate: sample twice, subtract, divide by interval
+  (the `vmstat 1` command does this for you)
+```
 
-## How To Read This Source
-1. Start from stable baseline counters.
-2. Track which counters move first during load spikes.
-3. Compare trend with sibling network sources (`ss`, conntrack, pressure).
-4. Map counter drift to connection lifecycle stages.
+The `vmstat 1` command you probably know reads from here and shows *per-second deltas*. `/proc/vmstat` is the raw cumulative source.
 
-## Pattern Library
-- Healthy: counters scale with traffic and settle quickly.
-- Warning: specific error/retry counters trend independently of traffic growth.
-- Critical: multiple error paths rise while successful progression stalls.
+---
 
-## Suggested Workflow
-1. Mark first anomaly timestamp.
-2. Cross-check one socket-level and one pressure-level source.
-3. Decide mitigation (rate shaping, timeout tuning, retry policy adjustments).
-4. Document evidence chain for repeat incidents.
+## What questions does it answer?
 
-## Unix Internals Lens
+- Is the kernel actively swapping pages in or out? (`pswpin`, `pswpout`)
+- How often are major page faults happening? (`pgmajfault`) — each one stalls a process waiting for disk
+- Is dirty data accumulating faster than it can be flushed? (`nr_dirty`, `nr_writeback`)
+- Is the kernel reclaiming memory aggressively? (`pgsteal_kswapd`, `pgscand`)
+- Are there memory compaction failures that indicate fragmentation? (`compactfail`)
 
-This field is a manifestation of **Unix kernel execution side effects**.
+---
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+## Key fields to watch
 
-## Systems Narrative (Memory)
+| Field | Type | What it means |
+|---|---|---|
+| `nr_dirty` | Snapshot | Current dirty page count. Watch for high-and-stable (flush stalled) vs high-and-falling (flushing). |
+| `nr_writeback` | Snapshot | Pages actively being written to disk. Zero with high nr_dirty = flush blocked. |
+| `pgmajfault` | Counter | Major page faults since boot. Each fault = a process waited for disk. Rate spike = swap or mmap pressure. |
+| `pswpin` / `pswpout` | Counter | Pages swapped in / out since boot. Any nonzero rate means anonymous pages are being evicted. |
+| `pgsteal_kswapd` | Counter | Pages reclaimed by kswapd background thread. High rate = sustained memory pressure. |
+| `pgscand` | Counter | Pages scanned during direct reclaim. Direct reclaim blocks the faulting process — more painful than kswapd. |
 
-This signal (sourceguide.vmstat) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+---
 
-### Episode: Dashboard Confidence vs User Pain (Memory)
-- The dashboard looked green because memory averages stayed normal.
-- User-facing latency regressed only in memory burst windows.
-- This memory field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large memory tuning change, but narrowing uncertainty quickly.
+## How to read it directly
 
-### Cross-Layer Translation (Memory)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+```sh
+# Single snapshot
+cat /proc/vmstat | grep -E 'nr_dirty|nr_writeback|pgmajfault|pswpin|pswpout'
 
-### What Senior Reviewers Usually Ask (Memory)
-- Which memory counter moved first in time order?
-- Which memory counter looked persuasive but was later demoted to a side effect?
-- Which memory execution path likely carried the user-visible penalty?
-- Which memory mitigation was reversible and what rollback trigger was defined?
+# Deltas every 2 seconds (the classic tool)
+vmstat 2
 
-### Combining With Unix Internals (Memory)
-- Process model (Memory lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Memory lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Memory lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Memory lens): did fairness protect throughput while harming tail latency?
+# Watch specific counters change
+watch -n 2 'grep -E "pgmajfault|pswpin|pswpout|nr_dirty" /proc/vmstat'
+```
 
-### Practical Mentor Notes (Memory)
-Treat procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
- r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
- 1  0      0 58782192  14560 1940892    0    0     8     3    4    4  0  0 99  0  0 as one scene in a longer diagnostic narrative.
-The memory narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+To manually compute a rate:
 
-## Incident Lab (Memory)
+```sh
+# Sample pgmajfault twice, 10 seconds apart
+v1=$(grep pgmajfault /proc/vmstat | awk '{print $2}')
+sleep 10
+v2=$(grep pgmajfault /proc/vmstat | awk '{print $2}')
+echo "pgmajfault rate: $(( (v2 - v1) / 10 )) per second"
+```
 
-### Drill A: First-Mover Detection (Memory)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+---
 
-### Drill B: Reversible Mitigation Design (Memory)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+## A real episode
 
-### Drill C: Evidence Compression (Memory)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+A Java service was experiencing random 200–500ms latency spikes every few minutes, but CPU and heap metrics looked normal. `/proc/vmstat` showed `pgmajfault` incrementing at 80–120 per second during spike windows. `pswpin` was also nonzero despite the system reporting 2 GB free.
 
-### Review Outcome (Memory)
-If your team can replay this memory article as a short diagnostic script, the article is operationally useful.
+The catch: the JVM's off-heap memory (mapped files for Lucene indices) was being paged out because the kernel's page cache had grown to fill most RAM. The system had "free" memory in the sense that `MemFree` wasn't zero, but `MemAvailable` told a different story. When the JVM accessed those mmap'd segments, it faulted them back in from swap — each fault adding 5–15ms of latency.
 
-## Quick Checklist (Memory)
-- Identify one memory-affected user-facing symptom and timestamp.
-- Identify one first-moving memory signal.
-- Identify one cross-layer memory confirmation signal.
-- State one reversible memory action.
-- State one memory rollback condition.
-- Verify memory trend recovery after action.
+The resolution was limiting the page cache with `vm.dirty_ratio` and adding explicit `madvise(MADV_WILLNEED)` calls in the application to hint to the kernel that those mmap regions should stay resident.
 
-## Advanced Practice Notes
+---
 
-### Focus
-Source-level operational literacy for vmstat.
+## See also
 
-### Operator Exercise
-1. Write one failure narrative where this article was primary evidence.
-2. Write one narrative where this article was only a supporting clue.
-3. Compare both and identify the earliest divergence point.
-
-### Escalation Boundary
-- Escalate when symptom severity rises while this signal remains ambiguous.
-- Avoid escalation if one more cross-layer check can resolve uncertainty in minutes.
-
-### Coaching Prompt
-Ask a junior engineer to explain this article without charts.
-If they can state cause candidates, disproof steps, and rollback-safe action, the understanding is operational.
-
-## Micro Episodes
-
-### Episode 1
-At 02:10, reclaim counters climbed before user latency alerts fired. The team first blamed CPU, but vmstat sequence showed memory reclaim pressure leading the event.
-
-### Episode 2
-A rollback decision was delayed until a sibling source confirmed reclaim stabilization. This avoided a noisy restart loop.
-
-### Use In Review
-In post-incident review, ask which episode pattern is closer to the observed timeline and which evidence is still missing.
-
-## Incident Forensics
-
-### Evidence Capture
-- Use this source as an index into neighboring sources rather than a standalone authority.
-- The reading quality improves when you can explain what this source cannot prove by itself.
-
-### Decision Record
-- Primary claim: sourceguide.vmstat indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: vmstat was treated as evidence in a chain, not a singleton verdict.
-
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: vmstat
-- Source anchor: sourceguide
-
-## Failure Archetype Matrix
-- Archetype A: source treated as verdict instead of index into neighboring evidence.
-- Archetype B: threshold crossing fixation while trend-shape evidence is ignored.
-- Archetype C: mitigation attempted before confirming cross-layer sequence.
-- Field in focus: vmstat
-
-## Counterfactual Branches
-1. If this source is removed, which two sources can reconstruct the same conclusion?
-2. If values stay normal but user pain grows, what trend clue was likely missed?
-3. What neighboring-source observation would invalidate your current mitigation immediately?
+- `sourceguide.meminfo` — current memory state (pair with vmstat for full picture)
+- `vmstat.nr_dirty` — deep dive on dirty pages, flush thresholds, and storm patterns
+- `sourceguide.pressure` — PSI metrics: did processes actually stall waiting for memory or I/O?
+- `sourceguide.diskstats` — disk throughput and queue depth (correlate with writeback activity)

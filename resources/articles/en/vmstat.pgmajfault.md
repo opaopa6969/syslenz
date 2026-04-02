@@ -1,170 +1,175 @@
 # pgmajfault
 
-## NAME
-`vmstat.pgmajfault` - metric signal from `vmstat` (pgmajfault)
+[日本語版](../ja/vmstat.pgmajfault.md)
 
-## WHY NOW
-Read this when vmstat reclaim and scan behavior around `pgmajfault` is noisy and you need a fast, defensible decision.
-If you cannot tell reclaim pressure around `pgmajfault` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`pgmajfault` counts **major page faults** — events where a process accesses a virtual memory address and the required page is **not in RAM**. The kernel must fetch the page from disk (either from swap space or from a file) before the process can continue.
 
-## Metric Snapshot
-- ID: `vmstat.pgmajfault`
-- Source: `vmstat` (`pgmajfault`)
-- Field: `pgmajfault`
-- Domain: virtual memory and reclaim behavior
-- Signal family: baseline behavior and drift detection
+Major faults are fundamentally different from minor faults. A minor fault takes microseconds (just a page table update). A major fault takes milliseconds — it blocks the process until the disk read completes.
 
-## Operational Meaning (VMStat Lens)
-This field is strongest for separating vmstat reclaim signal around `pgmajfault` from side-effect noise when scan and reclaim trends diverge.
+```
+  Minor fault (fast):
+  Process → address not mapped → page IS in RAM → map it → continue
+                                                    ~1 µs
 
-## Field Episode (VMStat Lens)
-The field looked quiet in isolation, but trend context changed the operational decision.
+  Major fault (slow):
+  Process → address not mapped → page NOT in RAM → read from disk
+                                                     → map it → continue
+                                                     ~5–50 ms (HDD)
+                                                     ~0.1–1 ms (SSD)
+```
 
-For `pgmajfault`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+The most common source of major faults on production servers:
+1. **Swap reads** — memory was paged out under pressure, now being read back
+2. **Cold file reads** — a file that hasn't been accessed recently, not in page cache
+3. **After OOM activity** — surviving processes whose pages were evicted
 
-## Reading Protocol (VMStat Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `vmstat` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+---
 
-## Decision Heuristic (VMStat Family)
-If this field normalizes quickly after load drop, bias toward burst explanation; if not, investigate persistent contention.
+## Why does it matter?
 
-## Failure Patterns To Avoid (VMStat Family)
-- Root-cause declaration from one vmstat reclaim/scan snapshot.
-- Ignoring post-mitigation recovery shape in vmstat timeline.
-- Confusing cross-layer vmstat correlation with causation.
+Even a small number of major faults can cause visible latency spikes. A process handling requests that suddenly takes 10ms+ for page reads looks like a slow application, not a memory problem.
 
-## Action Loop
-1. State a falsifiable hypothesis for `pgmajfault`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+**The key misread:** "The application is slow" when the real cause is "the application's memory was swapped out last night, and now every access is a disk read."
 
-## Unix Internals Lens
+Real-world consequence: a rate of 100 major faults/second on an HDD system means at least 500ms of blocking per second just in page reads — spread unevenly across processes, making latency spiky and hard to diagnose.
 
-This field is a manifestation of **virtual memory state transitions (`pgmajfault`)**.
+```
+  Major fault impact on latency:
 
-- Kernel path: reclaim, compaction, page fault handling, swap policy.
-- Typical trigger (`pgmajfault`): memory pressure or workload phase shift.
-- Cross-check: scheduler delay and storage writeback side effects.
+  Normal request: [ app logic 2ms ]
+  During major faults: [ wait for page 30ms ][ app logic 2ms ]
 
-## Casebook (VMStat Family)
+  From the outside: "why is this request sometimes 15x slower?"
+```
 
-### Incident Slice 1 (VMStat)
-Case C: Reversible mitigation provided faster learning than invasive change.
+---
 
-### Incident Slice 2 (VMStat)
-Case A: First anomaly came from this field trend, not absolute value.
+## How to read it
 
-### Incident Slice 3 (VMStat)
-Case B: Cross-source correlation reversed the initial diagnosis.
+```sh
+# System-wide rate (column 11 in vmstat output)
+vmstat 1 5
+# Header: r b swpd free buff cache si so bi bo in cs us sy id wa st
+# si (swap in) and bi (blocks in) also show if pages are coming from swap/disk
 
-## Failure Branches (VMStat Family)
-- Branch 1: Symptom improves but vmstat trend does not. -> Revisit vmstat causal layer assumption.
-- Branch 2: vmstat trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve vmstat evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check vmstat reclaim and retry feedback loops.
+# Per-process rate
+pidstat -f 1 5
+# Watch: majflt/s column
 
-## Runbook Drill (VMStat Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+# Historical counts for a process
+cat /proc/<PID>/stat | awk '{print "minor:", $10, "major:", $12}'
+```
 
-## MAN Notes (VMStat Lens)
-- This section mirrors man-page flow for vmstat reclaim analysis of `pgmajfault`: definition -> scan/reclaim context -> failure branches -> evidence order.
-- Prefer explicit timestamps and vmstat reclaim-phase notes; narratives drift without phase context.
-- If uncertain, follow SEE ALSO links before changing production vmstat-related memory knobs.
+| `pgmajfault` rate (per second) | Interpretation |
+|-------------------------------|----------------|
+| 0–2/s | Normal background activity |
+| 2–20/s | Occasional; monitor with `vmstat si` |
+| 20–100/s | Noticeable latency impact; investigate memory |
+| 100+/s | Severe; system thrashing or heavy cold reads |
 
-## Deep Appendix: Counterfactuals and Review Prompts (VMStat Family)
+**Correlate with swap:**
+```sh
+# Is swap being read? (si = swap in pages/second)
+vmstat 1 | awk '{print "swap_in:", $7, "major_faults:", $11}'
+```
 
-### Counterfactual Questions (VMStat)
-- If traffic had stayed constant, would vmstat reclaim and scan transitions still move this field the same way?
-- If this field had remained flat, which non-vmstat signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which vmstat-linked user metric would have crossed first?
-- If only one layer could be instrumented, which vmstat-adjacent layer would preserve most explanatory power?
+If `vmstat si` (swap-in) is high and `pgmajfault` is high → the system is reading from swap. This is almost always the critical path to fix.
 
-### Timeline Template (VMStat Incident)
-- T-10m: baseline snapshot with vmstat reclaim/scan phase annotation for `pgmajfault`
-- T-5m: first vmstat reclaim or scan anomaly candidate around `pgmajfault`
-- T0: user symptom confirmed with vmstat-side context around `pgmajfault`
-- T+3m: first hypothesis written with vmstat reclaim assumption for `pgmajfault`
-- T+6m: cross-source validation including scheduler or writeback for `pgmajfault`
-- T+10m: mitigation applied with rollback guard in the vmstat path for `pgmajfault`
-- T+15m: trend reaction checked for vmstat reclaim stabilization around `pgmajfault`
-- T+30m: recovery confidence decision with vmstat and pressure confirmation for `pgmajfault`
+---
 
-### Evidence Quality Rubric (VMStat)
-- Strong: ordered, cross-layer, and vmstat reclaim-consistent trend evidence for `pgmajfault`
-- Medium: correlated movement without clear vmstat reclaim/scan boundary
-- Weak: isolated value with no vmstat reclaim/scan context around `pgmajfault`
+## A real episode
 
-### Postmortem Questions (VMStat)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+A Java application at an e-commerce company processed morning traffic fine but was consistently slow for the first 10–15 minutes after 08:00. Engineers assumed "JVM warmup" and ignored it for months.
 
-### Anti-Drift Checklist (VMStat)
-- Keep one baseline note per environment, workload phase, and vmstat reclaim mode.
-- Revalidate vmstat-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with vmstat+pressure context.
-- Link this article to at least two neighboring vmstat or memory-path articles in your runbook.
+A new engineer looked at `pgmajfault` at 08:05:
+```sh
+pidstat -f 1 | grep java
+# PID  minflt/s  majflt/s
+# 2381   8,200    1,847
+```
 
-## Incident Forensics
+1,847 major faults per second. The JVM was reading pages from swap as fast as it could.
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first reclaim or scan inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one writeback or swap signal to test cross-layer consistency.
+Investigation: a nightly OOM event had been silently killing a low-priority background process and causing the JVM's heap pages to be partially swapped out around 04:00. By morning, the heap was in swap. The JVM's first 15 minutes of traffic was largely disk reads.
 
-### Decision Record
-- Primary claim: vmstat.pgmajfault indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: pgmajfault was treated as evidence in a chain, not a singleton verdict.
+Fixes applied:
+1. Added swap memory to reduce OOM pressure
+2. Added `mlockall()` JVM option to prevent heap pages from being swapped
+3. Fixed the root cause: the background process had a memory leak
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around vmstat inflection windows.
-- Syscall lens: Syscall: identify page-fault and memory-touching call bursts aligned with the vmstat transitions for `pgmajfault`.
-- Scheduler lens: Scheduler: verify whether reclaim-side waiting inflated wake latency during vmstat spikes.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around vmstat shifts.
-- Field anchor: pgmajfault
-- Source anchor: vmstat (`pgmajfault`)
+After the fix, morning major faults were 0.3/s. The "JVM warmup" latency disappeared entirely.
 
-## Source Drillbook (VMStat Family)
+**Lesson:** If your application is consistently slow after a quiet period (nights, weekends), check `pgmajfault`. "Warmup" is often just "memory was swapped out."
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+---
 
-### Debrief Questions
-- Which vmstat-side step around `pgmajfault` produced the highest confidence gain?
-- Which step failed to reduce uncertainty about reclaim pressure around `pgmajfault` versus side effect?
-- What vmstat instrumentation change around `pgmajfault` would accelerate this drill next time?
+## What to do when it's high
 
-### Anchor (VMStat)
-Field under practice: pgmajfault
+**Step 1: Determine if swap is involved.**
+```sh
+vmstat 1 5
+# si (column 7) = swap pages read per second
+# If si > 0 and rising, this is a swap-thrashing issue
+```
 
-## Failure Archetype Matrix
-- Archetype A (`pgmajfault`): silent vmstat reclaim pressure where utilization looks safe but stalls rise.
-- Archetype B (`pgmajfault`): vmstat reclaim oscillation causing repeated short recoveries and relapses.
-- Archetype C (`pgmajfault`): vmstat scan/reclaim phase shift with delayed user-impact visibility.
-- Field in focus: pgmajfault
+**Step 2: Check swap usage.**
+```sh
+free -h
+swapon -s
+cat /proc/swaps
+```
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Step 3: Identify which process is causing faults.**
+```sh
+pidstat -f 1 5
+# Sort by majflt/s to find the culprit
+```
+
+**Step 4: Address the root cause.**
+
+```sh
+# Option A: Process is using too much memory — find and fix the leak
+# Check RSS (resident set size) trend
+ps -o pid,rss,vsz,comm -p <PID>
+
+# Option B: OOM is evicting pages — add swap or reduce memory pressure
+vmstat 1 | grep -E "^[0-9]" | awk '{print "free:", $4, "swap_used:", $3}'
+
+# Option C: Lock critical process pages in RAM
+# (in application code)
+# mlockall(MCL_CURRENT | MCL_FUTURE)  # prevents swapping
+
+# Option D: Prioritize process to avoid OOM eviction
+echo -100 > /proc/<PID>/oom_score_adj
+```
+
+**Step 5: For file-based major faults (cold reads, not swap):**
+- Increase available RAM to grow the page cache
+- Warm up the cache deliberately on startup
+- Use `posix_fadvise(FADV_WILLNEED)` to prefetch files the application will need
+
+---
+
+## Common mistakes
+
+**Blaming "JVM warmup" or "application startup."** If a Java/Python/Ruby application is slow for 5–20 minutes after low traffic periods, check `pgmajfault` before assuming it's a runtime issue. It's often swap.
+
+**Seeing `pgmajfault = 0` and assuming no memory pressure.** If pages are being read from the page cache (cold but not swapped), they show up as major faults only when they need to be brought in. After a cache is warm, major faults drop. `pgmajfault` dropping to 0 after startup doesn't mean there was no problem at startup.
+
+**Fixing major faults without understanding whether it's swap or cold-read.** These require different solutions. Swap: reduce memory pressure or add swap. Cold reads: warm the cache or add RAM.
+
+**Not checking OOM history.** If you see major faults from swap, check `dmesg` or `journalctl` for OOM kill events. The process being slow is often not the process that was killed.
+
+---
+
+## See also
+
+- `vmstat.pgfault` — total page faults including the cheaper minor faults
+- `vmstat.pswpin` — pages swapped in from disk; direct measure of swap reads
+- `vmstat.pswpout` — pages swapped out; if high, swap pressure is building
+- `pressure/memory_some_avg10` — PSI memory pressure; confirms tasks are stalling
+- `stat.cpu_iowait` — if high alongside pgmajfault, disk is the bottleneck

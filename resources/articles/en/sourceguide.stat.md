@@ -1,168 +1,117 @@
-# Source Guide: stat
+# sourceguide: stat
 
-## NAME
-`sourceguide.stat` - source-level operational reading guide
+[日本語版](../ja/sourceguide.stat.md)
 
-## WHY NOW
-Read this when you need to interpret one source without losing cross-source context.
-If a single source looks convincing, use this article to validate what it cannot prove alone.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is this source?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`/proc/stat` is the kernel's CPU time accounting file — cumulative tick counts showing how much time each CPU has spent in each mode since boot. It also includes system-wide counters for interrupts, context switches, and process creation.
 
-## Why This Source Exists
-`stat` is a protocol-oriented telemetry surface. It helps connect socket behavior, packet lifecycle, and user-visible latency.
+```
+$ cat /proc/stat
+cpu  428291 0 183742 12847392 14832 0 3291 0 0 0
+cpu0 107432 0 46038  3212832  3621  0 824  0 0 0
+cpu1 106847 0 46209  3212432  3609  0 820  0 0 0
+...
+intr 48293847 ...
+ctxt 29483920
+btime 1711234567
+processes 48291
+procs_running 2
+procs_blocked 0
+```
 
-## Episode From Operations
-A service looked healthy at CPU and memory level, but protocol-level counters in this source exposed retry and state-transition anomalies that explained intermittent timeouts.
+The first `cpu` line is the sum of all CPUs. Each number is in USER_HZ ticks (typically 1/100 second on Linux). To get percentages, you must take two snapshots and calculate the delta.
 
-## How To Read This Source
-1. Start from stable baseline counters.
-2. Track which counters move first during load spikes.
-3. Compare trend with sibling network sources (`ss`, conntrack, pressure).
-4. Map counter drift to connection lifecycle stages.
+```
+  CPU time fields (in order):
+  user  - time in user mode
+  nice  - time in user mode with low priority (niced)
+  system - time in kernel mode
+  idle  - time doing nothing
+  iowait - time waiting for I/O to complete
+  irq   - time servicing hardware interrupts
+  softirq - time servicing software interrupts
+  steal - time "stolen" by hypervisor for other VMs  ← critical in VMs
+  guest - time running virtual CPUs
+  guest_nice - time running low-priority virtual CPUs
+```
 
-## Pattern Library
-- Healthy: counters scale with traffic and settle quickly.
-- Warning: specific error/retry counters trend independently of traffic growth.
-- Critical: multiple error paths rise while successful progression stalls.
+---
 
-## Suggested Workflow
-1. Mark first anomaly timestamp.
-2. Cross-check one socket-level and one pressure-level source.
-3. Decide mitigation (rate shaping, timeout tuning, retry policy adjustments).
-4. Document evidence chain for repeat incidents.
+## What questions does it answer?
 
-## Unix Internals Lens
+- Where is CPU time actually going — user code, kernel code, or I/O waiting?
+- Is this a virtualized host having its CPU time stolen by the hypervisor? (`steal`)
+- How many processes are running or blocked on I/O right now? (`procs_running`, `procs_blocked`)
+- Is the system spending too much time in kernel mode compared to user mode? (`system` ratio)
+- How fast is the system creating new processes? (`processes` counter rate)
 
-This field is a manifestation of **Unix kernel execution side effects**.
+---
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+## Key fields to watch
 
-## Systems Narrative (Process)
+| Field | What it means | When to worry |
+|---|---|---|
+| `user` | Time running application code | Expected to be dominant on compute workloads |
+| `system` | Time in kernel (syscalls, scheduling) | Persistently >20% suggests syscall-heavy or lock-contended code |
+| `iowait` | Time CPUs idle waiting for I/O | >10% means I/O is a bottleneck. Correlate with diskstats. |
+| `steal` | Time hypervisor served other VMs | **Any sustained steal% in a VM means you're being throttled.** Even 5–10% steal causes latency jitter. |
+| `idle` | Genuine idle time | Low idle + low steal + low iowait = CPU saturation |
+| `procs_blocked` | Processes in D state right now | Nonzero means threads are stuck in uninterruptible wait (often I/O or kernel locks) |
 
-This signal (sourceguide.stat) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+---
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+## How to read it directly
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+```sh
+cat /proc/stat
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+# Traditional tool that computes percentages from /proc/stat
+mpstat 1 5
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+# Or with vmstat
+vmstat 1
+# columns: us sy id wa st
+#          user system idle iowait steal
+```
 
-### Practical Mentor Notes (Process)
-Treat stat as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+To compute CPU% manually from two snapshots:
 
-## Incident Lab (Process)
+```sh
+# Read twice, 5 seconds apart
+s1=$(grep '^cpu ' /proc/stat)
+sleep 5
+s2=$(grep '^cpu ' /proc/stat)
+# Subtract each field; divide non-idle by total to get busy%
+```
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+For steal specifically on cloud VMs:
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+```sh
+# Check current steal from vmstat
+vmstat 1 | awk '{print "steal:", $17}'
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+# Or from top: look for %st in CPU line
+top -bn1 | grep '%Cpu'
+```
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+---
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+## A real episode
 
-## Advanced Practice Notes
+A web service running on a cloud VM had p99 latency varying by 40–80ms between requests with identical CPU profiles. The application team profiled extensively — no hot paths, no GC pauses, no unusual system calls.
 
-### Focus
-Source-level operational literacy for stat.
+`/proc/stat` showed `steal` averaging 12–18% throughout the day, with spikes to 30%+ every few minutes. The VM was on a noisy-neighbor host: other tenants on the same physical machine were doing I/O-intensive batch jobs, and the hypervisor was regularly preempting this VM's CPUs to service them.
 
-### Operator Exercise
-1. Write one failure narrative where this article was primary evidence.
-2. Write one narrative where this article was only a supporting clue.
-3. Compare both and identify the earliest divergence point.
+The fix was not application tuning. Moving the VM to a dedicated-host instance (no shared CPU allocation) dropped steal to 0% and p99 latency normalized to under 20ms. The signal was in `/proc/stat` all along; it just wasn't on anyone's dashboard.
 
-### Escalation Boundary
-- Escalate when symptom severity rises while this signal remains ambiguous.
-- Avoid escalation if one more cross-layer check can resolve uncertainty in minutes.
+---
 
-### Coaching Prompt
-Ask a junior engineer to explain this article without charts.
-If they can state cause candidates, disproof steps, and rollback-safe action, the understanding is operational.
+## See also
 
-## Micro Episodes
-
-### Episode 1
-Runqueue growth appeared without corresponding user CPU growth. Waiting-to-run, not compute saturation, explained the symptom.
-
-### Episode 2
-Reducing runnable contention resolved latency faster than CPU scaling.
-
-### Use In Review
-In post-incident review, ask which episode pattern is closer to the observed timeline and which evidence is still missing.
-
-## Incident Forensics
-
-### Evidence Capture
-- Use this source as an index into neighboring sources rather than a standalone authority.
-- The reading quality improves when you can explain what this source cannot prove by itself.
-
-### Decision Record
-- Primary claim: sourceguide.stat indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: stat was treated as evidence in a chain, not a singleton verdict.
-
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: stat
-- Source anchor: sourceguide
-
-## Failure Archetype Matrix
-- Archetype A: source treated as verdict instead of index into neighboring evidence.
-- Archetype B: threshold crossing fixation while trend-shape evidence is ignored.
-- Archetype C: mitigation attempted before confirming cross-layer sequence.
-- Field in focus: stat
-
-## Counterfactual Branches
-1. If this source is removed, which two sources can reconstruct the same conclusion?
-2. If values stay normal but user pain grows, what trend clue was likely missed?
-3. What neighboring-source observation would invalidate your current mitigation immediately?
+- `sourceguide.loadavg` — the derived load signal that `/proc/stat` helps explain
+- `sourceguide.pressure` — PSI separates CPU scheduling delay from I/O stall more cleanly than stat
+- `sourceguide.schedstat` — per-CPU scheduler statistics including runqueue wait time
+- `sourceguide.processes` — current process and thread state, including D-state count

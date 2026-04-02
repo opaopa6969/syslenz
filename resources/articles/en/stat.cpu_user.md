@@ -1,152 +1,131 @@
 # cpu_user
 
-## NAME
-`stat.cpu_user` - metric signal from `stat` (cpu_user)
+[日本語版](../ja/stat.cpu_user.md)
 
-## WHY NOW
-Read this when noisy telemetry must be turned into a concrete operational decision.
-If cause, symptom, and side effect are mixed, use this article to structure next checks.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`cpu_user` is the percentage of CPU time spent executing code in **user space** — your applications, databases, language runtimes, and any other non-kernel code. The Linux kernel tracks this per-CPU in `/proc/stat` as a tick counter, and syslenz exposes it as a percentage over the sampling interval.
 
-## Metric Snapshot
-- ID: `stat.cpu_user`
-- Source: `stat`
-- Field: `cpu_user`
-- Domain: CPU and kernel activity
+Think of it like a restaurant kitchen. The CPU is the chef. `cpu_user` measures how much time the chef spends actually cooking food (your app). `cpu_system` measures time spent doing admin work like restocking supplies (kernel calls). `cpu_iowait` is the chef standing idle waiting for a delivery.
 
-## Why This Metric Is Operationally Valuable
-This metric helps separate normal workload expansion from unstable behavior. It is most reliable when read with neighboring fields and time trend.
+```
+  CPU time budget (100%)
+  ┌──────────────────────────────┐
+  │ user   ████████████ 60%      │  <- your app runs here
+  │ system ████ 20%              │  <- kernel runs on behalf of your app
+  │ iowait ██ 10%                │  <- CPU idle, waiting for I/O
+  │ idle   ██ 10%                │  <- nothing to do
+  └──────────────────────────────┘
+```
 
-## Episode
-Context switches doubled after rollout; lock contention, not raw CPU, was the hidden bottleneck.
+---
 
-In this incident pattern, this metric appears early in the evidence chain, but becomes actionable only after cross-source validation.
+## Why does it matter?
 
-## Reading Strategy
-1. Check current value and direction.
-2. Compare short-term trend in Diff/Graph.
-3. Pair one sibling metric in `stat` plus one pressure/queue metric from another source.
-4. Map movement to user-impact hypothesis.
+High `cpu_user` means your application is doing real computation. This is often **healthy** — it means the CPU is productive. However, it can also signal runaway processes, inefficient algorithms, or a workload that has grown beyond what the hardware can sustain.
 
-## Decision Signals
-- Low risk: load-proportional movement with fast recovery.
-- Warning: trend persists after load normalization.
-- Critical: related metrics co-move and recovery slope degrades.
+The key insight: **high `cpu_user` alone is not a problem.** The problem arises when:
+- `cpu_user` is high AND latency is rising (CPU is the bottleneck)
+- `cpu_user` is high AND `cpu_iowait` is also high (the CPU looks busy, but it's mostly waiting — real issue is I/O)
+- One process is consuming unexpectedly large share of CPU (runaway)
 
-## Misread Patterns
-- Absolute-value judgment without workload context.
-- Ignoring recovery slope after mitigation.
-- Mixing symptom metrics and causal metrics.
+Scenario: a batch job that normally takes 5 minutes starts taking 40. `cpu_user` is pegged at 95%. Is the CPU too slow? Or did someone push an inefficient SQL query that now does a full table scan? The metric points you to user space; the investigation starts there.
 
-## Action Loop
-1. State a falsifiable hypothesis.
-2. Apply reversible mitigation.
-3. Verify with 2-3 correlated metrics.
-4. Keep concise evidence notes for postmortem reuse.
+---
 
-## Unix Internals Lens
+## How to read it
 
-This field is a manifestation of **scheduler and task accounting core counters**.
+```sh
+# Real-time CPU breakdown, 1-second samples
+mpstat -P ALL 1
 
-- Kernel path: context switching, runqueue movement, interrupt accounting.
-- Typical trigger: concurrency changes, lock contention, wakeup storms.
-- Cross-check: schedstat and interrupts/softirqs distributions.
+# Which processes are consuming user CPU?
+top -b -n 1 | head -20
 
-## Systems Narrative (Process)
+# Or with more detail
+pidstat -u 1 5
+```
 
-This signal (stat.cpu_user) is not only a number; it is an exposed edge of kernel state transitions.
-Scheduler-facing counters tell whether time is spent executing, waiting-to-run, or context-switching.
+| `cpu_user` value | Interpretation |
+|-----------------|----------------|
+| 0–30% | Comfortable headroom |
+| 30–70% | Normal load for busy systems |
+| 70–90% | Watch for latency impact; check trends |
+| 90–100% | CPU-bound; scale or optimize |
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+**Pair with:**
+- `cpu_system`: if system is also high, the app makes lots of syscalls — check file I/O, network
+- `cpu_iowait`: if iowait is high and user is high, user is misleading — the real bottleneck is storage
+- `stat.procs_running`: if runqueue is growing, CPU is genuinely saturated
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+---
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+## A real episode
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+A media transcoding service ran fine at 60% `cpu_user` for months. After a library upgrade, users started reporting that jobs took 3x longer. Monitoring showed `cpu_user` had jumped to 98%. The team's first instinct was "we need more servers."
 
-### Practical Mentor Notes (Process)
-Treat cpu_user as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+But a closer look with `pidstat` showed a single transcoding worker process using 95% of one CPU, while 15 other workers sat near-idle. The upgraded library had silently changed from multi-threaded to single-threaded mode. The work was piling into one thread.
 
-## Incident Lab (Process)
+Fix: one config line to re-enable threading. `cpu_user` dropped from 98% to 65%, spread across all cores. No new hardware needed.
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+**Lesson:** `cpu_user` tells you *that* the CPU is working hard. It doesn't tell you *where* or *whether the work is efficient*. Always dig into which processes and threads are running.
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+---
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+## What to do when it's high
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+**Step 1: Identify who is using the CPU.**
+```sh
+# Top CPU consumers by process
+ps aux --sort=-%cpu | head -15
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+# Per-thread breakdown
+pidstat -u -t 1 5
+```
 
-## Incident Forensics
+**Step 2: Check if it's actually causing a problem.**
+Is latency rising? Are requests timing out? High `cpu_user` on a batch workload with no user-facing impact is fine. On an API server, 95% `cpu_user` may mean requests are queuing.
 
-### Evidence Capture
-- Anchor analysis on time order, not magnitude alone.
-- Prefer reversible action and explicit rollback guardrails while uncertainty remains.
+**Step 3: Rule out iowait masking.**
+```sh
+# If iowait is also elevated, the issue is storage, not compute
+cat /proc/stat | awk 'NR==1{print "user="$2, "system="$4, "iowait="$6, "idle="$5}'
+```
 
-### Decision Record
-- Primary claim: stat.cpu_user indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: cpu_user was treated as evidence in a chain, not a singleton verdict.
+**Step 4: Profile the hot process.**
+```sh
+# Sample what code is executing (requires perf)
+perf top -p <PID>
 
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: cpu_user
-- Source anchor: stat
+# Or use strace to see what syscalls dominate
+strace -c -p <PID>
+```
 
-## Failure Archetype Matrix
-- Archetype A: magnitude-focused reading without sequence context.
-- Archetype B: mitigation overreach under high uncertainty.
-- Archetype C: symptom-mechanism mismatch after partial recovery.
-- Field in focus: cpu_user
+**Step 5: If CPU is genuinely saturated**, consider:
+- Horizontal scaling (more instances)
+- Algorithmic optimization (profile first)
+- Reducing work per request (caching, batching)
+- CPU affinity tuning for NUMA systems
 
-## Counterfactual Branches
-1. If this signal is secondary, what primary signal should have moved first?
-2. If mitigation is rolled back, which metric should recover first and why?
-3. What source-specific observation would invalidate your current mitigation immediately?
+---
+
+## Common mistakes
+
+**Treating 90% cpu_user as automatically bad.** A video encoder at 90% is healthy — that's what encoders are supposed to do. A web API server at 90% under normal traffic is a warning sign.
+
+**Not pairing with iowait.** If `cpu_user + cpu_iowait = 95%`, the CPU looks busy but is mostly idle waiting for disk. Adding more compute won't help.
+
+**Reacting to a single spike.** Look at sustained trends. A 5-second spike to 100% during a garbage collection cycle is normal. A sustained 90%+ over 10 minutes under normal traffic is not.
+
+**Missing the per-core view.** System-wide `cpu_user` averages across all cores. One core at 100% with 15 idle cores shows up as only 6% in the aggregate. Always check per-CPU data.
+
+---
+
+## See also
+
+- `stat.cpu_iowait` — time the CPU is idle waiting for I/O; the most common misread alongside cpu_user
+- `stat.cpu_system` — kernel time; high system often means lots of syscalls from user code
+- `stat.procs_running` — runqueue length; grows when CPU is the bottleneck
+- `schedstat.cpu_stats` — per-CPU scheduler statistics for deeper analysis

@@ -1,152 +1,153 @@
 # uptime
 
-## NAME
-`uptime.uptime` - metric signal from `uptime` (uptime)
+[日本語版](../ja/uptime.uptime.md)
 
-## WHY NOW
-Read this when noisy telemetry must be turned into a concrete operational decision.
-If cause, symptom, and side effect are mixed, use this article to structure next checks.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`uptime` is the number of seconds the system has been running since it last booted. It comes from `/proc/uptime` — the first number in that file. Simple to read, easy to misread.
 
-## Metric Snapshot
-- ID: `uptime.uptime`
-- Source: `uptime`
-- Field: `uptime`
-- Domain: system behavior
+Think of it as the system's age since its last birthday (reboot). A server with 86,400 uptime seconds is 1 day old. One with 31,536,000 seconds has been running for a year without a reboot.
 
-## Why This Metric Is Operationally Valuable
-This metric helps separate normal workload expansion from unstable behavior. It is most reliable when read with neighboring fields and time trend.
+```
+  /proc/uptime example:
+  1234567.89  4987654.32
+  ^            ^
+  │            └─ total idle time across all CPUs (seconds)
+  └─ uptime in seconds (this is what syslenz reports)
 
-## Episode
-A familiar operations pattern: one metric looked abnormal, but correlated signals changed the diagnosis and mitigation plan.
+  1,234,567 seconds = ~14.3 days
+```
 
-In this incident pattern, this metric appears early in the evidence chain, but becomes actionable only after cross-source validation.
+---
 
-## Reading Strategy
-1. Check current value and direction.
-2. Compare short-term trend in Diff/Graph.
-3. Pair one sibling metric in `uptime` plus one pressure/queue metric from another source.
-4. Map movement to user-impact hypothesis.
+## Why does it matter?
 
-## Decision Signals
-- Low risk: load-proportional movement with fast recovery.
-- Warning: trend persists after load normalization.
-- Critical: related metrics co-move and recovery slope degrades.
+**Unexpected reboots.** If uptime suddenly resets to a small value, the system rebooted. This might be planned (kernel update), accidental (power failure, OOM kill cascade), or hostile (someone rebooted your database server at 3am). Monitoring uptime gives you a tripwire.
 
-## Misread Patterns
-- Absolute-value judgment without workload context.
-- Ignoring recovery slope after mitigation.
-- Mixing symptom metrics and causal metrics.
+**Stale patches.** A server running for 400+ days has almost certainly missed kernel security patches. Linux requires a reboot to apply kernel updates. High uptime sounds good ("system is stable!") but often means "system is running a kernel from 2022 with known CVEs."
 
-## Action Loop
-1. State a falsifiable hypothesis.
-2. Apply reversible mitigation.
-3. Verify with 2-3 correlated metrics.
-4. Keep concise evidence notes for postmortem reuse.
+**Stability signal.** A server that keeps rebooting (uptime resets every few hours) has a serious problem — kernel panic, hardware fault, or a crash loop. Low uptime on a production server demands immediate investigation.
 
-## Unix Internals Lens
+```
+  Uptime as a health signal:
 
-This field is a manifestation of **Unix kernel execution side effects**.
+  New system:     [1 day]   <- normal post-deployment
+  Healthy:        [7-90 days] <- patched regularly
+  Patch debt:     [180+ days] <- security risk
+  Crash loop:     resets repeatedly <- critical
+```
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+---
 
-## Systems Narrative (Systems)
+## How to read it
 
-This signal (uptime.uptime) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+```sh
+# Human-readable uptime
+uptime
+# Example: 14:32:01 up 14 days, 3:17,  2 users,  load average: 0.52, 0.58, 0.61
 
-### Episode: Dashboard Confidence vs User Pain (Systems)
-- The dashboard looked green because systems averages stayed normal.
-- User-facing latency regressed only in systems burst windows.
-- This systems field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large systems tuning change, but narrowing uncertainty quickly.
+# Raw seconds from /proc/uptime
+awk '{print $1}' /proc/uptime
 
-### Cross-Layer Translation (Systems)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+# When did the system boot?
+who -b
+# or
+last reboot | head -3
+```
 
-### What Senior Reviewers Usually Ask (Systems)
-- Which systems counter moved first in time order?
-- Which systems counter looked persuasive but was later demoted to a side effect?
-- Which systems execution path likely carried the user-visible penalty?
-- Which systems mitigation was reversible and what rollback trigger was defined?
+| Uptime | Interpretation |
+|--------|---------------|
+| < 1 hour | Just rebooted — verify it was intentional |
+| 1–7 days | Recent deployment or patch cycle |
+| 7–90 days | Normal operational range for patched systems |
+| 90–180 days | Review patch status; plan maintenance window |
+| 180+ days | Likely security debt; kernel patches pending |
+| Repeated resets | Crash loop or instability — investigate immediately |
 
-### Combining With Unix Internals (Systems)
-- Process model (Systems lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Systems lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Systems lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Systems lens): did fairness protect throughput while harming tail latency?
+**Check if a reboot was expected:**
+```sh
+# Was there a scheduled maintenance in the logs?
+journalctl -b -1 | head -20   # previous boot's last messages
+last reboot                    # reboot history
+```
 
-### Practical Mentor Notes (Systems)
-Treat  18:22:53 up 2 days,  8:34,  2 users,  load average: 0.70, 0.62, 0.60 as one scene in a longer diagnostic narrative.
-The systems narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+---
 
-## Incident Lab (Systems)
+## A real episode
 
-### Drill A: First-Mover Detection (Systems)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+A fintech startup's payment processing service had been running for 270 days with no issues — the team was proud of the stability. Then a security audit flagged the server: it was running a kernel version with a local privilege escalation CVE that had been patched 8 months ago.
 
-### Drill B: Reversible Mitigation Design (Systems)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+The team realized they had never set up automated kernel patching because "the system was stable and they didn't want to break anything." The 270-day uptime was a badge of honor that had become a liability.
 
-### Drill C: Evidence Compression (Systems)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+Worse: when they finally planned the patching window, they discovered the system had been using features deprecated in newer kernels. The patch brought a breaking change. The "stable" system had accumulated 9 months of hidden technical debt.
 
-### Review Outcome (Systems)
-If your team can replay this systems article as a short diagnostic script, the article is operationally useful.
+**Lesson:** High uptime is not the same as healthy uptime. Track uptime not to maximize it, but to detect unexpected drops and enforce a maximum ceiling for security patches.
 
-## Quick Checklist (Systems)
-- Identify one systems-affected user-facing symptom and timestamp.
-- Identify one first-moving systems signal.
-- Identify one cross-layer systems confirmation signal.
-- State one reversible systems action.
-- State one systems rollback condition.
-- Verify systems trend recovery after action.
+---
 
-## Incident Forensics
+## What to do when it resets unexpectedly
 
-### Evidence Capture
-- Anchor analysis on time order, not magnitude alone.
-- Prefer reversible action and explicit rollback guardrails while uncertainty remains.
+**Step 1: Confirm the reboot happened.**
+```sh
+last reboot | head -5
+who -b
+```
 
-### Decision Record
-- Primary claim: uptime.uptime indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: uptime was treated as evidence in a chain, not a singleton verdict.
+**Step 2: Find out why.**
+```sh
+# Check kernel messages from the previous boot
+journalctl -b -1 -p err | tail -50
 
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: uptime
-- Source anchor: uptime
+# Was it a kernel panic?
+journalctl -b -1 | grep -i "panic\|oops\|BUG\|killed"
 
-## Failure Archetype Matrix
-- Archetype A: magnitude-focused reading without sequence context.
-- Archetype B: mitigation overreach under high uncertainty.
-- Archetype C: symptom-mechanism mismatch after partial recovery.
-- Field in focus: uptime
+# Was it an OOM kill?
+journalctl -b -1 | grep "oom\|Out of memory"
 
-## Counterfactual Branches
-1. If this signal is secondary, what primary signal should have moved first?
-2. If mitigation is rolled back, which metric should recover first and why?
-3. What source-specific observation would invalidate your current mitigation immediately?
+# Check hardware errors
+dmesg | grep -iE "hardware error|mce|edac"
+```
+
+**Step 3: Check for intentional causes.**
+```sh
+# Scheduled reboot (systemd)
+systemctl list-timers | grep reboot
+
+# Was a kernel update pending?
+needs-restarting -r   # (RHEL/CentOS)
+```
+
+**What to do when uptime is too high (patch debt):**
+```sh
+# Check current kernel version
+uname -r
+
+# Compare with available updates (Debian/Ubuntu)
+apt list --upgradable | grep linux-image
+
+# Check for CVEs in current kernel (RHEL/CentOS)
+yum updateinfo list security | grep kernel
+```
+
+---
+
+## Common mistakes
+
+**Maximizing uptime as a goal.** "999 days uptime!" is not a success metric for a Linux server. It usually means unpatched CVEs. Set a maximum uptime policy: "reboot for kernel patches within 30 days of release."
+
+**Not alerting on unexpected reboots.** A server that reboots at 3am unannounced may have had a kernel panic. Without an alert on uptime reset, you might not know for days.
+
+**Confusing uptime with reliability.** A server can have 365 days uptime while silently degrading — disk slowly filling, memory leaking, connections accumulating. Uptime tells you it hasn't rebooted, not that it's healthy.
+
+**Ignoring the idle time field.** The second number in `/proc/uptime` is total CPU idle time. On a 4-core machine with 1000s uptime, an idle time of 3800s means the CPUs were 95% idle on average. Useful sanity check.
+
+---
+
+## See also
+
+- `uptime.idle` — total CPU idle time from the same file; sanity-checks load average
+- `stat.procs_running` — if high after a reboot, something is not starting cleanly
+- `loadavg` — load average at 1/5/15 minutes; reboot resets this too
+- `journalctl -b -1` — logs from the previous boot session for reboot root-cause analysis

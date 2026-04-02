@@ -1,170 +1,144 @@
 # cpu_some_avg10
 
-## NAME
-`pressure.cpu_some_avg10` - metric signal from `pressure` (cpu_some_avg10)
+[日本語版](../ja/pressure.cpu_some_avg10.md)
 
-## WHY NOW
-Read this when pressure stalled-time behavior around `cpu_some_avg10` is noisy and you need a fast, defensible decision.
-If you cannot tell pressure stall signal around `cpu_some_avg10` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`cpu_some_avg10` is part of Linux's **PSI (Pressure Stall Information)**, introduced in kernel 4.20. It measures the percentage of time in the last 10 seconds during which at least one task was waiting for CPU — unable to run because all cores were busy.
 
-## Metric Snapshot
-- ID: `pressure.cpu_some_avg10`
-- Source: `pressure`
-- Field: `cpu_some_avg10`
-- Domain: stall accumulation and backpressure
-- Signal family: stall-time accumulation
+The scale is 0–100%. A value of 5.0 means that for 5% of the last 10 seconds, at least one process was ready to run but couldn't get a CPU.
 
-## Operational Meaning (Pressure Lens)
-This field is strongest for separating pressure stalled-time signal around `cpu_some_avg10` from side-effect noise when some/full trends diverge.
+```
+  PSI measures real waiting time, not utilization:
 
-## Field Episode (Pressure Lens)
-Average pressure looked acceptable while cumulative stall time explained tail-latency degradation.
+  CPU utilization:  ████████████████████░░░░  80% busy
+                    ↑ traditional metric — doesn't tell you if tasks are waiting
 
-For `cpu_some_avg10`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+  cpu_some_avg10:   ████░░░░░░░░░░░░░░░░░░░░  15% of time, someone was waiting
+                    ↑ PSI — directly measures "did processes get delayed?"
+```
 
-## Reading Protocol (Pressure Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `pressure` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+**Why PSI beats load average for CPU pressure:** Load average counts processes in the run queue but doesn't tell you the actual delay they experience. PSI measures the time processes spent stalled. A system with load=2.0 and cpu_some_avg10=40% is starving its processes. A system with load=6.0 and cpu_some_avg10=2% is busy but not hurting anyone.
 
-## Decision Heuristic (Pressure Family)
-If this field normalizes quickly after load drop, bias toward burst explanation; if not, investigate persistent contention.
+The `avg10` suffix means this is the 10-second exponential moving average. There are also `avg60` (1-minute) and `avg300` (5-minute) variants.
 
-## Failure Patterns To Avoid (Pressure Family)
-- Root-cause declaration from one pressure some/full snapshot.
-- Ignoring post-mitigation recovery shape in pressure timeline.
-- Confusing cross-layer pressure correlation with causation.
+---
 
-## Action Loop
-1. State a falsifiable hypothesis for `cpu_some_avg10`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+## Why does it matter?
 
-## Unix Internals Lens
+Load average can lie about CPU pressure — especially when I/O-blocked processes inflate it. PSI cannot lie: it is a direct measurement of scheduler delay.
 
-This field is a manifestation of **stall-time accumulation in kernel subsystems (cpu_some_avg10)**.
+**Where PSI shines:**
+- A system at 70% CPU utilization with cpu_some_avg10=0.5%: processes are well-scheduled, no one is starving.
+- A system at 50% CPU utilization with cpu_some_avg10=30%: something is serialized — lock contention, pinned to a single CPU, or noisy-neighbor cgroup interference.
 
-- Kernel path: runnable wait, memory reclaim stalls, I/O wait chains.
-- Typical trigger (cpu_some_avg10): resource contention that does not always raise CPU%.
-- Cross-check (cpu_some_avg10): runqueue, reclaim, and queue-depth signals.
+**SLO budgeting:** PSI is the metric behind Linux cgroup CPU throttling decisions and Facebook's `oomd`. If you are building latency SLOs, `cpu_some_avg10` tells you directly what fraction of time your processes were delayed — which maps cleanly to p99 latency.
 
-## Casebook (Pressure Family)
+**Noisy-neighbor detection:** In containerized environments, `cpu_some_avg10` at the cgroup level reveals which container is experiencing CPU starvation, even if system-wide CPU% looks fine.
 
-### Incident Slice 1 (Pressure)
-Case B (burst storm): Short periodic stalls were invisible in coarse dashboards but aligned perfectly with user complaints.
+---
 
-### Incident Slice 2 (Pressure)
-Case C (cross-layer confusion): Team blamed network; stall evidence showed memory contention as first mover.
+## How to read it
 
-### Incident Slice 3 (Pressure)
-Case A (utilization trap): CPU utilization looked moderate while PSI total climbed steadily. Hidden waiting, not execution, consumed SLO budget.
+```sh
+cat /proc/pressure/cpu
+# some avg10=2.45 avg60=1.83 avg300=1.20 total=12345678
+# full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+```
 
-## Failure Branches (Pressure Family)
-- Branch 1: Symptom improves but pressure trend does not. -> Revisit pressure causal layer assumption.
-- Branch 2: pressure trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve pressure evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check pressure stall and retry feedback loops.
+**`some` vs `full`:**
+- `some`: at least one task was waiting for CPU (one or more processes delayed)
+- `full`: ALL non-idle tasks were waiting for CPU simultaneously (system-wide stall — very serious)
 
-## Runbook Drill (Pressure Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+`full` is almost always 0 for CPU (it's common for I/O, not for CPU). Focus on `some` for CPU pressure.
 
-## MAN Notes (Pressure Lens)
-- This section mirrors man-page flow for pressure analysis: definition -> stalled-time context -> failure branches -> evidence order.
-- Prefer explicit timestamps and pressure-phase notes; narratives drift without stall-phase context.
-- If uncertain, follow SEE ALSO links before changing production pressure-related knobs.
+**Practical thresholds:**
 
-## Deep Appendix: Counterfactuals and Review Prompts (Pressure Family)
+| cpu_some_avg10 | Interpretation |
+|---|---|
+| 0 – 5% | Healthy — minimal CPU contention |
+| 5 – 20% | Moderate pressure — monitor for sustained levels |
+| 20 – 40% | High — latency impact likely, investigate runqueue |
+| > 40% | Severe — processes are starving, immediate attention needed |
 
-### Counterfactual Questions (Pressure)
-- If traffic had stayed constant, would pressure some/full transitions still move this field the same way?
-- If this field had remained flat, which non-pressure signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which pressure-linked user metric would have crossed first?
-- If only one layer could be instrumented, which pressure-adjacent layer would preserve most explanatory power?
+These are guidelines. A latency-sensitive real-time service might care about > 5%. A batch job might tolerate > 40%.
 
-### Timeline Template (Pressure Incident)
-- T-10m: baseline snapshot with pressure some/full annotation
-- T-5m: first pressure stalled-time anomaly candidate
-- T0: user symptom confirmed with pressure-side context
-- T+3m: first hypothesis written with pressure-stall assumption
-- T+6m: cross-source validation including scheduler or capacity source
-- T+10m: mitigation applied with rollback guard in pressure path
-- T+15m: trend reaction checked for pressure stall stabilization
-- T+30m: recovery confidence decision with pressure and symptom confirmation
+---
 
-### Evidence Quality Rubric (Pressure)
-- Strong: ordered, cross-layer, and pressure stalled-time-consistent trend evidence
-- Medium: correlated movement without clear pressure some/full boundary
-- Weak: isolated value with no pressure some/full context
+## A real episode
 
-### Postmortem Questions (Pressure)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+A Go microservice was showing p99 latency of 180ms against an SLO of 50ms. CPU utilization was 45% — plenty of headroom by conventional wisdom. Load average was 3.2 on an 8-core machine. Dashboards looked yellow, not red.
 
-### Anti-Drift Checklist (Pressure)
-- Keep one baseline note per environment, workload phase, and pressure profile.
-- Revalidate pressure-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with pressure+symptom context.
-- Link this article to at least two neighboring pressure or memory-path articles in your runbook.
+An engineer ran:
+```sh
+cat /proc/pressure/cpu
+# some avg10=38.2 avg60=35.1 avg300=29.8 total=...
+```
 
-## Incident Forensics
+CPU `some` pressure at 38%. More than a third of time, processes were waiting for a CPU slot. The culprit: the service was running in a Kubernetes pod with a CPU limit of 2000m (2 cores). The application was spawning goroutines that were fighting over 2 virtual CPUs even though the node had 8 physical cores.
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first stalled-time inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one source-specific capacity signal to test cross-layer consistency.
+Increasing the CPU limit to 4000m dropped `cpu_some_avg10` to 4.1% and p99 latency to 48ms — under SLO.
 
-### Decision Record
-- Primary claim: pressure.cpu_some_avg10 indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: cpu_some_avg10 was treated as evidence in a chain, not a singleton verdict.
+**Lesson:** CPU pressure (`cpu_some_avg10`) reveals contention even when utilization looks safe. Check cgroup CPU limits before assuming you have plenty of CPU.
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around pressure inflection windows.
-- Syscall lens: Syscall: identify blocking-call bursts aligned with pressure stalled-time transitions.
-- Scheduler lens: Scheduler: verify whether wait-to-run inflation amplified pressure stalled-time spikes.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around pressure shifts.
-- Field anchor: cpu_some_avg10
-- Source anchor: pressure
+---
 
-## Source Drillbook (Pressure Family)
+## What to do when it's high
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+**Step 1: Confirm it's sustained, not a spike.**
+```sh
+# Watch all three averages
+watch -n 5 'cat /proc/pressure/cpu'
+# If avg10 is high but avg300 is low, it's a recent burst
+```
 
-### Debrief Questions
-- Which pressure-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about stalled-time versus side effect?
-- What pressure instrumentation change would accelerate this drill next time?
+**Step 2: Check if a CPU limit is the constraint.**
+```sh
+# In a container/cgroup environment
+cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us
+cat /sys/fs/cgroup/cpu/cpu.cfs_period_us
+# quota/period < number of cores = throttling possible
+```
 
-### Anchor (Pressure)
-Field under practice: cpu_some_avg10
+**Step 3: Find which processes are consuming CPU.**
+```sh
+top -H        # thread-level, sorted by CPU
+pidstat 1 5   # per-process CPU usage over time
+```
 
-## Failure Archetype Matrix
-- Archetype A: silent pressure rise where utilization appears safe but stalled time climbs.
-- Archetype B: pressure some/full oscillation causing short recoveries and relapses.
-- Archetype C: pressure phase shift with delayed user-impact visibility.
-- Field in focus: cpu_some_avg10
+**Step 4: Check for CPU pinning or NUMA issues.**
+```sh
+taskset -p <pid>   # which CPUs is this process allowed to use?
+numastat           # NUMA memory access patterns
+```
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Step 5: Look at scheduler statistics.**
+```sh
+# Check runqueue length per CPU
+cat /proc/schedstat
+sar -q 1 5   # if sysstat installed
+```
+
+---
+
+## Common mistakes
+
+**Ignoring PSI because load average looks OK.** Load average is blind to cgroup CPU limits and CPU pinning. PSI is not. If you are running containers, load average will look fine while individual pods starve.
+
+**Confusing `cpu_some_avg10` with CPU utilization.** 38% PSI does not mean 38% CPU utilization. It means 38% of time, at least one process was delayed — even if overall CPU utilization is low.
+
+**Treating any nonzero value as a problem.** On a busy multi-tenant system, `cpu_some_avg10` of 2–5% is normal and harmless. Worry when it climbs above 20% and correlates with user-visible latency.
+
+**Ignoring `avg60` and `avg300`.** A high `avg10` with low `avg300` is a recent burst. A high `avg300` is a chronic problem. Both matter, but differently.
+
+---
+
+## See also
+
+- `pressure.cpu_full_avg10` — all tasks stalled simultaneously (extreme case)
+- `pressure.cpu_some_avg60` — 1-minute smoothed view of CPU pressure
+- `loadavg.load_1min` — traditional alternative (less precise for cgroup contexts)
+- `stat.cpu_iowait` — separates I/O wait from actual CPU pressure
+- `schedstat.runqueue_distribution` — per-CPU queue depth over time

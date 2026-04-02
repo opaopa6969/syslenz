@@ -1,168 +1,98 @@
-# Source Guide: meminfo
+# sourceguide: meminfo
 
-## NAME
-`sourceguide.meminfo` - source-level operational reading guide
+[日本語版](../ja/sourceguide.meminfo.md)
 
-## WHY NOW
-Read this when you need to interpret one source without losing cross-source context.
-If a single source looks convincing, use this article to validate what it cannot prove alone.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is this source?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`/proc/meminfo` is the kernel's real-time memory accounting ledger. Every line is a named counter updated by the kernel's memory management subsystem — page allocator, slab allocator, swap mechanism, and page cache — without buffering or delay.
 
-## Why This Source Exists
-`meminfo` is a protocol-oriented telemetry surface. It helps connect socket behavior, packet lifecycle, and user-visible latency.
+```
+  Physical RAM
+  ┌─────────────────────────────────────────────┐
+  │  Kernel (slab, page tables, etc.)           │
+  │  Page cache (file-backed)  ← Cached         │
+  │    └─ Dirty pages          ← Dirty          │
+  │  Anonymous pages (heap/stack) ← AnonPages   │
+  │  Free                      ← MemFree        │
+  └─────────────────────────────────────────────┘
+        │                            │
+     Swap out                    Swap in
+        ▼                            ▲
+  Swap space (disk)           ← SwapFree tracks remaining
+```
 
-## Episode From Operations
-A service looked healthy at CPU and memory level, but protocol-level counters in this source exposed retry and state-transition anomalies that explained intermittent timeouts.
+The numbers here are what the kernel *actually knows* about RAM — not what a monitoring agent inferred.
 
-## How To Read This Source
-1. Start from stable baseline counters.
-2. Track which counters move first during load spikes.
-3. Compare trend with sibling network sources (`ss`, conntrack, pressure).
-4. Map counter drift to connection lifecycle stages.
+---
 
-## Pattern Library
-- Healthy: counters scale with traffic and settle quickly.
-- Warning: specific error/retry counters trend independently of traffic growth.
-- Critical: multiple error paths rise while successful progression stalls.
+## What questions does it answer?
 
-## Suggested Workflow
-1. Mark first anomaly timestamp.
-2. Cross-check one socket-level and one pressure-level source.
-3. Decide mitigation (rate shaping, timeout tuning, retry policy adjustments).
-4. Document evidence chain for repeat incidents.
+- How much memory can a new allocation actually use? (`MemAvailable`)
+- Is the system paging anonymous memory to swap? (`SwapFree` trend)
+- How large is the page cache, and is it building up dirty data? (`Cached`, `Dirty`)
+- Are anonymous pages (heap, stack, mmap) growing unexpectedly? (`AnonPages`)
+- Is the kernel holding back memory in free lists or slab caches? (`MemFree`, `SReclaimable`)
 
-## Unix Internals Lens
+---
 
-This field is a manifestation of **Unix kernel execution side effects**.
+## Key fields to watch
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+| Field | What it means | Why it matters |
+|---|---|---|
+| `MemAvailable` | Estimated free + reclaimable memory | The realistic "how much can I allocate" number. More useful than MemFree alone. |
+| `AnonPages` | Anonymous (non-file) pages in RAM | Growing means heap/mmap expansion. Shrinking under load means swap pressure. |
+| `Cached` | Page cache size (file-backed pages) | High is fine; it means I/O is being absorbed. Watch for it squeezing AnonPages. |
+| `Dirty` | Pages written but not yet flushed | Persistent high values mean write backlog. Spikes precede flush storms. |
+| `SwapFree` | Free swap space remaining | Falling means anonymous pages are being evicted — a serious pressure signal. |
+| `SReclaimable` | Reclaimable slab memory (dentries, inodes) | Can be freed under pressure; included in MemAvailable calculation. |
+| `Writeback` | Pages currently being flushed to disk | High alongside Dirty means flush is running. Zero with high Dirty means flush stalled. |
 
-## Systems Narrative (Memory)
+---
 
-This signal (sourceguide.meminfo) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+## How to read it directly
 
-### Episode: Dashboard Confidence vs User Pain (Memory)
-- The dashboard looked green because memory averages stayed normal.
-- User-facing latency regressed only in memory burst windows.
-- This memory field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large memory tuning change, but narrowing uncertainty quickly.
+```sh
+cat /proc/meminfo
+```
 
-### Cross-Layer Translation (Memory)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+Typical output on a lightly loaded 64 GB server:
 
-### What Senior Reviewers Usually Ask (Memory)
-- Which memory counter moved first in time order?
-- Which memory counter looked persuasive but was later demoted to a side effect?
-- Which memory execution path likely carried the user-visible penalty?
-- Which memory mitigation was reversible and what rollback trigger was defined?
+```
+MemTotal:       65780736 kB
+MemFree:         2341024 kB
+MemAvailable:   58200448 kB
+Buffers:           19840 kB
+Cached:         56023552 kB
+SwapCached:            0 kB
+AnonPages:       4312064 kB
+Dirty:              2304 kB
+Writeback:             0 kB
+SwapTotal:       8388604 kB
+SwapFree:        8388604 kB
+SReclaimable:    3201024 kB
+```
 
-### Combining With Unix Internals (Memory)
-- Process model (Memory lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Memory lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Memory lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Memory lens): did fairness protect throughput while harming tail latency?
+To watch it live and filter to the fields you care about:
 
-### Practical Mentor Notes (Memory)
-Treat meminfo as one scene in a longer diagnostic narrative.
-The memory narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+```sh
+watch -n 1 'grep -E "MemAvailable|AnonPages|Dirty|Writeback|SwapFree" /proc/meminfo'
+```
 
-## Incident Lab (Memory)
+---
 
-### Drill A: First-Mover Detection (Memory)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+## A real episode
 
-### Drill B: Reversible Mitigation Design (Memory)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+A batch processing job ran nightly and completed successfully, but morning response times were elevated for 20–30 minutes after it finished. `/proc/meminfo` showed: during the batch job, `Cached` had grown to fill nearly all RAM. After the job ended, `AnonPages` for the web service began growing again — and `MemAvailable` was low enough that each allocation triggered reclaim from the page cache. `Dirty` was spiking during these reclaim events because the batch writes hadn't fully flushed.
 
-### Drill C: Evidence Compression (Memory)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+The fix was not adding RAM. It was bounding the batch job's I/O with `ionice` to prevent it from monopolizing the page cache, and tuning `vm.dirty_background_ratio` to flush more aggressively during the batch window. `MemAvailable` after the batch run stayed above 4 GB, and the morning latency bump disappeared.
 
-### Review Outcome (Memory)
-If your team can replay this memory article as a short diagnostic script, the article is operationally useful.
+---
 
-## Quick Checklist (Memory)
-- Identify one memory-affected user-facing symptom and timestamp.
-- Identify one first-moving memory signal.
-- Identify one cross-layer memory confirmation signal.
-- State one reversible memory action.
-- State one memory rollback condition.
-- Verify memory trend recovery after action.
+## See also
 
-## Advanced Practice Notes
-
-### Focus
-Source-level operational literacy for meminfo.
-
-### Operator Exercise
-1. Write one failure narrative where this article was primary evidence.
-2. Write one narrative where this article was only a supporting clue.
-3. Compare both and identify the earliest divergence point.
-
-### Escalation Boundary
-- Escalate when symptom severity rises while this signal remains ambiguous.
-- Avoid escalation if one more cross-layer check can resolve uncertainty in minutes.
-
-### Coaching Prompt
-Ask a junior engineer to explain this article without charts.
-If they can state cause candidates, disproof steps, and rollback-safe action, the understanding is operational.
-
-## Micro Episodes
-
-### Episode 1
-MemAvailable looked stable, yet slab-related movement reduced practical headroom. The decisive clue came from reading reserve and reclaimability together.
-
-### Episode 2
-The mitigation was not adding memory first; it was reducing burst allocation shape and re-measuring.
-
-### Use In Review
-In post-incident review, ask which episode pattern is closer to the observed timeline and which evidence is still missing.
-
-## Incident Forensics
-
-### Evidence Capture
-- Use this source as an index into neighboring sources rather than a standalone authority.
-- The reading quality improves when you can explain what this source cannot prove by itself.
-
-### Decision Record
-- Primary claim: sourceguide.meminfo indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: meminfo was treated as evidence in a chain, not a singleton verdict.
-
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: meminfo
-- Source anchor: sourceguide
-
-## Failure Archetype Matrix
-- Archetype A: source treated as verdict instead of index into neighboring evidence.
-- Archetype B: threshold crossing fixation while trend-shape evidence is ignored.
-- Archetype C: mitigation attempted before confirming cross-layer sequence.
-- Field in focus: meminfo
-
-## Counterfactual Branches
-1. If this source is removed, which two sources can reconstruct the same conclusion?
-2. If values stay normal but user pain grows, what trend clue was likely missed?
-3. What neighboring-source observation would invalidate your current mitigation immediately?
+- `sourceguide.vmstat` — cumulative counters for page faults, swap I/O, and reclaim activity
+- `sourceguide.pressure` — time-based pressure stall metrics (are processes actually blocked on memory?)
+- `vmstat.nr_dirty` — dirty page count with thresholds and flush storm explanation
+- `sourceguide.swaps` — swap area inventory and usage breakdown

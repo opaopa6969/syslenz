@@ -1,170 +1,127 @@
 # pgfault
 
-## NAME
-`vmstat.pgfault` - metric signal from `vmstat` (pgfault)
+[日本語版](../ja/vmstat.pgfault.md)
 
-## WHY NOW
-Read this when vmstat reclaim and scan behavior around `pgfault` is noisy and you need a fast, defensible decision.
-If you cannot tell reclaim pressure around `pgfault` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`pgfault` counts the total number of **page faults** — events where a process accesses a virtual memory address that doesn't have a physical memory page mapped to it yet. The kernel intercepts this, maps the page, and lets the process continue.
 
-## Metric Snapshot
-- ID: `vmstat.pgfault`
-- Source: `vmstat` (`pgfault`)
-- Field: `pgfault`
-- Domain: virtual memory and reclaim behavior
-- Signal family: reclaim and page-lifecycle pressure
+Almost all page faults are **minor faults**: the page already exists in RAM (perhaps in the page cache or shared memory), and the kernel just needs to update the process's page table to point to it. This is fast — microseconds.
 
-## Operational Meaning (VMStat Lens)
-This field is strongest for separating vmstat reclaim signal around `pgfault` from side-effect noise when scan and reclaim trends diverge.
+The count in `/proc/vmstat` is cumulative since boot. What matters is the **rate** of change, not the absolute value.
 
-## Field Episode (VMStat Lens)
-During a latency spike, reclaim-related counters moved before user-visible error rate changed.
+```
+  Process accesses address 0xABCD1234
+           │
+           v
+  ┌──────────────────┐
+  │  Page table: ?   │  <- no mapping yet → PAGE FAULT
+  └──────────────────┘
+           │
+           ├─ Page in RAM (page cache, shared)?  → MINOR fault: just map it
+           │
+           └─ Page NOT in RAM?                   → MAJOR fault: read from disk
+```
 
-For `pgfault`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+Think of minor faults like finding a book already on your desk — you just need to pick it up. Major faults are like having to go to the library to get the book first.
 
-## Reading Protocol (VMStat Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `vmstat` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+---
 
-## Decision Heuristic (VMStat Family)
-If mitigation changes user latency but not this field trend, re-check the assumed causal layer.
+## Why does it matter?
 
-## Failure Patterns To Avoid (VMStat Family)
-- Root-cause declaration from one vmstat reclaim/scan snapshot.
-- Ignoring post-mitigation recovery shape in vmstat timeline.
-- Confusing cross-layer vmstat correlation with causation.
+A moderate rate of `pgfault` (minor faults) is completely normal. Every time a process allocates memory and first touches a page, or first accesses a shared library, or inherits a copy-on-write page after a fork, it generates a minor fault. Tens of thousands per second is not unusual on a busy system.
 
-## Action Loop
-1. State a falsifiable hypothesis for `pgfault`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+**When to pay attention:**
 
-## Unix Internals Lens
+- **Rate spikes after a deployment** — new code may have different memory access patterns, causing more frequent minor faults. Usually not a problem, but worth noting.
+- **Sustained high rate with high CPU system time** — minor fault handling runs in kernel context; very high fault rates can add up to meaningful kernel CPU overhead.
+- **pgfault rising without corresponding work increase** — may indicate memory fragmentation, inefficient memory allocation, or a leak causing the process to constantly allocate and map new pages.
 
-This field is a manifestation of **virtual memory state transitions (`pgfault`)**.
+The sister metric `pgmajfault` (major faults) is where serious performance problems usually live. Always check both together.
 
-- Kernel path: reclaim, compaction, page fault handling, swap policy.
-- Typical trigger (`pgfault`): memory pressure or workload phase shift.
-- Cross-check: scheduler delay and storage writeback side effects.
+---
 
-## Casebook (VMStat Family)
+## How to read it
 
-### Incident Slice 1 (VMStat)
-Case B (batch job overlap): Nightly batch overlapped with API peak. Reclaim and major-fault signals increased before error rate. Mitigation was workload staggering, not node restart.
+```sh
+# Rate of page faults per second (system-wide)
+vmstat 1 | awk '{print $10, $11}'   # columns: minor, major faults
 
-### Incident Slice 2 (VMStat)
-Case C (misleading average): Hourly average memory looked safe. Per-window trend showed reclaim spikes every few minutes, matching p99 bursts.
+# Per-process page fault rate
+pidstat -f 1 5
+# or
+/usr/bin/time -v <command>   # shows major+minor faults after completion
+```
 
-### Incident Slice 3 (VMStat)
-Case A (memory squeeze): Cache looked large at T0, but reclaim counters rose first and scheduler delay followed. The first wrong move was forcing GC/compaction in app. The right move was reducing burst allocation rate and confirming reclaim slope recovery.
+| `pgfault` rate (per second) | Interpretation |
+|-----------------------------|----------------|
+| 0–10,000/s | Normal; light workload |
+| 10,000–100,000/s | Normal under active workload |
+| 100,000–500,000/s | Heavy; check for memory pressure |
+| 500,000+/s | Very high; investigate process memory patterns |
 
-## Failure Branches (VMStat Family)
-- Branch 1: Symptom improves but vmstat trend does not. -> Revisit vmstat causal layer assumption.
-- Branch 2: vmstat trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve vmstat evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check vmstat reclaim and retry feedback loops.
+**Compare with `pgmajfault`:**
+- If `pgfault` is 50,000/s and `pgmajfault` is 5/s → normal minor fault activity
+- If `pgfault` is 50,000/s and `pgmajfault` is 2,000/s → significant disk I/O from page faults
 
-## Runbook Drill (VMStat Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+---
 
-## MAN Notes (VMStat Lens)
-- This section mirrors man-page flow for vmstat reclaim analysis of `pgfault`: definition -> scan/reclaim context -> failure branches -> evidence order.
-- Prefer explicit timestamps and vmstat reclaim-phase notes; narratives drift without phase context.
-- If uncertain, follow SEE ALSO links before changing production vmstat-related memory knobs.
+## A real episode
 
-## Deep Appendix: Counterfactuals and Review Prompts (VMStat Family)
+A search service was running a nightly re-indexing job. Engineers noticed `cpu_system` spiked to 40% during the job — much higher than the 5% seen during normal queries. Application CPU (`cpu_user`) was normal. What was the kernel doing?
 
-### Counterfactual Questions (VMStat)
-- If traffic had stayed constant, would vmstat reclaim and scan transitions still move this field the same way?
-- If this field had remained flat, which non-vmstat signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which vmstat-linked user metric would have crossed first?
-- If only one layer could be instrumented, which vmstat-adjacent layer would preserve most explanatory power?
+`pidstat -f 1` during the job showed:
+```
+PID  minflt/s  majflt/s
+1842  87,000      1.2
+```
 
-### Timeline Template (VMStat Incident)
-- T-10m: baseline snapshot with vmstat reclaim/scan phase annotation for `pgfault`
-- T-5m: first vmstat reclaim or scan anomaly candidate around `pgfault`
-- T0: user symptom confirmed with vmstat-side context around `pgfault`
-- T+3m: first hypothesis written with vmstat reclaim assumption for `pgfault`
-- T+6m: cross-source validation including scheduler or writeback for `pgfault`
-- T+10m: mitigation applied with rollback guard in the vmstat path for `pgfault`
-- T+15m: trend reaction checked for vmstat reclaim stabilization around `pgfault`
-- T+30m: recovery confidence decision with vmstat and pressure confirmation for `pgfault`
+87,000 minor faults per second from the indexer. The job allocated large buffers repeatedly, used them briefly, freed them, and reallocated — causing a constant cycle of new page mappings. The fix was to pre-allocate a pool at startup and reuse it, reducing minor faults to 3,000/s and dropping `cpu_system` to 8%.
 
-### Evidence Quality Rubric (VMStat)
-- Strong: ordered, cross-layer, and vmstat reclaim-consistent trend evidence for `pgfault`
-- Medium: correlated movement without clear vmstat reclaim/scan boundary
-- Weak: isolated value with no vmstat reclaim/scan context around `pgfault`
+**Lesson:** Minor faults are cheap individually but expensive at scale. A process generating 80,000 minor faults per second is making 80,000 kernel trap-and-return cycles per second. On a latency-sensitive system, this adds up.
 
-### Postmortem Questions (VMStat)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+---
 
-### Anti-Drift Checklist (VMStat)
-- Keep one baseline note per environment, workload phase, and vmstat reclaim mode.
-- Revalidate vmstat-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with vmstat+pressure context.
-- Link this article to at least two neighboring vmstat or memory-path articles in your runbook.
+## What to do when the rate is high
 
-## Incident Forensics
+**Step 1: Identify which process is generating faults.**
+```sh
+pidstat -f 1 5
+# minflt/s = minor fault rate, majflt/s = major fault rate
+```
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first reclaim or scan inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one writeback or swap signal to test cross-layer consistency.
+**Step 2: Is it causing a real problem?**
+Check `cpu_system` — if kernel CPU is elevated, fault handling overhead may be the cause. Check application latency.
 
-### Decision Record
-- Primary claim: vmstat.pgfault indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: pgfault was treated as evidence in a chain, not a singleton verdict.
+**Step 3: If major faults are also high, that's the priority.**
+See `vmstat.pgmajfault` — major faults require disk I/O and are orders of magnitude more expensive.
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around vmstat inflection windows.
-- Syscall lens: Syscall: identify page-fault and memory-touching call bursts aligned with the vmstat transitions for `pgfault`.
-- Scheduler lens: Scheduler: verify whether reclaim-side waiting inflated wake latency during vmstat spikes.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around vmstat shifts.
-- Field anchor: pgfault
-- Source anchor: vmstat (`pgfault`)
+**Step 4: Reduce minor fault rate.**
+```sh
+# Use huge pages to reduce page table overhead (if app supports it)
+echo madvise > /sys/kernel/mm/transparent_hugepage/enabled
 
-## Source Drillbook (VMStat Family)
+# Check if process is using mmap heavily and repeatedly
+strace -e mmap,mprotect -p <PID> 2>&1 | head -30
+```
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+---
 
-### Debrief Questions
-- Which vmstat-side step around `pgfault` produced the highest confidence gain?
-- Which step failed to reduce uncertainty about reclaim pressure around `pgfault` versus side effect?
-- What vmstat instrumentation change around `pgfault` would accelerate this drill next time?
+## Common mistakes
 
-### Anchor (VMStat)
-Field under practice: pgfault
+**Confusing cumulative values with rates.** `/proc/vmstat` shows totals since boot. A high number after weeks of uptime is expected. Always look at the **rate of change** (use `vmstat 1` or `pidstat`).
 
-## Failure Archetype Matrix
-- Archetype A (`pgfault`): silent vmstat reclaim pressure where utilization looks safe but stalls rise.
-- Archetype B (`pgfault`): vmstat reclaim oscillation causing repeated short recoveries and relapses.
-- Archetype C (`pgfault`): vmstat scan/reclaim phase shift with delayed user-impact visibility.
-- Field in focus: pgfault
+**Worrying about minor faults before checking major faults.** Major faults involve disk I/O and are ~1000x more expensive than minor faults. If `pgmajfault` is rising, that's the urgent problem.
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Not correlating with cpu_system.** Page fault handling runs in kernel space. Very high minor fault rates will show up as elevated `cpu_system`. If `cpu_system` is high and you don't see obvious syscall activity, check fault rates.
+
+---
+
+## See also
+
+- `vmstat.pgmajfault` — major page faults; requires reading from disk; the expensive version
+- `vmstat.pswpin` — pages read from swap; a primary source of major faults
+- `stat.cpu_system` — kernel CPU time; elevated by high fault rates
+- `pressure/memory_some_avg10` — whether memory pressure is causing task delays

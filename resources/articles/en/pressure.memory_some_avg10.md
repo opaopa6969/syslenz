@@ -1,170 +1,150 @@
 # memory_some_avg10
 
-## NAME
-`pressure.memory_some_avg10` - metric signal from `pressure` (memory_some_avg10)
+[日本語版](../ja/pressure.memory_some_avg10.md)
 
-## WHY NOW
-Read this when pressure stalled-time behavior around `memory_some_avg10` is noisy and you need a fast, defensible decision.
-If you cannot tell pressure stall signal around `memory_some_avg10` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`memory_some_avg10` measures the percentage of time in the last 10 seconds during which at least one task was stalled waiting for memory — unable to proceed because the kernel was reclaiming pages, waiting for swap I/O, or handling a memory allocation that couldn't complete immediately.
 
-## Metric Snapshot
-- ID: `pressure.memory_some_avg10`
-- Source: `pressure`
-- Field: `memory_some_avg10`
-- Domain: stall accumulation and backpressure
-- Signal family: stall-time accumulation
+It is part of Linux PSI (Pressure Stall Information), available since kernel 4.20, and is read from `/proc/pressure/memory`.
 
-## Operational Meaning (Pressure Lens)
-This field is strongest for separating pressure stalled-time signal around `memory_some_avg10` from side-effect noise when some/full trends diverge.
+```
+  What memory stalls look like:
 
-## Field Episode (Pressure Lens)
-Average pressure looked acceptable while cumulative stall time explained tail-latency degradation.
+  Process wants to allocate memory
+         |
+         v
+  Kernel: "I need to reclaim pages first"
+         |
+         v
+  Process BLOCKS — it is counted in memory_some_avg10
+         |
+         v
+  Kernel frees pages (evicts cache, reads from swap)
+         |
+         v
+  Process continues
 
-For `memory_some_avg10`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+  memory_some_avg10 = % of time spent in the "blocked" step above
+```
 
-## Reading Protocol (Pressure Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `pressure` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+**Why this matters more than MemAvailable:** `MemAvailable` tells you how much free memory exists. `memory_some_avg10` tells you whether processes are actually experiencing delays because of memory pressure. A system can have 2GB MemAvailable and still show `memory_some_avg10=25%` if the kernel is constantly reclaiming cache pages to serve a working set that barely fits.
 
-## Decision Heuristic (Pressure Family)
-If this field rises while sibling pressure fields stay flat, verify whether the change is workload-shape related rather than capacity failure.
+---
 
-## Failure Patterns To Avoid (Pressure Family)
-- Root-cause declaration from one pressure some/full snapshot.
-- Ignoring post-mitigation recovery shape in pressure timeline.
-- Confusing cross-layer pressure correlation with causation.
+## Why does it matter?
 
-## Action Loop
-1. State a falsifiable hypothesis for `memory_some_avg10`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+Memory pressure is one of the hardest problems to diagnose because it often shows up as mysterious latency without any obvious memory exhaustion. `memory_some_avg10` bridges that gap.
 
-## Unix Internals Lens
+**Scenario A — silent killer:** A service has 60% memory utilization, MemAvailable shows 4GB free, but p99 latency spikes every 30 seconds. Nobody suspects memory. `memory_some_avg10` shows 18%: the working set is just barely fitting in RAM, and the kernel is frantically reclaiming LRU pages every time a new allocation arrives.
 
-This field is a manifestation of **stall-time accumulation in kernel subsystems (memory_some_avg10)**.
+**Scenario B — swap blindspot:** A machine has swap enabled. MemAvailable is 512MB. The machine is not swapping visibly. But `memory_some_avg10` is 45%, and `memory_full_avg10` is 12% (all tasks stalled). The system is in deep memory trouble that neither MemAvailable nor swap usage makes obvious.
 
-- Kernel path: runnable wait, memory reclaim stalls, I/O wait chains.
-- Typical trigger (memory_some_avg10): resource contention that does not always raise CPU%.
-- Cross-check (memory_some_avg10): runqueue, reclaim, and queue-depth signals.
+**Cgroup-level visibility:** In containerized environments, `/sys/fs/cgroup/memory.pressure` shows PSI for individual containers. A pod can be experiencing memory stalls even when the node appears healthy.
 
-## Casebook (Pressure Family)
+---
 
-### Incident Slice 1 (Pressure)
-Case B (burst storm): Short periodic stalls were invisible in coarse dashboards but aligned perfectly with user complaints.
+## How to read it
 
-### Incident Slice 2 (Pressure)
-Case C (cross-layer confusion): Team blamed network; stall evidence showed memory contention as first mover.
+```sh
+cat /proc/pressure/memory
+# some avg10=3.21 avg60=2.87 avg300=1.54 total=34567890
+# full avg10=0.12 avg60=0.08 avg300=0.03 total=789012
+```
 
-### Incident Slice 3 (Pressure)
-Case A (utilization trap): CPU utilization looked moderate while PSI total climbed steadily. Hidden waiting, not execution, consumed SLO budget.
+**`some` vs `full`:**
+- `some` (memory_some_avg10): At least one task was stalled for memory. Most of the time, other tasks could still run. Indicates memory pressure is present.
+- `full` (memory_full_avg10): ALL non-idle tasks were stalled simultaneously. CPU was idle while every process waited for memory. This is severe — system is nearly unusable.
 
-## Failure Branches (Pressure Family)
-- Branch 1: Symptom improves but pressure trend does not. -> Revisit pressure causal layer assumption.
-- Branch 2: pressure trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve pressure evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check pressure stall and retry feedback loops.
+A `full` value above 1–2% is a serious alarm. `some` up to 10% can be tolerated on some workloads.
 
-## Runbook Drill (Pressure Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+**Practical thresholds:**
 
-## MAN Notes (Pressure Lens)
-- This section mirrors man-page flow for pressure analysis: definition -> stalled-time context -> failure branches -> evidence order.
-- Prefer explicit timestamps and pressure-phase notes; narratives drift without stall-phase context.
-- If uncertain, follow SEE ALSO links before changing production pressure-related knobs.
+| memory_some_avg10 | Interpretation |
+|---|---|
+| 0 – 2% | Healthy |
+| 2 – 10% | Light pressure — worth monitoring |
+| 10 – 25% | Moderate — latency impact likely, check MemAvailable and swap |
+| > 25% | High — significant stall time, investigate reclaim |
+| > 50% | Critical — system is struggling, OOM risk |
 
-## Deep Appendix: Counterfactuals and Review Prompts (Pressure Family)
+---
 
-### Counterfactual Questions (Pressure)
-- If traffic had stayed constant, would pressure some/full transitions still move this field the same way?
-- If this field had remained flat, which non-pressure signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which pressure-linked user metric would have crossed first?
-- If only one layer could be instrumented, which pressure-adjacent layer would preserve most explanatory power?
+## A real episode
 
-### Timeline Template (Pressure Incident)
-- T-10m: baseline snapshot with pressure some/full annotation
-- T-5m: first pressure stalled-time anomaly candidate
-- T0: user symptom confirmed with pressure-side context
-- T+3m: first hypothesis written with pressure-stall assumption
-- T+6m: cross-source validation including scheduler or capacity source
-- T+10m: mitigation applied with rollback guard in pressure path
-- T+15m: trend reaction checked for pressure stall stabilization
-- T+30m: recovery confidence decision with pressure and symptom confirmation
+A machine learning inference service was hit by periodic latency spikes — every 2–3 minutes, p99 latency would jump from 80ms to 600ms for about 10 seconds. The memory utilization alerts were set at 90% usage, and the machine was at 72%. Nothing triggered.
 
-### Evidence Quality Rubric (Pressure)
-- Strong: ordered, cross-layer, and pressure stalled-time-consistent trend evidence
-- Medium: correlated movement without clear pressure some/full boundary
-- Weak: isolated value with no pressure some/full context
+An engineer set up a quick monitoring loop:
+```sh
+while true; do
+  date
+  cat /proc/pressure/memory
+  sleep 5
+done
+```
 
-### Postmortem Questions (Pressure)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+The output showed `memory_some_avg10` oscillating between 0.5% (normal) and 28–35% (spike windows). The spikes aligned perfectly with the latency events.
 
-### Anti-Drift Checklist (Pressure)
-- Keep one baseline note per environment, workload phase, and pressure profile.
-- Revalidate pressure-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with pressure+symptom context.
-- Link this article to at least two neighboring pressure or memory-path articles in your runbook.
+Further investigation: the inference model had a hot access pattern that cycled through 3.2GB of model weights. The machine had 8GB RAM but was running multiple other services. The effective available RAM for this service was ~2.8GB. Every 2 minutes, the kernel evicted model weights from page cache to serve another service's allocations — and when the model accessed those weights again, it triggered major page faults and memory reclaim.
 
-## Incident Forensics
+Fix: pinned the model weights into memory with `mlock()`, reserved memory limit on the competing services. Latency spikes disappeared.
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first stalled-time inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one source-specific capacity signal to test cross-layer consistency.
+**Lesson:** `memory_some_avg10` can pinpoint memory-driven latency that MemAvailable and utilization percentages completely miss.
 
-### Decision Record
-- Primary claim: pressure.memory_some_avg10 indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: memory_some_avg10 was treated as evidence in a chain, not a singleton verdict.
+---
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around pressure inflection windows.
-- Syscall lens: Syscall: identify blocking-call bursts aligned with pressure stalled-time transitions.
-- Scheduler lens: Scheduler: verify whether wait-to-run inflation amplified pressure stalled-time spikes.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around pressure shifts.
-- Field anchor: memory_some_avg10
-- Source anchor: pressure
+## What to do when it's high
 
-## Source Drillbook (Pressure Family)
+**Step 1: Check `full` as well as `some`.**
+```sh
+cat /proc/pressure/memory
+```
+If `full_avg10` > 2%, treat as critical. If only `some` is high, there is still headroom.
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+**Step 2: Check MemAvailable and swap.**
+```sh
+free -h
+vmstat 1 5   # si/so columns: swap in/swap out per second
+```
+High `memory_some_avg10` with low swap activity means reclaim is happening in page cache (evicting file-backed pages). High swap I/O means the system is going beyond cache into swap.
 
-### Debrief Questions
-- Which pressure-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about stalled-time versus side effect?
-- What pressure instrumentation change would accelerate this drill next time?
+**Step 3: Find who is consuming memory.**
+```sh
+ps aux --sort=-%mem | head -20
+# Or for cgroups:
+cat /sys/fs/cgroup/*/memory.current 2>/dev/null | sort -rn | head -10
+```
 
-### Anchor (Pressure)
-Field under practice: memory_some_avg10
+**Step 4: Check for page reclaim activity.**
+```sh
+vmstat 1 5
+# Look at 'si'/'so' (swap) and 'bi'/'bo' (block I/O)
+# High 'bi' with no obvious I/O workload = page reclaim reading from swap or disk
+```
 
-## Failure Archetype Matrix
-- Archetype A: silent pressure rise where utilization appears safe but stalled time climbs.
-- Archetype B: pressure some/full oscillation causing short recoveries and relapses.
-- Archetype C: pressure phase shift with delayed user-impact visibility.
-- Field in focus: memory_some_avg10
+**Step 5: Consider adding memory or adjusting limits.**
+If reclaim is constant and unavoidable, the working set doesn't fit. Add RAM, reduce memory limits on other services, or reduce the working set.
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+---
+
+## Common mistakes
+
+**Setting memory alerts only on MemFree or utilization percentage.** These metrics tell you how much memory is used, not whether processes are being hurt by it. A busy kernel can have processes stalling at 70% utilization.
+
+**Ignoring `memory_full_avg10`.** The `some` metric is a warning. The `full` metric is an emergency. Not checking `full` means you might miss the system tipping into near-unusable state.
+
+**Attributing latency spikes to network or application bugs without checking PSI.** Memory-driven latency looks identical to network latency from outside the system. Check `memory_some_avg10` before opening a packet capture.
+
+**Thinking swap == memory pressure.** A system with swap disabled can have severe memory pressure (all reclaim from page cache). A system actively swapping might show lower `memory_some_avg10` than one thrashing page cache. PSI measures the actual stall, not the mechanism.
+
+---
+
+## See also
+
+- `memory_full_avg10` — when ALL tasks are stalled (critical threshold)
+- `memory_some_avg60` — 1-minute view for trend confirmation
+- `meminfo.MemAvailable` — available memory estimate (complement to PSI)
+- `vmstat.pgmajfault` — major page faults, often correlated with memory stalls
+- `pressure.io_some_avg10` — I/O pressure, often co-occurs with memory pressure during swap

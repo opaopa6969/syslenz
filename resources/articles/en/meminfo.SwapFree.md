@@ -1,170 +1,137 @@
 # SwapFree
 
-## NAME
-`meminfo.SwapFree` - metric signal from `meminfo` (SwapFree)
+[日本語版](../ja/meminfo.SwapFree.md)
 
-## WHY NOW
-Read this when meminfo headroom and reclaimability behavior around `SwapFree` is noisy and you need a fast, defensible decision.
-If you cannot tell headroom erosion around `SwapFree` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`SwapFree` is the unused space remaining in your swap partition or swap file. Swap is disk space reserved to hold anonymous memory pages that the kernel has evicted from RAM.
 
-## Metric Snapshot
-- ID: `meminfo.SwapFree`
-- Source: `meminfo`
-- Field: `SwapFree`
-- Domain: memory capacity and reclaim headroom
-- Signal family: swap pressure and memory fallback behavior
+Think of swap as a safety net at the bottom of a tightrope — it stops you from crashing completely, but you never want to fall onto it. Swap is not extra RAM. Even on an NVMe SSD, swap is **10 to 100 times slower** than RAM.
 
-## Operational Meaning (MemInfo Lens)
-This field is strongest for separating meminfo headroom signal around `SwapFree` from side-effect noise when free/reclaimable trends diverge.
+```
+  RAM: nanosecond access
+  ┌──────────────────────────────────────┐
+  │ App A  │ App B  │ Cache  │ Free      │
+  └──────────────────────────────────────┘
+                ↓ kernel evicts App B to swap
+  Swap (disk): microsecond to millisecond access
+  ┌────────────────┐
+  │ App B (paged)  │ SwapTotal - SwapFree
+  └────────────────┘
+```
 
-## Field Episode (MemInfo Lens)
-Swap-related movement stayed low at first, then accelerated when cache headroom collapsed.
+`SwapFree = SwapTotal - (swap currently in use)`
 
-For `SwapFree`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+---
 
-## Reading Protocol (MemInfo Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `meminfo` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+## Why does it matter?
 
-## Decision Heuristic (MemInfo Family)
-If this field and a queue/stall indicator co-move for multiple snapshots, treat it as actionable, not transient noise.
+**SwapFree declining over time means your system is accumulating swap usage.** If it never comes back up, something is leaking memory. If it bounces — swap fills and drains — the system is under pressure but recovering.
 
-## Failure Patterns To Avoid (MemInfo Family)
-- Root-cause declaration from one meminfo headroom/reclaimability snapshot.
-- Ignoring post-mitigation recovery shape in meminfo timeline.
-- Confusing cross-layer meminfo correlation with causation.
+**The real danger is not SwapFree = 0; it's active swap I/O.** A system with 2 GB in swap but no active swapping is stable. A system with 500 MB in swap and `vmstat` showing `so=50` (50 pages swapped out per second) is under active stress — your applications are running in slow motion.
 
-## Action Loop
-1. State a falsifiable hypothesis for `SwapFree`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+**SwapFree = SwapTotal (no swap used) is ideal** but doesn't mean you're safe — it might mean swap hasn't been needed *yet*. Watch `MemAvailable` for the leading indicator.
 
-## Unix Internals Lens
+---
 
-This field is a manifestation of **memory accounting surfaces (SwapFree)**.
+## How to read it
 
-- Kernel path (SwapFree): allocator, page cache, slab, reclaim boundaries.
-- Typical trigger (SwapFree): cache growth/shrink, allocation bursts, background reclaim.
-- Cross-check (SwapFree): vmstat reclaim counters and pressure metrics.
+```sh
+# Swap status
+grep -E "SwapTotal|SwapFree|SwapCached" /proc/meminfo
 
-## Casebook (MemInfo Family)
+# Swap in use as a percentage
+awk '/SwapTotal/{t=$2} /SwapFree/{f=$2} END{
+  if(t>0) printf "Swap used: %.1f%%\n", (t-f)/t*100
+  else print "No swap configured"
+}' /proc/meminfo
 
-### Incident Slice 1 (MemInfo)
-Case A (silent fallback): Swap usage was stable for hours, then accelerated once cache headroom collapsed. Symptoms appeared late; prevention required earlier pressure-based alerting.
+# CRITICAL: check for active swap I/O, not just usage
+vmstat 1 10
+# si = pages swapped in from disk per second
+# so = pages swapped out to disk per second
+# Non-zero so means the system is paging RIGHT NOW
+```
 
-### Incident Slice 2 (MemInfo)
-Case B (noisy neighbor): A side workload induced swap churn that impacted unrelated services. Isolation and cgroup limits reduced collateral latency.
+| Situation | What to do |
+|-----------|------------|
+| SwapFree = SwapTotal, so=0 | Healthy — swap unused |
+| SwapFree < SwapTotal, so=0 | Swap used but not active — monitor trend |
+| SwapFree declining steadily | Memory leak — find with AnonPages |
+| so > 0 continuously | Active pressure — investigate now |
+| SwapFree = 0, so > 0 | Critical — OOM likely |
 
-### Incident Slice 3 (MemInfo)
-Case C (false CPU diagnosis): Team tuned thread pool for CPU but issue was swap-induced wake latency.
+---
 
-## Failure Branches (MemInfo Family)
-- Branch 1: Symptom improves but meminfo trend does not. -> Revisit meminfo causal layer assumption.
-- Branch 2: meminfo trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve meminfo evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check meminfo headroom and retry feedback loops.
+## A real episode
 
-## Runbook Drill (MemInfo Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+A Redis instance on a 16 GB server had been running for six months without issues. The operations team noticed query latencies creeping up — from 0.5ms to 3ms over two weeks. Nothing obvious in CPU or network graphs.
 
-## MAN Notes (MemInfo Lens)
-- This section mirrors man-page flow for meminfo analysis: definition -> headroom context -> failure branches -> evidence order.
-- Prefer explicit timestamps and meminfo headroom notes; narratives drift without headroom context.
-- If uncertain, follow SEE ALSO links before changing production meminfo-related memory knobs.
+Someone ran `vmstat 1` and saw `si=12` — 12 pages being swapped back in every second, steadily. `SwapFree` showed 1.4 GB used out of 4 GB total. Not alarming on its own. But `so` and `si` were non-zero around the clock.
 
-## Deep Appendix: Counterfactuals and Review Prompts (MemInfo Family)
+The cause: Redis was configured with `maxmemory` set to 12 GB, but the OS was also running several background jobs that accumulated 4 GB of anonymous pages over weeks. The kernel was slowly evicting older Redis pages to swap. When those pages were accessed, they had to be swapped back in — causing the latency spikes.
 
-### Counterfactual Questions (MemInfo)
-- If traffic had stayed constant, would meminfo headroom transitions still move this field the same way?
-- If this field had remained flat, which non-meminfo signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which meminfo-linked user metric would have crossed first?
-- If only one layer could be instrumented, which meminfo-adjacent layer would preserve most explanatory power?
+Fix: reduce the background job memory footprint, increase Redis `maxmemory-policy` to evict more aggressively within Redis rather than letting the kernel manage it.
 
-### Timeline Template (MemInfo Incident)
-- T-10m: baseline snapshot with meminfo headroom annotation
-- T-5m: first meminfo headroom or reclaimability anomaly candidate
-- T0: user symptom confirmed with meminfo-side context
-- T+3m: first hypothesis written with meminfo headroom assumption
-- T+6m: cross-source validation including scheduler or pressure
-- T+10m: mitigation applied with rollback guard in meminfo path
-- T+15m: trend reaction checked for meminfo headroom stabilization
-- T+30m: recovery confidence decision with meminfo and pressure confirmation
+The lesson: swap usage can be silent for a long time. The real signal is `vmstat`'s `si`/`so`, not just `SwapFree`.
 
-### Evidence Quality Rubric (MemInfo)
-- Strong: ordered, cross-layer, and meminfo headroom-consistent trend evidence
-- Medium: correlated movement without clear meminfo headroom/reclaimability boundary
-- Weak: isolated value with no meminfo headroom/reclaimability context
+---
 
-### Postmortem Questions (MemInfo)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+## What to do when SwapFree is declining
 
-### Anti-Drift Checklist (MemInfo)
-- Keep one baseline note per environment, workload phase, and meminfo headroom profile.
-- Revalidate meminfo-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with meminfo+pressure context.
-- Link this article to at least two neighboring meminfo or memory-path articles in your runbook.
+**Step 1: Check if swap is actively being used (not just allocated).**
+```sh
+vmstat 1 10
+# Look at si and so columns
+```
 
-## Incident Forensics
+**Step 2: Find the memory hog.**
+```sh
+# Check AnonPages trend — is it growing?
+grep AnonPages /proc/meminfo
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first headroom or reclaimability inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one pressure or vmstat signal to test cross-layer consistency.
+# Which processes have the most RSS?
+ps aux --sort=-%mem | head -15
+```
 
-### Decision Record
-- Primary claim: meminfo.SwapFree indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: SwapFree was treated as evidence in a chain, not a singleton verdict.
+**Step 3: Check how long swap has been filling.**
+If you have historical monitoring, check the slope. Steady slow decline = probable leak. Fast recent change = load spike.
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around meminfo inflection windows.
-- Syscall lens: Syscall: identify allocation and memory-touching call bursts aligned with meminfo transitions.
-- Scheduler lens: Scheduler: verify whether headroom-side waiting inflated wake latency during meminfo shifts.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around meminfo shifts.
-- Field anchor: SwapFree
-- Source anchor: meminfo
+**Step 4: If active swapping (so > 0):**
+- Short term: identify and restart the leaking process, or free other memory
+- Medium term: add RAM or reduce per-process memory limits
+- Do NOT rely on swap as a permanent solution
 
-## Source Drillbook (MemInfo Family)
+**Step 5: Consider swappiness tuning** (only if you understand the tradeoff):
+```sh
+# Check current setting (default: 60)
+cat /proc/sys/vm/swappiness
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+# Lower value = kernel prefers keeping anon pages in RAM over swapping
+# 10 is common for latency-sensitive workloads
+sysctl vm.swappiness=10
+```
 
-### Debrief Questions
-- Which meminfo-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about headroom versus side effect?
-- What meminfo instrumentation change would accelerate this drill next time?
+---
 
-### Anchor (MemInfo)
-Field under practice: SwapFree
+## Common mistakes
 
-## Failure Archetype Matrix
-- Archetype A: silent meminfo headroom erosion while utilization appears safe.
-- Archetype B: meminfo reserve/reclaimability oscillation causing short recoveries and relapses.
-- Archetype C: meminfo headroom phase shift with delayed user-impact visibility.
-- Field in focus: SwapFree
+**Treating swap as "extra RAM."** Swap is a fallback for emergencies. Sizing swap generously does not mean you can run more applications — it just means the OOM killer arrives later, after performance has already degraded significantly.
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Ignoring active swap I/O because SwapFree looks OK.** 1 GB of swap used with `so=100` is far worse than 3 GB used with `so=0`.
+
+**Setting swappiness=0.** This tells the kernel to avoid swap entirely, which can cause the OOM killer to fire sooner than necessary. `swappiness=10` is a better tradeoff.
+
+**Not having swap at all on production systems.** Without swap, the OOM killer fires the moment memory runs out. With swap, there's a degraded-but-functional grace period to notice and respond.
+
+---
+
+## See also
+
+- `meminfo.SwapTotal` — total swap space configured
+- `meminfo.MemAvailable` — leading indicator before swap starts filling
+- `meminfo.AnonPages` — what fills up swap (anonymous pages)
+- `vmstat.si` / `vmstat.so` — actual swap I/O rate (the real latency signal)
+- `pressure/memory_some_avg10` — kernel stall signal that precedes OOM

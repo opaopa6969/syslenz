@@ -1,170 +1,132 @@
 # nr_dirty
 
-## NAME
-`vmstat.nr_dirty` - metric signal from `vmstat` (nr_dirty)
+[日本語版](../ja/vmstat.nr_dirty.md)
 
-## WHY NOW
-Read this when vmstat reclaim and scan behavior around `nr_dirty` is noisy and you need a fast, defensible decision.
-If you cannot tell reclaim pressure around `nr_dirty` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`nr_dirty` counts the number of memory pages that have been written to but not yet flushed to disk. The kernel buffers writes in RAM first — your app writes to a file, the kernel marks that page "dirty," and a background kernel thread (`pdflush` / `kworker`) eventually flushes it to storage.
 
-## Metric Snapshot
-- ID: `vmstat.nr_dirty`
-- Source: `vmstat` (`nr_dirty`)
-- Field: `nr_dirty`
-- Domain: virtual memory and reclaim behavior
-- Signal family: writeback pipeline saturation
+Think of it as unsaved work. Every dirty page is data that exists only in RAM. If the system crashes right now, that data is gone.
 
-## Operational Meaning (VMStat Lens)
-This field is strongest for separating vmstat reclaim signal around `nr_dirty` from side-effect noise when scan and reclaim trends diverge.
+```
+  App writes to file
+       |
+       v
+  Page Cache (RAM)     <-- nr_dirty counts these
+  [dirty] [dirty] [dirty] [clean] [clean]
+       |
+       | pdflush / kworker flushes in background
+       v
+  Disk (persistent)    <-- nr_writeback counts in-progress flushes
+```
 
-## Field Episode (VMStat Lens)
-Writeback counters diverged from baseline, and response-time variance increased before throughput dropped.
+---
 
-For `nr_dirty`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+## Why does it matter?
 
-## Reading Protocol (VMStat Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `vmstat` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+**Write pressure.** When `nr_dirty` climbs and stays high, the kernel is accumulating writes faster than it can flush them. Eventually the kernel throttles your application — literally stalls it — until the backlog drains. This shows up as unpredictable write latency spikes.
 
-## Decision Heuristic (VMStat Family)
-If this field and a queue/stall indicator co-move for multiple snapshots, treat it as actionable, not transient noise.
+**Data durability risk.** High dirty page counts mean more data loss exposure on a crash or power failure. Most apps don't care (they use `fsync()`), but databases and message queues care a lot.
 
-## Failure Patterns To Avoid (VMStat Family)
-- Root-cause declaration from one vmstat reclaim/scan snapshot.
-- Ignoring post-mitigation recovery shape in vmstat timeline.
-- Confusing cross-layer vmstat correlation with causation.
+**Flush storms.** When `nr_dirty` hits the kernel's `dirty_background_ratio` threshold, background flushing kicks in. When it hits `dirty_ratio`, foreground flushing blocks your app. If dirty accumulates slowly and then drains in one big burst, you get periodic latency spikes with no obvious cause.
 
-## Action Loop
-1. State a falsifiable hypothesis for `nr_dirty`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+```
+  nr_dirty over time:
 
-## Unix Internals Lens
+  ▲
+  │         /\        /\
+  │        /  \      /  \      <-- flush storms: burst then drain
+  │       /    \    /    \
+  │______/      \__/      \___
+  └──────────────────────────▶ time
 
-This field is a manifestation of **virtual memory state transitions (`nr_dirty`)**.
+  vs. healthy:
+  ▲
+  │ ~~~~~~~~~~~~~~~~~~~        <-- steady low value, continuous flushing
+  └──────────────────────────▶ time
+```
 
-- Kernel path: reclaim, compaction, page fault handling, swap policy.
-- Typical trigger (`nr_dirty`): memory pressure or workload phase shift.
-- Cross-check: scheduler delay and storage writeback side effects.
+---
 
-## Casebook (VMStat Family)
+## How to read it
 
-### Incident Slice 1 (VMStat)
-Case C (storage firmware variance): Same write load, different wait distribution after firmware change; writeback indicators exposed regression early.
+**Absolute value matters less than trend.** A server doing heavy write I/O might normally sit at 50,000 dirty pages — that's fine. The same value on a mostly-read workload is a warning sign.
 
-### Incident Slice 2 (VMStat)
-Case A (tail-lat spike): Throughput looked healthy while writeback backlog increased. Latency tail worsened because flush bursts created queue shock.
+**Always pair with `nr_writeback`.** These two tell the story together:
 
-### Incident Slice 3 (VMStat)
-Case B (retry amplification): Application retries intensified dirty-page pressure and prolonged writeback recovery.
+| Situation | nr_dirty | nr_writeback | What it means |
+|-----------|----------|--------------|---------------|
+| Normal write load | Low–medium | Low | Flush keeping up |
+| Write burst | Rising | Rising | Flush active, watch for throttle |
+| Throttle risk | High, stable | Low | Flush stopped or blocked |
+| After flush storm | Dropping | Dropping | Recovering |
+| Storage bottleneck | High | 0 | Kernel can't write — check disk |
 
-## Failure Branches (VMStat Family)
-- Branch 1: Symptom improves but vmstat trend does not. -> Revisit vmstat causal layer assumption.
-- Branch 2: vmstat trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve vmstat evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check vmstat reclaim and retry feedback loops.
+**Kernel thresholds to know:**
 
-## Runbook Drill (VMStat Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+```
+  /proc/sys/vm/dirty_background_ratio   (default: 10%)
+  → Background flush starts when dirty exceeds this % of RAM
 
-## MAN Notes (VMStat Lens)
-- This section mirrors man-page flow for vmstat reclaim analysis of `nr_dirty`: definition -> scan/reclaim context -> failure branches -> evidence order.
-- Prefer explicit timestamps and vmstat reclaim-phase notes; narratives drift without phase context.
-- If uncertain, follow SEE ALSO links before changing production vmstat-related memory knobs.
+  /proc/sys/vm/dirty_ratio              (default: 20%)
+  → App writes BLOCK until dirty drops below this
 
-## Deep Appendix: Counterfactuals and Review Prompts (VMStat Family)
+  /proc/sys/vm/dirty_expire_centisecs   (default: 3000 = 30s)
+  → Pages older than this are flushed regardless of ratio
+```
 
-### Counterfactual Questions (VMStat)
-- If traffic had stayed constant, would vmstat reclaim and scan transitions still move this field the same way?
-- If this field had remained flat, which non-vmstat signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which vmstat-linked user metric would have crossed first?
-- If only one layer could be instrumented, which vmstat-adjacent layer would preserve most explanatory power?
+Check these on your system:
+```sh
+sysctl vm.dirty_background_ratio vm.dirty_ratio vm.dirty_expire_centisecs
+```
 
-### Timeline Template (VMStat Incident)
-- T-10m: baseline snapshot with vmstat reclaim/scan phase annotation for `nr_dirty`
-- T-5m: first vmstat reclaim or scan anomaly candidate around `nr_dirty`
-- T0: user symptom confirmed with vmstat-side context around `nr_dirty`
-- T+3m: first hypothesis written with vmstat reclaim assumption for `nr_dirty`
-- T+6m: cross-source validation including scheduler or writeback for `nr_dirty`
-- T+10m: mitigation applied with rollback guard in the vmstat path for `nr_dirty`
-- T+15m: trend reaction checked for vmstat reclaim stabilization around `nr_dirty`
-- T+30m: recovery confidence decision with vmstat and pressure confirmation for `nr_dirty`
+---
 
-### Evidence Quality Rubric (VMStat)
-- Strong: ordered, cross-layer, and vmstat reclaim-consistent trend evidence for `nr_dirty`
-- Medium: correlated movement without clear vmstat reclaim/scan boundary
-- Weak: isolated value with no vmstat reclaim/scan context around `nr_dirty`
+## What to do when it's high
 
-### Postmortem Questions (VMStat)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+**Step 1: Is it actually causing a problem?**
+Check `pressure/io_some_avg10`. If I/O pressure is also elevated, your app is being throttled. If pressure is low, the high dirty count may be normal write buffering.
 
-### Anti-Drift Checklist (VMStat)
-- Keep one baseline note per environment, workload phase, and vmstat reclaim mode.
-- Revalidate vmstat-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with vmstat+pressure context.
-- Link this article to at least two neighboring vmstat or memory-path articles in your runbook.
+**Step 2: Check if flushing is running.**
+```sh
+cat /proc/vmstat | grep -E 'nr_dirty|nr_writeback'
+# Run twice, 5 seconds apart — are the numbers moving?
+```
+If `nr_dirty` is high and `nr_writeback` is 0, something is blocking flushes. Check disk health and I/O errors:
+```sh
+dmesg | tail -20
+iostat -x 1
+```
 
-## Incident Forensics
+**Step 3: Check your writeback bandwidth.**
+`nr_written` in `/proc/vmstat` counts total pages written to disk. A rising `nr_dirty` with a flat `nr_written` means flushes aren't completing.
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first reclaim or scan inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one writeback or swap signal to test cross-layer consistency.
+**Step 4: Tune if needed.**
+If the flush storms are hurting latency, reduce dirty ratios to flatten the burst:
+```sh
+# More aggressive background flushing, less bursty
+sysctl vm.dirty_background_ratio=5
+sysctl vm.dirty_ratio=10
+```
+Test before applying permanently — tighter ratios increase I/O throughput requirements.
 
-### Decision Record
-- Primary claim: vmstat.nr_dirty indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: nr_dirty was treated as evidence in a chain, not a singleton verdict.
+---
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around vmstat inflection windows.
-- Syscall lens: Syscall: identify page-fault and memory-touching call bursts aligned with the vmstat transitions for `nr_dirty`.
-- Scheduler lens: Scheduler: verify whether reclaim-side waiting inflated wake latency during vmstat spikes.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around vmstat shifts.
-- Field anchor: nr_dirty
-- Source anchor: vmstat (`nr_dirty`)
+## Common mistakes
 
-## Source Drillbook (VMStat Family)
+**Treating a high number as automatically bad.** A database doing bulk writes will have high `nr_dirty`. That's expected. Look at whether it's causing throttle (`dirty_ratio` crossed) or latency.
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+**Ignoring `nr_writeback`.** `nr_dirty` alone doesn't tell you if flushing is healthy. A dirty count of 100,000 with active writeback is very different from 100,000 with zero writeback.
 
-### Debrief Questions
-- Which vmstat-side step around `nr_dirty` produced the highest confidence gain?
-- Which step failed to reduce uncertainty about reclaim pressure around `nr_dirty` versus side effect?
-- What vmstat instrumentation change around `nr_dirty` would accelerate this drill next time?
+**Tuning `dirty_ratio` without measuring throughput.** Lower dirty ratios mean more frequent, smaller flushes. This increases I/O operations per second required from your storage. On SSDs this is fine. On HDDs, too-frequent flushes cause seek overhead.
 
-### Anchor (VMStat)
-Field under practice: nr_dirty
+---
 
-## Failure Archetype Matrix
-- Archetype A (`nr_dirty`): silent vmstat reclaim pressure where utilization looks safe but stalls rise.
-- Archetype B (`nr_dirty`): vmstat reclaim oscillation causing repeated short recoveries and relapses.
-- Archetype C (`nr_dirty`): vmstat scan/reclaim phase shift with delayed user-impact visibility.
-- Field in focus: nr_dirty
+## See also
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+- `vmstat.nr_writeback` — pages currently being written to disk (the flush pipeline)
+- `vmstat.nr_dirty_threshold` — the computed kernel limit before app stall
+- `pressure/io_some_avg10` — whether I/O pressure is actually being felt
+- `diskstats` — per-device write throughput and queue depth

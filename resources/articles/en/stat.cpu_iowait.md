@@ -1,152 +1,155 @@
 # cpu_iowait
 
-## NAME
-`stat.cpu_iowait` - metric signal from `stat` (cpu_iowait)
+[日本語版](../ja/stat.cpu_iowait.md)
 
-## WHY NOW
-Read this when noisy telemetry must be turned into a concrete operational decision.
-If cause, symptom, and side effect are mixed, use this article to structure next checks.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`cpu_iowait` is the percentage of time the CPU was **idle and waiting for I/O to complete**. This is one of the most misread metrics in Linux performance monitoring.
 
-## Metric Snapshot
-- ID: `stat.cpu_iowait`
-- Source: `stat`
-- Field: `cpu_iowait`
-- Domain: CPU and kernel activity
+The critical distinction: iowait is not CPU time. It is *idle* time — time when the CPU had nothing to run, specifically because all runnable tasks were blocked waiting for disk or network I/O. The CPU is doing nothing productive, but it can't run anything else either because all pending work is stuck waiting.
 
-## Why This Metric Is Operationally Valuable
-This metric helps separate normal workload expansion from unstable behavior. It is most reliable when read with neighboring fields and time trend.
+```
+  What iowait actually is:
 
-## Episode
-Context switches doubled after rollout; lock contention, not raw CPU, was the hidden bottleneck.
+  Process A: [running][running][ BLOCKED on disk read ][running]
+  Process B: [running][   BLOCKED on disk read         ][run]
+  CPU:       [busy   ][busy   ][ idle — iowait         ][busy]
 
-In this incident pattern, this metric appears early in the evidence chain, but becomes actionable only after cross-source validation.
+  The CPU is free, but there's nothing runnable.
+  This idle time is counted as iowait.
+```
 
-## Reading Strategy
-1. Check current value and direction.
-2. Compare short-term trend in Diff/Graph.
-3. Pair one sibling metric in `stat` plus one pressure/queue metric from another source.
-4. Map movement to user-impact hypothesis.
+Think of it like an assembly line worker waiting for parts to arrive. The worker (CPU) isn't doing anything — but it's not because they're lazy. The bottleneck is the parts supplier (storage).
 
-## Decision Signals
-- Low risk: load-proportional movement with fast recovery.
-- Warning: trend persists after load normalization.
-- Critical: related metrics co-move and recovery slope degrades.
+---
 
-## Misread Patterns
-- Absolute-value judgment without workload context.
-- Ignoring recovery slope after mitigation.
-- Mixing symptom metrics and causal metrics.
+## Why does it matter?
 
-## Action Loop
-1. State a falsifiable hypothesis.
-2. Apply reversible mitigation.
-3. Verify with 2-3 correlated metrics.
-4. Keep concise evidence notes for postmortem reuse.
+**iowait high = storage is slow, not CPU.** This is the core insight. When iowait is high, adding faster CPUs or more CPU cores does nothing. The system is limited by how fast data can move between storage and RAM.
 
-## Unix Internals Lens
+Common scenarios where iowait spikes:
+- A database query hits an uncached table — must read cold data from disk
+- Log rotation or backup jobs writing large files
+- Application reading config files on every request (should be cached)
+- RAID rebuild or filesystem check running in the background
+- Swap is active and pages are being read back from swap space
 
-This field is a manifestation of **scheduler and task accounting core counters**.
+**Why does iowait sometimes look like "CPU is busy"?** Because tools like `top` count iowait toward "CPU time" in their summary. If `top` shows 90% CPU, that might be 10% user + 80% iowait — the CPU is mostly sitting idle waiting for disk. This is completely different from 80% user + 10% iowait.
 
-- Kernel path: context switching, runqueue movement, interrupt accounting.
-- Typical trigger: concurrency changes, lock contention, wakeup storms.
-- Cross-check: schedstat and interrupts/softirqs distributions.
+---
 
-## Systems Narrative (Process)
+## How to read it
 
-This signal (stat.cpu_iowait) is not only a number; it is an exposed edge of kernel state transitions.
-Scheduler-facing counters tell whether time is spent executing, waiting-to-run, or context-switching.
+```sh
+# See iowait in context
+mpstat -P ALL 1 5
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+# Identify which disks are busy
+iostat -x 1
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+# Which processes are doing I/O?
+iotop -a
+```
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+| `cpu_iowait` value | Interpretation |
+|-------------------|----------------|
+| 0–5% | Negligible; I/O is fast or light |
+| 5–20% | Moderate; worth watching with iostat |
+| 20–40% | High; storage may be bottleneck |
+| 40%+ | Severe; system is likely I/O-bound |
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+**The iowait + iostat cross-check:**
 
-### Practical Mentor Notes (Process)
-Treat cpu_iowait as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+```sh
+# Run these together to confirm I/O is the cause
+iostat -x 1 | grep -v '^$'
+# Look for: %util approaching 100, await > 10ms on HDDs, > 1ms on SSDs
+```
 
-## Incident Lab (Process)
+| Situation | iowait | iostat %util | What it means |
+|-----------|--------|--------------|---------------|
+| Normal | Low | Low | Healthy |
+| Storage bottleneck | High | ~100% | Disk saturated |
+| I/O burst (SSD) | Spike then drops | Spike then drops | Transient; monitor |
+| Mystery high iowait | High | Low | Check NFS, network storage |
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+---
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+## A real episode
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+An e-commerce platform had been running smoothly for six months. Then the team received alerts: "CPU usage at 92%." Engineers started profiling application code, tuning JVM settings, and discussing whether to upgrade the instance type.
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+Three hours into the investigation, someone ran `mpstat -P ALL 1` and noticed: `%usr` was 11%, `%sys` was 1%, but `%iowait` was 80%. The total showed 92%, which is why monitoring had fired the "CPU" alert.
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+A quick `iostat -x 1` revealed one disk at 100% utilization. The culprit: a scheduled antivirus scan that had started at 02:00 and was grinding through the entire `/var` directory, which held the application's session files.
 
-## Incident Forensics
+Fix: reschedule the scan to 05:00 (after traffic drops) and exclude session file directories. `cpu_iowait` dropped to 2%. No code changes. No hardware upgrades.
 
-### Evidence Capture
-- Anchor analysis on time order, not magnitude alone.
-- Prefer reversible action and explicit rollback guardrails while uncertainty remains.
+**Lesson:** When someone says "CPU is at 90%," always ask: "How much of that is iowait?" The answer changes everything.
 
-### Decision Record
-- Primary claim: stat.cpu_iowait indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: cpu_iowait was treated as evidence in a chain, not a singleton verdict.
+---
 
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: cpu_iowait
-- Source anchor: stat
+## What to do when it's high
 
-## Failure Archetype Matrix
-- Archetype A: magnitude-focused reading without sequence context.
-- Archetype B: mitigation overreach under high uncertainty.
-- Archetype C: symptom-mechanism mismatch after partial recovery.
-- Field in focus: cpu_iowait
+**Step 1: Confirm I/O is the actual cause.**
+```sh
+iostat -x 1 5
+# Look at: %util (saturation), await (latency ms), r/s and w/s (throughput)
+```
 
-## Counterfactual Branches
-1. If this signal is secondary, what primary signal should have moved first?
-2. If mitigation is rolled back, which metric should recover first and why?
-3. What source-specific observation would invalidate your current mitigation immediately?
+**Step 2: Identify which device and which process.**
+```sh
+# Which device is saturated?
+iostat -x 1 | sort -k 14 -rn | head -5
+
+# Which process is doing the I/O?
+iotop -aoP
+```
+
+**Step 3: Categorize the I/O.**
+- Is it read or write? (`r/s` vs `w/s` in iostat)
+- Is it sequential or random? (check `rrqm/s` and `wrqm/s` merge rates)
+- Is it from application code, a background job, or the OS itself?
+
+**Step 4: Take action based on the cause.**
+
+```sh
+# If a specific process is the culprit, limit its I/O priority
+ionice -c 3 -p <PID>   # idle priority: yield to others
+
+# Check if swap is contributing (pswpin/pswpout in vmstat)
+vmstat 1 5
+
+# Check for stuck I/O at the kernel level
+cat /proc/diskstats
+dmesg | grep -i "error\|timeout\|reset" | tail -20
+```
+
+**Step 5: Hardware considerations.**
+- HDDs: await > 20ms is a problem; consider SSD migration
+- SSDs: if %util is consistently > 80%, you need more IOPS (add drives, use NVMe)
+- Network storage (NFS, iSCSI): check network latency, not disk health
+
+---
+
+## Common mistakes
+
+**Calling it a "CPU problem."** iowait is CPU idle time. The CPU is fine. The storage is not. Don't tune CPU settings when iowait is the issue.
+
+**Ignoring it because "the CPU is actually idle."** True — but your application is stalled waiting for that I/O. Your users are experiencing slowness even though the CPU is free.
+
+**Not checking network storage.** High iowait with low local disk utilization often means NFS or iSCSI is slow. `iostat` won't show NFS — you need `nfsstat` or `mountstats`.
+
+**Panic-killing I/O-heavy processes.** If a backup job is causing iowait, killing it mid-run may leave data in an inconsistent state. Use `ionice` to throttle it instead.
+
+---
+
+## See also
+
+- `stat.cpu_user` — user-space CPU time; high user + high iowait is the classic false-alarm pattern
+- `vmstat.pgpgin` / `vmstat.pgpgout` — page-level I/O counters; rising means swap or file I/O
+- `vmstat.pswpin` / `vmstat.pswpout` — swap I/O; if these are rising, iowait may be swap-driven
+- `diskstats` — per-device I/O statistics for pinpointing the saturated device
+- `pressure/io_some_avg10` — kernel PSI; confirms whether I/O pressure is actually stalling tasks

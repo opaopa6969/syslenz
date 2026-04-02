@@ -1,152 +1,125 @@
 # load_15min
 
-## NAME
-`loadavg.load_15min` - metric signal from `loadavg` (load_15min)
+[日本語版](../ja/loadavg.load_15min.md)
 
-## WHY NOW
-Read this when noisy telemetry must be turned into a concrete operational decision.
-If cause, symptom, and side effect are mixed, use this article to structure next checks.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`load_15min` is the 15-minute exponential moving average of the Linux load average — the slowest-moving of the three values in `/proc/loadavg`. It is the third field.
 
-## Metric Snapshot
-- ID: `loadavg.load_15min`
-- Source: `loadavg`
-- Field: `load_15min`
-- Domain: runnable/blocked pressure
+If `load_1min` is the current heartbeat and `load_5min` is the recent trend, `load_15min` is the baseline. It tells you what normal looks like for this system, right now.
 
-## Why This Metric Is Operationally Valuable
-This metric helps separate normal workload expansion from unstable behavior. It is most reliable when read with neighboring fields and time trend.
+```
+  A sudden spike and recovery:          A sustained overload:
+  ▲                                     ▲
+  │      /\                             │           ___________
+  │     /  \    load_1min              │          /
+  │    /    \__  load_5min             │         /
+  │___/______\___ load_15min           │________/   load_15min slowly rises
+  └───────────────────────▶ time       └─────────────────────────▶ time
+```
 
-## Episode
-High load was misread as compute shortage; blocked I/O tasks were the real source.
+Because of the long smoothing window, `load_15min` changes slowly. A sudden problem that lasts only 3 minutes barely moves it. A problem sustained for 20 minutes will push it noticeably.
 
-In this incident pattern, this metric appears early in the evidence chain, but becomes actionable only after cross-source validation.
+---
 
-## Reading Strategy
-1. Check current value and direction.
-2. Compare short-term trend in Diff/Graph.
-3. Pair one sibling metric in `loadavg` plus one pressure/queue metric from another source.
-4. Map movement to user-impact hypothesis.
+## Why does it matter?
 
-## Decision Signals
-- Low risk: load-proportional movement with fast recovery.
-- Warning: trend persists after load normalization.
-- Critical: related metrics co-move and recovery slope degrades.
+`load_15min` is the number that tells you whether you are in an incident or just watching noise.
 
-## Misread Patterns
-- Absolute-value judgment without workload context.
-- Ignoring recovery slope after mitigation.
-- Mixing symptom metrics and causal metrics.
+**As a baseline:** When a system is healthy, `load_15min` reflects its typical workload. If it sits at 2.0 on a healthy day, then 2.0 is your baseline. A spike to 6.0 in `load_1min` is notable. A `load_15min` of 6.0 means it has been at that level for most of the last 15 minutes — that is an incident.
 
-## Action Loop
-1. State a falsifiable hypothesis.
-2. Apply reversible mitigation.
-3. Verify with 2-3 correlated metrics.
-4. Keep concise evidence notes for postmortem reuse.
+**As a recovery signal:** After you fix a problem, `load_1min` drops first. `load_5min` follows. `load_15min` lags behind the most. If `load_1min` is back to normal but `load_15min` is still elevated, the incident likely just ended — you are watching the 15-minute average catch up.
 
-## Unix Internals Lens
+**As a drift detector:** If `load_15min` creeps up slowly over days or weeks — from 1.5 to 2.5 to 3.5 — without any incident, the system is accumulating background load. This is often a sign of a slow memory leak, runaway cron jobs, or a capacity problem that will eventually surface as an incident.
 
-This field is a manifestation of **Unix kernel execution side effects**.
+---
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+## How to read it
 
-## Systems Narrative (Process)
+```sh
+uptime
+# load average: 1.20, 2.85, 5.40
+#               ↑     ↑     ↑
+#               1min  5min  15min
+```
 
-This signal (loadavg.load_15min) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+This output tells a specific story: load has been at 5.4 for a while but is now dropping fast. Load_1min at 1.2 means the heavy period recently ended. Recovery is well underway.
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+**The direction matrix:**
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+| Condition | Meaning |
+|-----------|---------|
+| 1min > 5min > 15min | Accelerating — load is rising, has been for a while |
+| 1min < 5min < 15min | Decelerating — load is dropping, recovering |
+| 1min ≈ 5min ≈ 15min | Stable — whatever level it's at, it's been there |
+| 1min >> 15min | Sudden spike — watch for fast recovery or continued rise |
+| 1min << 15min | Sudden drop — incident recently resolved |
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+**Is the 15min value unusual for this machine?**
+```sh
+# Watch how load_15min behaves during normal hours
+# Compare morning vs afternoon vs overnight
+sar -q 1 0  # if sysstat is installed — shows load over time
+```
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+---
 
-### Practical Mentor Notes (Process)
-Treat load_15min as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+## A real episode
 
-## Incident Lab (Process)
+A payment processing server had been running at `load_15min` ≈ 1.5 for months. One Monday morning, an engineer noticed it had drifted to 3.8 over the previous two weeks — no incidents, no alerts, just a slow climb.
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+Digging in, she found a batch reporting job added six weeks earlier that was re-scanning an increasingly large table every hour. The table had grown 10x since the job was added. The job took 4 minutes at first; now it took 22 minutes per run, overlapping with the next run and accumulating.
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+Nothing had "broken" — but the 15-minute average showed the drift that the 1-minute value hid in noise. She added an index, and `load_15min` dropped to 1.6 over the next few days as the backlog cleared.
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+**Lesson:** Slow drift in `load_15min` over days or weeks is often more diagnostic than any single spike.
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+---
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+## What to do when load_15min is high
 
-## Incident Forensics
+High `load_15min` means the overload is not a spike — it has been sustained.
 
-### Evidence Capture
-- Anchor analysis on time order, not magnitude alone.
-- Prefer reversible action and explicit rollback guardrails while uncertainty remains.
+**Step 1: Determine the trend direction.**
+```sh
+uptime
+```
+If 1min > 15min: still getting worse. If 1min < 15min: peak has passed.
 
-### Decision Record
-- Primary claim: loadavg.load_15min indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: load_15min was treated as evidence in a chain, not a singleton verdict.
+**Step 2: Find out how long the load has been elevated.**
+If `load_15min` is significantly above your normal baseline, the problem has been going on for 15+ minutes. Look further back:
+```sh
+journalctl --since "30 minutes ago" | grep -i "error\|warn\|fail"
+```
 
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: load_15min
-- Source anchor: loadavg
+**Step 3: Check the load type.**
+```sh
+vmstat 1 3
+# I/O-bound: high 'wa', high 'b', low 'r'
+# CPU-bound: low 'wa', high 'r'
+```
 
-## Failure Archetype Matrix
-- Archetype A: magnitude-focused reading without sequence context.
-- Archetype B: mitigation overreach under high uncertainty.
-- Archetype C: symptom-mechanism mismatch after partial recovery.
-- Field in focus: load_15min
+**Step 4: After fixing, watch the slow recovery.**
+`load_15min` will take 10–15 minutes to reflect the fix. Be patient. Confirm recovery with `load_1min` first, then watch `load_15min` trend downward.
 
-## Counterfactual Branches
-1. If this signal is secondary, what primary signal should have moved first?
-2. If mitigation is rolled back, which metric should recover first and why?
-3. What source-specific observation would invalidate your current mitigation immediately?
+---
+
+## Common mistakes
+
+**Using `load_15min` to detect fast incidents.** It is too slow for that. Use `load_1min` for alerting on sudden spikes. Use `load_15min` to confirm sustained problems or detect slow drift.
+
+**Declaring recovery when `load_15min` is still high.** The 15-minute average is a lagging indicator. If you resolved a problem 5 minutes ago, `load_15min` will still show the elevated value for another 10 minutes. Confirm recovery with `load_1min` instead.
+
+**Ignoring slow drift over days.** Most monitoring focuses on threshold crossing. Slow `load_15min` drift that stays below threshold is invisible to most alerting systems. Consider a trend-based alert or weekly review.
+
+---
+
+## See also
+
+- `loadavg.load_1min` — reactive, current value
+- `loadavg.load_5min` — medium-term trend, most operationally useful
+- `stat.cpu_iowait` — confirms I/O vs CPU nature of load
+- `pressure.cpu_some_avg10` — more precise CPU contention signal
+- `vmstat.nr_dirty` — can reveal a slow writeback backlog contributing to load drift

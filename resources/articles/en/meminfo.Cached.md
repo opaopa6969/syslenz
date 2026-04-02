@@ -1,170 +1,119 @@
 # Cached
 
-## NAME
-`meminfo.Cached` - metric signal from `meminfo` (Cached)
+[日本語版](../ja/meminfo.Cached.md)
 
-## WHY NOW
-Read this when meminfo headroom and reclaimability behavior around `Cached` is noisy and you need a fast, defensible decision.
-If you cannot tell headroom erosion around `Cached` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`Cached` is the amount of RAM used as a page cache for files read from or written to disk. When your application opens a file, the kernel reads it into RAM and keeps it there. The next time anyone reads the same file, no disk access is needed — the data comes straight from RAM.
 
-## Metric Snapshot
-- ID: `meminfo.Cached`
-- Source: `meminfo`
-- Field: `Cached`
-- Domain: memory capacity and reclaim headroom
-- Signal family: capacity headroom and allocator pressure
+Think of it as the kernel's automatic disk speed-up. The kernel decides what to cache and what to evict without any application input. When memory pressure rises, cache pages are the first to be reclaimed — they're "clean" copies of data that exists on disk, so discarding them costs nothing except a future disk read.
 
-## Operational Meaning (MemInfo Lens)
-This field is strongest for separating meminfo headroom signal around `Cached` from side-effect noise when free/reclaimable trends diverge.
+```
+  First read: file → disk I/O → page cache → application
+  Second read: file → page cache → application  (no disk!)
 
-## Field Episode (MemInfo Lens)
-Headroom looked sufficient in one chart, but correlated fields showed steady erosion toward unstable territory.
+  When memory is needed:
+  page cache pages → evicted → MemFree grows → application gets RAM
+  (the data still exists on disk, nothing is lost)
+```
 
-For `Cached`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+---
 
-## Reading Protocol (MemInfo Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `meminfo` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+## Why does it matter?
 
-## Decision Heuristic (MemInfo Family)
-If mitigation changes user latency but not this field trend, re-check the assumed causal layer.
+**Large `Cached` is usually good.** A database server with 50 GB `Cached` is reading its working set from RAM, not disk. Read latency is microseconds instead of milliseconds. That 50 GB isn't "wasted" — it's doing work.
 
-## Failure Patterns To Avoid (MemInfo Family)
-- Root-cause declaration from one meminfo headroom/reclaimability snapshot.
-- Ignoring post-mitigation recovery shape in meminfo timeline.
-- Confusing cross-layer meminfo correlation with causation.
+**`Cached` dropping suddenly is bad.** If another workload needs memory and the kernel evicts your cache, the next reads become slow disk I/O. This is the "cold start" effect: a service that was running at sub-millisecond latency suddenly takes 50–200ms per operation while its working set reloads.
 
-## Action Loop
-1. State a falsifiable hypothesis for `Cached`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+**Typical patterns to recognize:**
 
-## Unix Internals Lens
+| `Cached` behavior | What it means |
+|-------------------|---------------|
+| Large and stable | Good — working set is warm |
+| Large and dropping | Memory pressure — something else needs RAM |
+| Small and growing | System warming up after restart |
+| Near zero | Cache evicted — expect slow I/O until it warms |
 
-This field is a manifestation of **memory accounting surfaces (Cached)**.
+---
 
-- Kernel path (Cached): allocator, page cache, slab, reclaim boundaries.
-- Typical trigger (Cached): cache growth/shrink, allocation bursts, background reclaim.
-- Cross-check (Cached): vmstat reclaim counters and pressure metrics.
+## How to read it
 
-## Casebook (MemInfo Family)
+```sh
+# Check cache size alongside availability
+grep -E "MemTotal|MemAvailable|Cached|Buffers" /proc/meminfo
 
-### Incident Slice 1 (MemInfo)
-Case B (`Cached`): Cross-source correlation reversed the initial diagnosis.
+# Watch cache and available together
+watch -n 2 'grep -E "MemAvailable|Cached:" /proc/meminfo'
 
-### Incident Slice 2 (MemInfo)
-Case C (`Cached`): Reversible mitigation provided faster learning than invasive change.
+# See how much is actually being read from disk vs cache
+# (look at "pgpgin" — pages read from disk)
+grep pgpgin /proc/vmstat
+```
 
-### Incident Slice 3 (MemInfo)
-Case A (`Cached`): First anomaly came from this field trend, not absolute value.
+**On a database server,** the ratio of cache hits to total reads is the key metric. If `Cached` is large and your DB reports high buffer hit rates, you're in a good state.
 
-## Failure Branches (MemInfo Family)
-- Branch 1: Symptom improves but meminfo trend does not. -> Revisit meminfo causal layer assumption.
-- Branch 2: meminfo trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve meminfo evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check meminfo headroom and retry feedback loops.
+**Rule of thumb:** on a server dedicated to one workload, having `Cached` use 60–80% of total RAM is healthy. Only worry if `MemAvailable` is dropping.
 
-## Runbook Drill (MemInfo Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+---
 
-## MAN Notes (MemInfo Lens)
-- This section mirrors man-page flow for meminfo analysis: definition -> headroom context -> failure branches -> evidence order.
-- Prefer explicit timestamps and meminfo headroom notes; narratives drift without headroom context.
-- If uncertain, follow SEE ALSO links before changing production meminfo-related memory knobs.
+## A real episode
 
-## Deep Appendix: Counterfactuals and Review Prompts (MemInfo Family)
+A company ran an Elasticsearch cluster. Each node had 32 GB RAM. For months, queries ran at < 10ms average. Then they added a new log ingestion pipeline that ran on the same nodes.
 
-### Counterfactual Questions (MemInfo)
-- If traffic had stayed constant, would meminfo headroom transitions still move this field the same way?
-- If this field had remained flat, which non-meminfo signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which meminfo-linked user metric would have crossed first?
-- If only one layer could be instrumented, which meminfo-adjacent layer would preserve most explanatory power?
+The ingestion pipeline wrote multi-GB log files. The kernel was caching them, which steadily evicted Elasticsearch's index pages from cache. Over two days, `Cached` content shifted from Elasticsearch indexes to log files. Query latency climbed from 10ms to 400ms. No crash, no OOM — just a slow, quiet performance erosion.
 
-### Timeline Template (MemInfo Incident)
-- T-10m: baseline snapshot with meminfo headroom annotation
-- T-5m: first meminfo headroom or reclaimability anomaly candidate
-- T0: user symptom confirmed with meminfo-side context
-- T+3m: first hypothesis written with meminfo headroom assumption
-- T+6m: cross-source validation including scheduler or pressure
-- T+10m: mitigation applied with rollback guard in meminfo path
-- T+15m: trend reaction checked for meminfo headroom stabilization
-- T+30m: recovery confidence decision with meminfo and pressure confirmation
+The fix was separating workloads onto different nodes. But the diagnosis required understanding that cache isn't neutral — it has content, and that content matters.
 
-### Evidence Quality Rubric (MemInfo)
-- Strong: ordered, cross-layer, and meminfo headroom-consistent trend evidence
-- Medium: correlated movement without clear meminfo headroom/reclaimability boundary
-- Weak: isolated value with no meminfo headroom/reclaimability context
+The lesson: if latency mysteriously rises on a database or search service, check whether something else is evicting its cache. `Cached` in `/proc/meminfo` tells you the size, but `fincore` or `vmtouch` can show you what's actually cached.
 
-### Postmortem Questions (MemInfo)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+---
 
-### Anti-Drift Checklist (MemInfo)
-- Keep one baseline note per environment, workload phase, and meminfo headroom profile.
-- Revalidate meminfo-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with meminfo+pressure context.
-- Link this article to at least two neighboring meminfo or memory-path articles in your runbook.
+## What to do when cache drops suddenly
 
-## Incident Forensics
+**Step 1: Identify what's consuming memory instead.**
+```sh
+# Check AnonPages — is an app consuming more RAM?
+grep AnonPages /proc/meminfo
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first headroom or reclaimability inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one pressure or vmstat signal to test cross-layer consistency.
+# Top RSS consumers
+ps aux --sort=-%mem | head -10
+```
 
-### Decision Record
-- Primary claim: meminfo.Cached indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: Cached was treated as evidence in a chain, not a singleton verdict.
+**Step 2: Check if I/O latency has increased.**
+```sh
+iostat -x 1 5
+# Look at %util and await columns — are disks busy?
+```
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around meminfo inflection windows.
-- Syscall lens: Syscall: identify allocation and memory-touching call bursts aligned with meminfo transitions.
-- Scheduler lens: Scheduler: verify whether headroom-side waiting inflated wake latency during meminfo shifts.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around meminfo shifts.
-- Field anchor: Cached
-- Source anchor: meminfo
+**Step 3: Identify what was cached.**
+If you suspect a specific file's cache was evicted, you can check with `fincore`:
+```sh
+# Install: apt install libfincore / fincore <filename>
+fincore /var/lib/postgresql/data/base/...
+```
 
-## Source Drillbook (MemInfo Family)
+**Step 4: If workload competition is the cause,** consider cgroup memory limits to reserve cache for critical services, or separate workloads onto different hosts.
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+---
 
-### Debrief Questions
-- Which meminfo-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about headroom versus side effect?
-- What meminfo instrumentation change would accelerate this drill next time?
+## Common mistakes
 
-### Anchor (MemInfo)
-Field under practice: Cached
+**Trying to "free up" cache to get more memory.** The kernel does this automatically when memory is needed. Manually dropping cache (`drop_caches`) just causes unnecessary cache misses.
 
-## Failure Archetype Matrix
-- Archetype A: silent meminfo headroom erosion while utilization appears safe.
-- Archetype B: meminfo reserve/reclaimability oscillation causing short recoveries and relapses.
-- Archetype C: meminfo headroom phase shift with delayed user-impact visibility.
-- Field in focus: Cached
+**Confusing `Cached` with `Buffers`.** `Cached` is page cache for file content. `Buffers` is block device metadata (filesystem structures, not file data). They're different pools with different behavior.
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Mistaking cold cache for a crash.** After a server restart, `Cached` starts near zero. Services will be slow until cache warms. This is normal — not a bug.
+
+**Ignoring cache as a performance signal.** Falling `Cached` on a database server is an early warning. Don't wait until latency spikes — watch `Cached` trend over time.
+
+---
+
+## See also
+
+- `meminfo.MemAvailable` — the actual memory headroom (includes reclaimable cache)
+- `meminfo.Buffers` — block device metadata cache (separate from file cache)
+- `meminfo.AnonPages` — application memory that cannot be reclaimed
+- `meminfo.MemFree` — truly idle memory (usually a misleading metric)
+- `vmstat.pgpgin` / `pgpgout` — pages read/written from disk (cache miss rate proxy)

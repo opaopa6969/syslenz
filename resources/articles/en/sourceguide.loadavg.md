@@ -1,168 +1,96 @@
-# Source Guide: loadavg
+# sourceguide: loadavg
 
-## NAME
-`sourceguide.loadavg` - source-level operational reading guide
+[日本語版](../ja/sourceguide.loadavg.md)
 
-## WHY NOW
-Read this when you need to interpret one source without losing cross-source context.
-If a single source looks convincing, use this article to validate what it cannot prove alone.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is this source?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`/proc/loadavg` exposes the system's load averages — a single line with five fields that the kernel updates every 5 seconds.
 
-## Why This Source Exists
-`loadavg` is a protocol-oriented telemetry surface. It helps connect socket behavior, packet lifecycle, and user-visible latency.
+```
+$ cat /proc/loadavg
+2.34 1.87 1.52 3/412 29518
+ │    │    │   │  │    │
+ │    │    │   │  │    └─ last PID created
+ │    │    │   │  └─ total threads in system
+ │    │    │   └─ runnable/running threads right now
+ │    │    └─ 15-minute load average
+ │    └─ 5-minute load average
+ └─ 1-minute load average
+```
 
-## Episode From Operations
-A service looked healthy at CPU and memory level, but protocol-level counters in this source exposed retry and state-transition anomalies that explained intermittent timeouts.
+Load average is an **exponentially weighted moving average** of the number of threads in the run queue (running or waiting to run) plus threads in uninterruptible sleep. The kernel samples the scheduler's counters and updates the averages using a decay formula — recent samples count more than older ones.
 
-## How To Read This Source
-1. Start from stable baseline counters.
-2. Track which counters move first during load spikes.
-3. Compare trend with sibling network sources (`ss`, conntrack, pressure).
-4. Map counter drift to connection lifecycle stages.
+**The Linux difference:** BSD and Solaris count only runnable threads. Linux also counts threads in `D` state (uninterruptible wait — typically waiting for I/O, kernel locks, or NFS). This means a high load average on Linux can indicate I/O saturation, not just CPU saturation.
 
-## Pattern Library
-- Healthy: counters scale with traffic and settle quickly.
-- Warning: specific error/retry counters trend independently of traffic growth.
-- Critical: multiple error paths rise while successful progression stalls.
+```
+  Load = (threads running) + (threads waiting to run) + (threads in D state)
+                                                         ↑
+                                           Linux-specific: I/O waiters included
+```
 
-## Suggested Workflow
-1. Mark first anomaly timestamp.
-2. Cross-check one socket-level and one pressure-level source.
-3. Decide mitigation (rate shaping, timeout tuning, retry policy adjustments).
-4. Document evidence chain for repeat incidents.
+---
 
-## Unix Internals Lens
+## What questions does it answer?
 
-This field is a manifestation of **Unix kernel execution side effects**.
+- Is the system more or less busy than its baseline? (compare to CPU count)
+- Is pressure building up (1-min > 5-min > 15-min) or recovering (15-min > 5-min > 1-min)?
+- Is a sudden spike CPU-driven or I/O-driven? (correlate with `iowait` in `/proc/stat`)
+- How many runnable threads exist right now? (the `3/412` field)
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+---
 
-## Systems Narrative (Process)
+## Key fields to watch
 
-This signal (sourceguide.loadavg) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+| Field | What it means |
+|---|---|
+| 1-minute avg | Immediate pressure. Changes fastest. Noisy on bursty workloads. |
+| 5-minute avg | Medium-term trend. Most useful for incident correlation. |
+| 15-minute avg | Background trend. Useful as a stable baseline for comparison. |
+| Running/total | `3/412` means 3 threads runnable or running, 412 total. Runnable > CPU count = contention. |
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+**The rule of thumb:** load ÷ number of CPUs. A 4-CPU system with load 4.0 is fully loaded. Load 8.0 on the same system means threads are waiting. Load 1.0 means one CPU is busy on average.
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+But load average alone cannot tell you *why*. A load of 8.0 could be 8 CPU-hungry threads, or 8 threads blocked on a slow NFS mount.
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+---
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+## How to read it directly
 
-### Practical Mentor Notes (Process)
-Treat loadavg as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+```sh
+cat /proc/loadavg
 
-## Incident Lab (Process)
+# More context with uptime
+uptime
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+# Number of CPUs for comparison
+nproc
+```
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+To distinguish CPU load from I/O load, check `/proc/stat` for `iowait`:
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+```sh
+# High iowait% = threads blocked on I/O are inflating load average
+grep 'cpu ' /proc/stat
+# columns: user nice system idle iowait irq softirq steal guest
+```
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+---
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+## A real episode
 
-## Advanced Practice Notes
+An alert fired at 03:45: load average hit 18.2 on a 16-CPU host. The on-call engineer checked CPU — all cores were under 30% utilization. No obvious compute problem.
 
-### Focus
-Source-level operational literacy for loadavg.
+The 1-minute average had spiked while the 15-minute average was still around 2.0 — clearly a sudden event, not a slow buildup. `/proc/loadavg`'s runnable field showed `4/890`: only 4 runnable threads despite 890 total. The other 886 were sleeping, but why were so many in D state?
 
-### Operator Exercise
-1. Write one failure narrative where this article was primary evidence.
-2. Write one narrative where this article was only a supporting clue.
-3. Compare both and identify the earliest divergence point.
+`/proc/stat` showed `iowait` at 68%. `dmesg` revealed EXT4 errors on one disk. A failing drive was causing kernel I/O paths to time out, creating a cascade of threads blocked in uninterruptible wait. The load average had faithfully reported the I/O disaster that CPU metrics completely missed.
 
-### Escalation Boundary
-- Escalate when symptom severity rises while this signal remains ambiguous.
-- Avoid escalation if one more cross-layer check can resolve uncertainty in minutes.
+---
 
-### Coaching Prompt
-Ask a junior engineer to explain this article without charts.
-If they can state cause candidates, disproof steps, and rollback-safe action, the understanding is operational.
+## See also
 
-## Micro Episodes
-
-### Episode 1
-Runqueue growth appeared without corresponding user CPU growth. Waiting-to-run, not compute saturation, explained the symptom.
-
-### Episode 2
-Reducing runnable contention resolved latency faster than CPU scaling.
-
-### Use In Review
-In post-incident review, ask which episode pattern is closer to the observed timeline and which evidence is still missing.
-
-## Incident Forensics
-
-### Evidence Capture
-- Use this source as an index into neighboring sources rather than a standalone authority.
-- The reading quality improves when you can explain what this source cannot prove by itself.
-
-### Decision Record
-- Primary claim: sourceguide.loadavg indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: loadavg was treated as evidence in a chain, not a singleton verdict.
-
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: loadavg
-- Source anchor: sourceguide
-
-## Failure Archetype Matrix
-- Archetype A: source treated as verdict instead of index into neighboring evidence.
-- Archetype B: threshold crossing fixation while trend-shape evidence is ignored.
-- Archetype C: mitigation attempted before confirming cross-layer sequence.
-- Field in focus: loadavg
-
-## Counterfactual Branches
-1. If this source is removed, which two sources can reconstruct the same conclusion?
-2. If values stay normal but user pain grows, what trend clue was likely missed?
-3. What neighboring-source observation would invalidate your current mitigation immediately?
+- `sourceguide.stat` — CPU time breakdown including iowait and steal; needed to interpret load cause
+- `sourceguide.pressure` — PSI gives per-resource stall time, replacing load average as a pressure signal
+- `sourceguide.schedstat` — per-CPU runqueue wait times for deeper scheduler analysis
+- `sourceguide.processes` — live thread state breakdown to see how many threads are in D state

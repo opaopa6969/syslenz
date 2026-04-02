@@ -1,168 +1,101 @@
-# Source Guide: pressure
+# sourceguide: pressure
 
-## NAME
-`sourceguide.pressure` - source-level operational reading guide
+[日本語版](../ja/sourceguide.pressure.md)
 
-## WHY NOW
-Read this when you need to interpret one source without losing cross-source context.
-If a single source looks convincing, use this article to validate what it cannot prove alone.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is this source?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`/proc/pressure/` is a directory containing three files — `cpu`, `memory`, and `io` — each exposing **PSI (Pressure Stall Information)** metrics. Available since Linux 4.20.
 
-## Why This Source Exists
-`pressure` is a protocol-oriented telemetry surface. It helps connect socket behavior, packet lifecycle, and user-visible latency.
+PSI answers a question that load average cannot: **how much time were processes unable to make progress because a resource was unavailable?** Instead of counting threads in a queue, it measures wall-clock time lost to resource stalls, expressed as a percentage over a sliding window.
 
-## Episode From Operations
-A service looked healthy at CPU and memory level, but protocol-level counters in this source exposed retry and state-transition anomalies that explained intermittent timeouts.
+```
+  /proc/pressure/memory:
+  some avg10=0.34 avg60=0.12 avg300=0.05 total=183429
+  full avg10=0.00 avg60=0.00 avg300=0.00 total=0
 
-## How To Read This Source
-1. Start from stable baseline counters.
-2. Track which counters move first during load spikes.
-3. Compare trend with sibling network sources (`ss`, conntrack, pressure).
-4. Map counter drift to connection lifecycle stages.
+       │     │         │         │          │
+       │     │         │         │          └─ microseconds total since boot
+       │     │         │         └─ 5-minute sliding window (%)
+       │     │         └─ 1-minute sliding window (%)
+       │     └─ 10-second sliding window (%)
+       └─ "some" line: at least one task was stalled
+          "full" line: ALL runnable tasks were stalled simultaneously
+```
 
-## Pattern Library
-- Healthy: counters scale with traffic and settle quickly.
-- Warning: specific error/retry counters trend independently of traffic growth.
-- Critical: multiple error paths rise while successful progression stalls.
+**Some vs Full:**
+- `some`: at least one process was waiting for this resource. The system was still making progress, but not everyone could.
+- `full`: every runnable process was blocked on this resource simultaneously. No forward progress anywhere. This is severe.
 
-## Suggested Workflow
-1. Mark first anomaly timestamp.
-2. Cross-check one socket-level and one pressure-level source.
-3. Decide mitigation (rate shaping, timeout tuning, retry policy adjustments).
-4. Document evidence chain for repeat incidents.
+---
 
-## Unix Internals Lens
+## What questions does it answer?
 
-This field is a manifestation of **Unix kernel execution side effects**.
+- Is the system actually stalling on CPU, memory, or I/O — not just "busy"? (`some` lines)
+- Has the system reached a point where *no work is getting done* on a resource? (`full` lines)
+- Is pressure improving or worsening over the last 10 seconds vs last 5 minutes? (compare avg10 to avg300)
+- Is load average high because of CPU contention or I/O blocking? (compare `cpu` and `io` PSI)
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+---
 
-## Systems Narrative (Memory)
+## Key fields to watch
 
-This signal (sourceguide.pressure) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+| File | Metric | Alert signal |
+|---|---|---|
+| `cpu` | `some avg10` | CPU scheduling delay. Consistent >10% means CPU oversubscription. |
+| `memory` | `some avg10` | Processes waiting for memory. Even 1–2% sustained is a warning. |
+| `memory` | `full avg10` | Every task blocked on memory. Any nonzero value is serious. |
+| `io` | `some avg10` | I/O wait. High on write-heavy workloads; correlate with diskstats. |
+| `io` | `full avg10` | Complete I/O stall. Nonzero means the storage layer is the bottleneck. |
 
-### Episode: Dashboard Confidence vs User Pain (Memory)
-- The dashboard looked green because memory averages stayed normal.
-- User-facing latency regressed only in memory burst windows.
-- This memory field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large memory tuning change, but narrowing uncertainty quickly.
+**PSI is better than load average for alerting.** Load average conflates CPU and I/O pressure into one number. PSI separates them by resource and measures actual stall time rather than queue length.
 
-### Cross-Layer Translation (Memory)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+---
 
-### What Senior Reviewers Usually Ask (Memory)
-- Which memory counter moved first in time order?
-- Which memory counter looked persuasive but was later demoted to a side effect?
-- Which memory execution path likely carried the user-visible penalty?
-- Which memory mitigation was reversible and what rollback trigger was defined?
+## How to read it directly
 
-### Combining With Unix Internals (Memory)
-- Process model (Memory lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Memory lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Memory lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Memory lens): did fairness protect throughput while harming tail latency?
+```sh
+cat /proc/pressure/cpu
+cat /proc/pressure/memory
+cat /proc/pressure/io
+```
 
-### Practical Mentor Notes (Memory)
-Treat pressure as one scene in a longer diagnostic narrative.
-The memory narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+Watch all three together:
 
-## Incident Lab (Memory)
+```sh
+watch -n 2 'echo "=== CPU ===" && cat /proc/pressure/cpu && echo "=== Memory ===" && cat /proc/pressure/memory && echo "=== I/O ===" && cat /proc/pressure/io'
+```
 
-### Drill A: First-Mover Detection (Memory)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+PSI thresholds can trigger kernel events via a file descriptor notification mechanism — useful for cgroup-level alerting:
 
-### Drill B: Reversible Mitigation Design (Memory)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+```sh
+# Alert when memory pressure some avg10 exceeds 5% for 500ms
+fd=$(open /proc/pressure/memory rw)
+echo "some 5000 500000" > /proc/pressure/memory
+```
 
-### Drill C: Evidence Compression (Memory)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+---
 
-### Review Outcome (Memory)
-If your team can replay this memory article as a short diagnostic script, the article is operationally useful.
+## A real episode
 
-## Quick Checklist (Memory)
-- Identify one memory-affected user-facing symptom and timestamp.
-- Identify one first-moving memory signal.
-- Identify one cross-layer memory confirmation signal.
-- State one reversible memory action.
-- State one memory rollback condition.
-- Verify memory trend recovery after action.
+A Postgres database host had load average of 4.2 on a 4-CPU machine — textbook "fully loaded." The on-call team was about to add more CPU capacity. Before provisioning, someone checked PSI:
 
-## Advanced Practice Notes
+```
+cpu:    some avg10=1.2  avg60=0.8   (negligible CPU scheduling delay)
+memory: some avg10=18.4 avg60=14.1  (significant memory stall!)
+io:     some avg10=22.1 avg60=19.8  (I/O also stalling)
+```
 
-### Focus
-Source-level operational literacy for pressure.
+The load average of 4.2 was almost entirely I/O and memory stall, not CPU saturation. The `D` state threads inflating load average were blocked on memory reclaim and disk writes. Adding CPUs would have done nothing.
 
-### Operator Exercise
-1. Write one failure narrative where this article was primary evidence.
-2. Write one narrative where this article was only a supporting clue.
-3. Compare both and identify the earliest divergence point.
+The actual fix: the Postgres `shared_buffers` setting was too small, causing constant page eviction and re-read from disk. Increasing it from 256 MB to 4 GB cut `memory some` from 18% to 0.3% and `io some` from 22% to 4%.
 
-### Escalation Boundary
-- Escalate when symptom severity rises while this signal remains ambiguous.
-- Avoid escalation if one more cross-layer check can resolve uncertainty in minutes.
+---
 
-### Coaching Prompt
-Ask a junior engineer to explain this article without charts.
-If they can state cause candidates, disproof steps, and rollback-safe action, the understanding is operational.
+## See also
 
-## Micro Episodes
-
-### Episode 1
-Utilization stayed moderate while pressure some metrics rose. User pain matched stalled time better than percentage utilization.
-
-### Episode 2
-Once pressure dropped after a small queue policy change, tail latency normalized without large infrastructure changes.
-
-### Use In Review
-In post-incident review, ask which episode pattern is closer to the observed timeline and which evidence is still missing.
-
-## Incident Forensics
-
-### Evidence Capture
-- Use this source as an index into neighboring sources rather than a standalone authority.
-- The reading quality improves when you can explain what this source cannot prove by itself.
-
-### Decision Record
-- Primary claim: sourceguide.pressure indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: pressure was treated as evidence in a chain, not a singleton verdict.
-
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: pressure
-- Source anchor: sourceguide
-
-## Failure Archetype Matrix
-- Archetype A: source treated as verdict instead of index into neighboring evidence.
-- Archetype B: threshold crossing fixation while trend-shape evidence is ignored.
-- Archetype C: mitigation attempted before confirming cross-layer sequence.
-- Field in focus: pressure
-
-## Counterfactual Branches
-1. If this source is removed, which two sources can reconstruct the same conclusion?
-2. If values stay normal but user pain grows, what trend clue was likely missed?
-3. What neighboring-source observation would invalidate your current mitigation immediately?
+- `sourceguide.meminfo` — memory state counters that explain why memory pressure is occurring
+- `sourceguide.vmstat` — page reclaim and swap activity that drives memory PSI
+- `sourceguide.loadavg` — the older signal that PSI is designed to improve upon
+- `sourceguide.diskstats` — per-device I/O metrics that correlate with io PSI

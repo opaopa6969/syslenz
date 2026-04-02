@@ -1,152 +1,146 @@
 # load_5min
 
-## NAME
-`loadavg.load_5min` - metric signal from `loadavg` (load_5min)
+[日本語版](../ja/loadavg.load_5min.md)
 
-## WHY NOW
-Read this when noisy telemetry must be turned into a concrete operational decision.
-If cause, symptom, and side effect are mixed, use this article to structure next checks.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`load_5min` is the 5-minute exponential moving average of the Linux load average — the same count of running and I/O-blocked processes as `load_1min`, but smoothed over a longer window. It is the second field in `/proc/loadavg`.
 
-## Metric Snapshot
-- ID: `loadavg.load_5min`
-- Source: `loadavg`
-- Field: `load_5min`
-- Domain: runnable/blocked pressure
+If `load_1min` is a glance at the speedometer right now, `load_5min` is the average speed over the last stretch of highway. Short traffic jams don't show up much; sustained congestion does.
 
-## Why This Metric Is Operationally Valuable
-This metric helps separate normal workload expansion from unstable behavior. It is most reliable when read with neighboring fields and time trend.
+```
+  load_1min  ████████████░░░░░░  (reactive — spikes visible)
+  load_5min  ██████████░░░░░░░░  (smoother — trend visible)
+  load_15min █████████░░░░░░░░░  (slowest — baseline visible)
+              0         time →
+```
 
-## Episode
-High load was misread as compute shortage; blocked I/O tasks were the real source.
+The 5-minute value is the most operationally useful of the three. It responds fast enough to catch real problems, but is stable enough to filter out harmless one-minute spikes.
 
-In this incident pattern, this metric appears early in the evidence chain, but becomes actionable only after cross-source validation.
+---
 
-## Reading Strategy
-1. Check current value and direction.
-2. Compare short-term trend in Diff/Graph.
-3. Pair one sibling metric in `loadavg` plus one pressure/queue metric from another source.
-4. Map movement to user-impact hypothesis.
+## Why does it matter?
 
-## Decision Signals
-- Low risk: load-proportional movement with fast recovery.
-- Warning: trend persists after load normalization.
-- Critical: related metrics co-move and recovery slope degrades.
+The real power of `load_5min` emerges when you read all three values together. The relationship between them tells you whether a situation is improving or getting worse — without waiting another 15 minutes to find out.
 
-## Misread Patterns
-- Absolute-value judgment without workload context.
-- Ignoring recovery slope after mitigation.
-- Mixing symptom metrics and causal metrics.
+**The trend rule:**
+- `load_1min > load_15min`: load is **increasing** — the spike started recently
+- `load_1min ≈ load_15min`: load is **stable** — whatever is happening has been happening a while
+- `load_1min < load_15min`: load is **decreasing** — the worst is likely past
 
-## Action Loop
-1. State a falsifiable hypothesis.
-2. Apply reversible mitigation.
-3. Verify with 2-3 correlated metrics.
-4. Keep concise evidence notes for postmortem reuse.
+This is why operators look at all three in the same glance. The numbers themselves matter less than their relationship.
 
-## Unix Internals Lens
+**Scenario:** An alert fires at 02:00 with load=12 (8-core machine). You check:
+```
+load average: 12.3, 4.1, 1.8
+```
+This says load just exploded in the last few minutes. Check what started at 02:00 — a cron job, a deployment, a traffic spike.
 
-This field is a manifestation of **Unix kernel execution side effects**.
+Compare with:
+```
+load average: 12.1, 11.9, 12.2
+```
+This says load has been at 12 for the last 15 minutes. The alert was probably delayed. Look for something that started 20+ minutes ago.
 
-- Think in terms of layer: process, syscall, scheduler, memory, I/O, interrupt.
-- Identify where this field sits in that layer map.
-- Validate with one neighboring field and one cross-layer field.
+---
 
-## Systems Narrative (Process)
+## How to read it
 
-This signal (loadavg.load_5min) is not only a number; it is an exposed edge of kernel state transitions.
-This source becomes far more reliable when read as part of a cross-layer evidence chain.
+```sh
+uptime
+# load average: 5.20, 3.87, 2.41
+#               1min  5min  15min
+```
 
-### Episode: Dashboard Confidence vs User Pain (Process)
-- The dashboard looked green because process averages stayed normal.
-- User-facing latency regressed only in process burst windows.
-- This process field moved first, and neighboring fields confirmed direction.
-- The winning move was not a large process tuning change, but narrowing uncertainty quickly.
+**Reading the trend at a glance:**
 
-### Cross-Layer Translation (Process)
-1. Translate field movement into a probable kernel path.
-2. Verify whether scheduler delay or I/O wait explains wall-clock loss.
-3. Separate demand growth from service-time growth.
-4. Confirm post-change recovery in both symptom and mechanism.
+| 1min | 5min | 15min | Interpretation |
+|------|------|-------|----------------|
+| 8.0  | 4.0  | 2.0   | Rapidly worsening — act now |
+| 4.0  | 4.0  | 4.0   | Stable high — been this way for a while |
+| 2.0  | 5.0  | 8.0   | Recovering — may just need time |
+| 0.5  | 3.0  | 6.0   | Recovering fast — incident likely over |
 
-### What Senior Reviewers Usually Ask (Process)
-- Which process counter moved first in time order?
-- Which process counter looked persuasive but was later demoted to a side effect?
-- Which process execution path likely carried the user-visible penalty?
-- Which process mitigation was reversible and what rollback trigger was defined?
+**Check whether the load is real:**
+```sh
+# Watch load trend over 30 seconds
+watch -n 5 uptime
 
-### Combining With Unix Internals (Process)
-- Process model (Process lens): did runnable tasks increase, or did blocked tasks accumulate?
-- Syscall lifecycle (Process lens): where did request time shift (entry, sleep, wakeup, return)?
-- Interrupt path (Process lens): did wakeup delivery or softirq backlog alter tail behavior?
-- Scheduler (Process lens): did fairness protect throughput while harming tail latency?
+# Confirm with vmstat to see if CPU or I/O is the cause
+vmstat 1 5
+```
 
-### Practical Mentor Notes (Process)
-Treat load_5min as one scene in a longer diagnostic narrative.
-The process narrative quality matters more than single-point precision: strong incidents are solved by ordered evidence, explicit assumptions, and controlled experiments.
+---
 
-## Incident Lab (Process)
+## A real episode
 
-### Drill A: First-Mover Detection (Process)
-1. Pick one incident window and annotate first movement among three related signals.
-2. Record one wrong hypothesis that looked plausible at first.
-3. Explain why time order invalidated that hypothesis.
+A database server started alerting at load=24 (12 cores). The on-call engineer arrived 8 minutes after the alert and saw:
 
-### Drill B: Reversible Mitigation Design (Process)
-1. Define one mitigation that can be rolled back in less than five minutes.
-2. Define one explicit rollback condition before applying it.
-3. Track symptom and mechanism separately after the change.
+```
+load average: 24.1, 22.8, 8.3
+```
 
-### Drill C: Evidence Compression (Process)
-1. Write a six-line narrative: symptom, first signal, second signal, action, reaction, conclusion.
-2. Remove adjectives and keep only testable statements.
-3. Hand the narrative to another engineer and check if they can reproduce your reasoning.
+The 5-minute value (22.8) being close to the 1-minute value (24.1) told her the situation was not new — it had been building for at least 5 minutes before she arrived. The 15-minute value (8.3) told her the problem started roughly 10–15 minutes ago. She checked recent deployments and found a migration job had started 12 minutes earlier that was doing full-table scans without indexes. She killed the job, and 5 minutes later:
 
-### Review Outcome (Process)
-If your team can replay this process article as a short diagnostic script, the article is operationally useful.
+```
+load average: 4.2, 18.1, 12.5
+```
 
-## Quick Checklist (Process)
-- Identify one process-affected user-facing symptom and timestamp.
-- Identify one first-moving process signal.
-- Identify one cross-layer process confirmation signal.
-- State one reversible process action.
-- State one process rollback condition.
-- Verify process trend recovery after action.
+The drop in load_1min confirmed the fix was working. Load_5min would take a few more minutes to catch up. She knew from the numbers that recovery was in progress without having to wait.
 
-## Incident Forensics
+**Lesson:** The three values together form a timeline. When 1min drops but 5min is still high, recovery has started but isn't complete.
 
-### Evidence Capture
-- Anchor analysis on time order, not magnitude alone.
-- Prefer reversible action and explicit rollback guardrails while uncertainty remains.
+---
 
-### Decision Record
-- Primary claim: loadavg.load_5min indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: load_5min was treated as evidence in a chain, not a singleton verdict.
+## What to do when load_5min is sustained high
 
-## Man-Page Crosswalk
-- Process lens: Process: decide whether this is demand growth or service degradation.
-- Syscall lens: Syscall: mark one candidate path for time attribution.
-- Scheduler lens: Scheduler: validate runqueue and wake behavior before tuning.
-- Interrupt or IO lens: Interrupt or IO: cross-check one hardware-adjacent signal.
-- Field anchor: load_5min
-- Source anchor: loadavg
+"Sustained" means load_5min stays elevated for more than 5 minutes. This rules out harmless minute-scale spikes.
 
-## Failure Archetype Matrix
-- Archetype A: magnitude-focused reading without sequence context.
-- Archetype B: mitigation overreach under high uncertainty.
-- Archetype C: symptom-mechanism mismatch after partial recovery.
-- Field in focus: load_5min
+**Step 1: Compare all three values.**
+```sh
+uptime
+```
+Determine if load is still rising (1min > 5min), stable, or recovering.
 
-## Counterfactual Branches
-1. If this signal is secondary, what primary signal should have moved first?
-2. If mitigation is rolled back, which metric should recover first and why?
-3. What source-specific observation would invalidate your current mitigation immediately?
+**Step 2: Confirm the load type.**
+```sh
+vmstat 1 3
+# wa column: high = I/O bound
+# r  column: high = CPU bound, b column: high = blocked on I/O
+```
+
+**Step 3: Find the cause using the timeline.**
+The difference between `load_1min` and `load_15min` gives a rough idea of when the problem started. If they are equal, it has been going on for 15+ minutes.
+
+```sh
+# Check what changed recently
+journalctl --since "15 minutes ago" | tail -50
+last -n 10  # recent logins
+```
+
+**Step 4: If the trend is worsening, isolate before tuning.**
+Avoid tuning under a rising load. Isolate the process or job causing the load first.
+
+---
+
+## Common mistakes
+
+**Reacting to load_1min without checking load_5min.** A 1-minute spike is often harmless. Wait for load_5min to confirm before escalating.
+
+**Ignoring that load_5min lags behind.** When you fix a problem, load_5min takes several minutes to drop. Don't assume the fix failed just because load_5min is still high immediately after.
+
+**Reading the numbers without the trend direction.** A load of 6 on an 8-core machine means nothing without knowing if it is going up or down. The three-value spread is the signal.
+
+**Alerting on load_5min with the same threshold across machines.** Always normalize by core count: `load_5min / nproc > 1.5` is a more portable threshold.
+
+---
+
+## See also
+
+- `loadavg.load_1min` — instantaneous view, more reactive
+- `loadavg.load_15min` — the slowest-changing baseline value
+- `stat.cpu_iowait` — confirms the I/O vs CPU nature of load
+- `pressure.cpu_some_avg10` — PSI-based CPU pressure (more precise than load average)
+- `stat.procs_blocked` — direct count of blocked processes

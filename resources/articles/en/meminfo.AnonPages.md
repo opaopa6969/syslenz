@@ -1,170 +1,118 @@
 # AnonPages
 
-## NAME
-`meminfo.AnonPages` - metric signal from `meminfo` (AnonPages)
+[日本語版](../ja/meminfo.AnonPages.md)
 
-## WHY NOW
-Read this when meminfo headroom and reclaimability behavior around `AnonPages` is noisy and you need a fast, defensible decision.
-If you cannot tell headroom erosion around `AnonPages` from side effect, use this article to order evidence before tuning.
+---
 
-## EVIDENCE ORDER
-1. Fix user-visible symptom and time window first.
-2. Verify this article's primary signal trend.
-3. Cross-check one sibling signal and one cross-layer signal.
-4. Apply reversible mitigation and confirm trend recovery.
+## What is it?
 
-## SEE ALSO
-Use related links in the article overlay to continue the same evidence chain.
+`AnonPages` is the memory used by application heap, stack, and private memory-mapped regions — anything that isn't backed by a file on disk. When your application calls `malloc()`, allocates a Python object, or grows its heap, those pages show up here.
 
-## Metric Snapshot
-- ID: `meminfo.AnonPages`
-- Source: `meminfo`
-- Field: `AnonPages`
-- Domain: memory capacity and reclaim headroom
-- Signal family: baseline behavior and drift detection
+"Anonymous" means there's no file behind the page. If the kernel needs to reclaim it, it can't just discard it (there's no disk copy) — it must write it to swap first, or kill the process.
 
-## Operational Meaning (MemInfo Lens)
-This field is strongest for separating meminfo headroom signal around `AnonPages` from side-effect noise when free/reclaimable trends diverge.
+```
+  File cache (Cached):
+    App reads /etc/config → page backed by disk → evictable for free
 
-## Field Episode (MemInfo Lens)
-The field looked quiet in isolation, but trend context changed the operational decision.
+  Anonymous pages (AnonPages):
+    App does malloc(1MB) → page backed by nothing → NOT evictable
+    (must be swapped or the process killed to reclaim)
+```
 
-For `AnonPages`, the practical value comes from ordering evidence in time: what moved first, what followed, and what changed after mitigation.
+`AnonPages` is the closest thing `/proc/meminfo` has to "memory actually consumed by applications."
 
-## Reading Protocol (MemInfo Lens)
-1. Confirm current direction (rising/falling/flat) and short-term slope.
-2. Compare against sibling fields in `meminfo` to avoid single-metric bias.
-3. Cross-check one queue/stall/pressure metric from another source.
-4. Map the movement to user impact (latency, error, throughput) before acting.
+---
 
-## Decision Heuristic (MemInfo Family)
-If this field normalizes quickly after load drop, bias toward burst explanation; if not, investigate persistent contention.
+## Why does it matter?
 
-## Failure Patterns To Avoid (MemInfo Family)
-- Root-cause declaration from one meminfo headroom/reclaimability snapshot.
-- Ignoring post-mitigation recovery shape in meminfo timeline.
-- Confusing cross-layer meminfo correlation with causation.
+**It's what the OOM killer is really looking at.** When memory runs out, the kernel can't evict anonymous pages without swapping or killing. High `AnonPages` means the kernel has less maneuvering room.
 
-## Action Loop
-1. State a falsifiable hypothesis for `AnonPages`.
-2. Apply reversible mitigation.
-3. Validate with 2-3 correlated fields over multiple refreshes.
-4. Keep concise evidence notes for postmortem reuse.
+**It's your leak detector.** If `AnonPages` grows steadily over hours while request load is flat, something is leaking. `Cached` fluctuates naturally; `AnonPages` should be relatively stable on a stable workload.
 
-## Unix Internals Lens
+**It tells you whether MemAvailable's drop is real.** If `MemAvailable` is falling and `AnonPages` is rising at the same rate, applications are genuinely consuming more memory. If `MemAvailable` is falling but `AnonPages` is stable, cache behavior is likely the cause.
 
-This field is a manifestation of **memory accounting surfaces (AnonPages)**.
+---
 
-- Kernel path (AnonPages): allocator, page cache, slab, reclaim boundaries.
-- Typical trigger (AnonPages): cache growth/shrink, allocation bursts, background reclaim.
-- Cross-check (AnonPages): vmstat reclaim counters and pressure metrics.
+## How to read it
 
-## Casebook (MemInfo Family)
+```sh
+# Watch AnonPages trend
+watch -n 5 'grep -E "AnonPages|MemAvailable|SwapFree" /proc/meminfo'
 
-### Incident Slice 1 (MemInfo)
-Case B (`AnonPages`): Cross-source correlation reversed the initial diagnosis.
+# Check per-process anonymous memory (VmRSS ≈ anon + file pages)
+cat /proc/<pid>/status | grep -E "VmRSS|VmAnon|RssAnon"
 
-### Incident Slice 2 (MemInfo)
-Case C (`AnonPages`): Reversible mitigation provided faster learning than invasive change.
+# All processes, sorted by RSS
+ps aux --sort=-%rss | head -20
+```
 
-### Incident Slice 3 (MemInfo)
-Case A (`AnonPages`): First anomaly came from this field trend, not absolute value.
+**Interpreting trends:**
 
-## Failure Branches (MemInfo Family)
-- Branch 1: Symptom improves but meminfo trend does not. -> Revisit meminfo causal layer assumption.
-- Branch 2: meminfo trend improves but symptom does not. -> Inspect parallel CPU or IO bottleneck chain.
-- Branch 3: Both worsen after mitigation. -> Roll back quickly and preserve meminfo evidence snapshot.
-- Branch 4: Short recovery then relapse. -> Check meminfo headroom and retry feedback loops.
+| AnonPages behavior | What it means |
+|--------------------|---------------|
+| Stable | Healthy — apps using steady memory |
+| Slowly rising over hours | Possible leak — correlate with request count |
+| Rapidly rising | Load spike or runaway allocation |
+| Falling | App freed memory, or process exited |
 
-## Runbook Drill (MemInfo Lens)
-1. Pick a 15-minute incident window and annotate T0/T1/T2 events.
-2. Build a three-signal chain: primary field, sibling field, cross-layer field.
-3. Write one falsifiable hypothesis and one rollback-safe mitigation.
-4. Define success as trend recovery + user symptom recovery, not one chart turning green.
+---
 
-## MAN Notes (MemInfo Lens)
-- This section mirrors man-page flow for meminfo analysis: definition -> headroom context -> failure branches -> evidence order.
-- Prefer explicit timestamps and meminfo headroom notes; narratives drift without headroom context.
-- If uncertain, follow SEE ALSO links before changing production meminfo-related memory knobs.
+## A real episode
 
-## Deep Appendix: Counterfactuals and Review Prompts (MemInfo Family)
+A Python web service processed image uploads. The developer had profiled memory usage under normal load — everything looked fine. After deploying to production, `AnonPages` grew 200 MB/hour.
 
-### Counterfactual Questions (MemInfo)
-- If traffic had stayed constant, would meminfo headroom transitions still move this field the same way?
-- If this field had remained flat, which non-meminfo signal could still explain the symptom?
-- If mitigation was delayed by 10 minutes, which meminfo-linked user metric would have crossed first?
-- If only one layer could be instrumented, which meminfo-adjacent layer would preserve most explanatory power?
+The team watched `MemAvailable` fall for a day before someone noticed the trend. By that point, `AnonPages` had grown from 2 GB to 7 GB. They looked at per-process RSS with `ps` and found the web worker processes were all holding large amounts of memory.
 
-### Timeline Template (MemInfo Incident)
-- T-10m: baseline snapshot with meminfo headroom annotation
-- T-5m: first meminfo headroom or reclaimability anomaly candidate
-- T0: user symptom confirmed with meminfo-side context
-- T+3m: first hypothesis written with meminfo headroom assumption
-- T+6m: cross-source validation including scheduler or pressure
-- T+10m: mitigation applied with rollback guard in meminfo path
-- T+15m: trend reaction checked for meminfo headroom stabilization
-- T+30m: recovery confidence decision with meminfo and pressure confirmation
+The culprit: a PIL (Pillow) image object was being cached in a module-level dict for "performance." The cache had no eviction policy. Every unique image size that came through created a permanent entry. The dict grew forever.
 
-### Evidence Quality Rubric (MemInfo)
-- Strong: ordered, cross-layer, and meminfo headroom-consistent trend evidence
-- Medium: correlated movement without clear meminfo headroom/reclaimability boundary
-- Weak: isolated value with no meminfo headroom/reclaimability context
+Fixing it: add a max-size cache with LRU eviction. `AnonPages` stabilized within minutes of deployment.
 
-### Postmortem Questions (MemInfo)
-1. What evidence changed the team decision most?
-2. Which metric looked convincing but was later proven secondary?
-3. What assumption was left implicit and should be made explicit next time?
-4. Which alert would have triggered earlier with lower noise?
+The lesson: `AnonPages` growing on a stable workload is a leak. Find it with per-process RSS tracking over time, not just a snapshot.
 
-### Anti-Drift Checklist (MemInfo)
-- Keep one baseline note per environment, workload phase, and meminfo headroom profile.
-- Revalidate meminfo-related thresholds after release, kernel, or allocator-behavior changes.
-- Avoid cargo-cult tuning; require before and after evidence with meminfo+pressure context.
-- Link this article to at least two neighboring meminfo or memory-path articles in your runbook.
+---
 
-## Incident Forensics
+## How to find a memory leak
 
-### Evidence Capture
-- Capture a 30-minute timeline and mark the first headroom or reclaimability inflection before user-impact alerts.
-- Pair this field with one scheduler signal and one pressure or vmstat signal to test cross-layer consistency.
+**Step 1: Confirm it's not load-driven.**
+```sh
+# Compare AnonPages growth against request rate
+# If AnonPages grows even when requests are flat, it's a leak
+grep AnonPages /proc/meminfo  # sample every few minutes
+```
 
-### Decision Record
-- Primary claim: meminfo.AnonPages indicated a meaningful state transition.
-- Disproof attempt: identify one alternate cause and log why it failed.
-- Action note: AnonPages was treated as evidence in a chain, not a singleton verdict.
+**Step 2: Find the leaking process.**
+```sh
+# Snapshot RSS of all processes, wait 10 minutes, snapshot again
+ps -eo pid,comm,rss --sort=-rss | head -20
+# Which process is growing?
+```
 
-## Man-Page Crosswalk
-- Process lens: Process: check runnable vs blocked expansion around meminfo inflection windows.
-- Syscall lens: Syscall: identify allocation and memory-touching call bursts aligned with meminfo transitions.
-- Scheduler lens: Scheduler: verify whether headroom-side waiting inflated wake latency during meminfo shifts.
-- Interrupt or IO lens: Storage or IO: validate writeback or page-in side effects around meminfo shifts.
-- Field anchor: AnonPages
-- Source anchor: meminfo
+**Step 3: Confirm with /proc/<pid>/status.**
+```sh
+watch -n 30 'cat /proc/<pid>/status | grep -E "VmRSS|VmSize|RssAnon"'
+```
+`RssAnon` is exactly what `AnonPages` counts for that process.
 
-## Source Drillbook (MemInfo Family)
+**Step 4: Profile the leaking process.**
+For interpreted languages (Python, Ruby, Node.js), use their built-in heap profilers. For C/C++, use `valgrind --leak-check=full` or `heaptrack`. For Go, use `pprof`.
 
-### Drill Steps
-1. Run a 20-minute replay with three synchronized views: primary field, sibling field, and user symptom.
-2. Mark one point where trend direction changed without alert threshold crossing.
-3. Explain whether the change suggests reclaim pressure, allocation phase shift, or scheduler-side delay.
-4. Write one rollback-safe mitigation and predefine stop conditions.
-5. Document what evidence would force you to reject your first hypothesis.
+---
 
-### Debrief Questions
-- Which meminfo-side step produced the highest confidence gain?
-- Which step failed to reduce uncertainty about headroom versus side effect?
-- What meminfo instrumentation change would accelerate this drill next time?
+## Common mistakes
 
-### Anchor (MemInfo)
-Field under practice: AnonPages
+**Confusing `AnonPages` with total RSS.** A process's RSS includes both anonymous pages and file-backed pages (shared libraries, mmapped files). `RssAnon` in `/proc/<pid>/status` shows just the anonymous portion.
 
-## Failure Archetype Matrix
-- Archetype A: silent meminfo headroom erosion while utilization appears safe.
-- Archetype B: meminfo reserve/reclaimability oscillation causing short recoveries and relapses.
-- Archetype C: meminfo headroom phase shift with delayed user-impact visibility.
-- Field in focus: AnonPages
+**Blaming cache for a memory problem.** If `MemAvailable` is low but `AnonPages` is small, the issue is cache behavior, not a leak. Don't restart services until you've confirmed which is which.
 
-## Counterfactual Branches
-1. If traffic had been flat, would this field still drift in the same direction?
-2. If reclaim signals stabilized but latency stayed bad, which non-memory path becomes primary?
-3. What memory-side observation would invalidate your current mitigation immediately?
+**Taking a single snapshot.** Memory leaks are trends, not values. A one-time `AnonPages = 5 GB` tells you nothing without context.
+
+**Ignoring swap.** If `AnonPages` is high and swap is being used, your applications are effectively running in slow motion. Check `vmstat`'s `si`/`so` fields.
+
+---
+
+## See also
+
+- `meminfo.MemAvailable` — overall memory headroom
+- `meminfo.SwapFree` — if AnonPages is high, swap is the safety net (and it's slow)
+- `meminfo.Cached` — file-backed memory that CAN be reclaimed (contrast with AnonPages)
+- `vmstat.pgpgout` — pages written to disk (includes swap-outs of anonymous pages)
