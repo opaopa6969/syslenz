@@ -722,3 +722,55 @@ MemAvailable:    4000000 kB
 
 5. **オフライン再生**: export/import により、キャプチャしたスナップショットを
    別環境で閲覧可能。時系列データの保存にも対応。
+
+---
+
+## 3. Article Overlay アーキテクチャ (Session 018/019)
+
+### 3.1 新規モジュール
+
+```
+src/article.rs
+  - EducationArticle schema
+  - Metric/Group/Concept resolver
+  - static article registry
+  - SEE ALSO links
+```
+
+### 3.2 App 状態拡張
+
+```rust
+App {
+  article_overlay: Option<ArticleOverlayState>,
+}
+
+ArticleOverlayState {
+  article_id: String,
+  scroll: usize,
+  selected_link: usize,
+}
+```
+
+### 3.3 表示レイヤ
+
+- TUI: 既存 view の上に overlay を重ね描き
+- Web: `#article-overlay` を最前面表示
+- 共通: 記事解決ロジックは `src/article.rs` に集約
+
+### 3.4 Web API
+
+- `GET /api/article?source=...&field=...&locale=...`
+- 返却: `id/title/body/links`
+
+### 3.5 スケール戦略（記事数増加対応）
+
+1. MVP: static registry（高速で壊れにくい）
+2. 次段: `docs/articles/*` から生成される index へ移行
+3. 最終: 記事整合 CI（欠落リンク・重複ID・言語欠損）
+
+### 3.6 品質ガード
+
+- id 命名規約: `source.field` / `source.stem_distribution` / `concept.*`
+- すべての article link は実在IDのみ許可
+- fallback 記事を必須化（未定義時の空表示防止）
+

@@ -9,7 +9,10 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
 pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let parts: Vec<&str> = content.trim().split_whitespace().collect();
     if parts.len() < 2 {
-        anyhow::bail!("invalid uptime format: expected 2 fields, got {}", parts.len());
+        anyhow::bail!(
+            "invalid uptime format: expected 2 fields, got {}",
+            parts.len()
+        );
     }
 
     let uptime: f64 = parts[0].parse()?;

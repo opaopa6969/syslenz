@@ -13,7 +13,11 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         // Format: Node X, zone   ZoneName   count0 count1 count2 ...
         if parts.len() >= 5 {
-            let node = parts.get(1).unwrap_or(&"?").trim_end_matches(',').to_string();
+            let node = parts
+                .get(1)
+                .unwrap_or(&"?")
+                .trim_end_matches(',')
+                .to_string();
             let zone = parts.get(3).unwrap_or(&"?").to_string();
             let counts: Vec<String> = parts[4..].iter().map(|s| s.to_string()).collect();
             let mut row = vec![node, zone];
@@ -37,7 +41,8 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 name: "zones".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Memory fragmentation per zone (node, zone, free chunks per order 0-10)".into(),
+                description:
+                    "Memory fragmentation per zone (node, zone, free chunks per order 0-10)".into(),
             },
         ],
     })

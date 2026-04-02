@@ -1,28 +1,4 @@
 #[cfg(target_os = "linux")]
-pub mod meminfo;
-#[cfg(target_os = "linux")]
-pub mod uptime;
-#[cfg(target_os = "linux")]
-pub mod loadavg;
-#[cfg(target_os = "linux")]
-pub mod version;
-#[cfg(target_os = "linux")]
-pub mod mounts;
-#[cfg(target_os = "linux")]
-pub mod partitions;
-#[cfg(target_os = "linux")]
-pub mod cpuinfo;
-#[cfg(target_os = "linux")]
-pub mod stat;
-#[cfg(target_os = "linux")]
-pub mod net_dev;
-#[cfg(target_os = "linux")]
-pub mod diskstats;
-#[cfg(target_os = "linux")]
-pub mod processes;
-#[cfg(target_os = "linux")]
-pub mod swaps;
-#[cfg(target_os = "linux")]
 pub mod buddyinfo;
 #[cfg(target_os = "linux")]
 pub mod cgroups;
@@ -31,9 +7,15 @@ pub mod cmdline;
 #[cfg(target_os = "linux")]
 pub mod consoles;
 #[cfg(target_os = "linux")]
+pub mod cpuinfo;
+#[cfg(target_os = "linux")]
 pub mod crypto;
 #[cfg(target_os = "linux")]
 pub mod devices;
+#[cfg(target_os = "linux")]
+pub mod diskstats;
+#[cfg(target_os = "linux")]
+pub mod dma;
 #[cfg(target_os = "linux")]
 pub mod filesystems;
 #[cfg(target_os = "linux")]
@@ -43,19 +25,29 @@ pub mod iomem;
 #[cfg(target_os = "linux")]
 pub mod ioports;
 #[cfg(target_os = "linux")]
+pub mod loadavg;
+#[cfg(target_os = "linux")]
 pub mod locks;
 #[cfg(target_os = "linux")]
-pub mod modules;
-#[cfg(target_os = "linux")]
-pub mod vmstat;
-#[cfg(target_os = "linux")]
-pub mod zoneinfo;
-#[cfg(target_os = "linux")]
-pub mod softirqs;
+pub mod meminfo;
 #[cfg(target_os = "linux")]
 pub mod misc;
 #[cfg(target_os = "linux")]
-pub mod pressure;
+pub mod modules;
+#[cfg(target_os = "linux")]
+pub mod mounts;
+#[cfg(target_os = "linux")]
+pub mod net_arp;
+#[cfg(target_os = "linux")]
+pub mod net_dev;
+#[cfg(target_os = "linux")]
+pub mod net_netstat;
+#[cfg(target_os = "linux")]
+pub mod net_route;
+#[cfg(target_os = "linux")]
+pub mod net_snmp;
+#[cfg(target_os = "linux")]
+pub mod net_sockstat;
 #[cfg(target_os = "linux")]
 pub mod net_tcp;
 #[cfg(target_os = "linux")]
@@ -63,36 +55,44 @@ pub mod net_udp;
 #[cfg(target_os = "linux")]
 pub mod net_unix;
 #[cfg(target_os = "linux")]
-pub mod net_arp;
-#[cfg(target_os = "linux")]
-pub mod net_route;
-#[cfg(target_os = "linux")]
-pub mod net_sockstat;
-#[cfg(target_os = "linux")]
-pub mod net_snmp;
-#[cfg(target_os = "linux")]
-pub mod net_netstat;
-#[cfg(target_os = "linux")]
 pub mod net_wireless;
-#[cfg(target_os = "linux")]
-pub mod slabinfo;
 #[cfg(target_os = "linux")]
 pub mod pagetypeinfo;
 #[cfg(target_os = "linux")]
+pub mod partitions;
+#[cfg(target_os = "linux")]
+pub mod pressure;
+#[cfg(target_os = "linux")]
+pub mod processes;
+#[cfg(target_os = "linux")]
 pub mod schedstat;
 #[cfg(target_os = "linux")]
-pub mod dma;
+pub mod slabinfo;
+#[cfg(target_os = "linux")]
+pub mod softirqs;
+#[cfg(target_os = "linux")]
+pub mod stat;
+#[cfg(target_os = "linux")]
+pub mod swaps;
 #[cfg(target_os = "linux")]
 pub mod timer_list;
+#[cfg(target_os = "linux")]
+pub mod uptime;
+#[cfg(target_os = "linux")]
+pub mod version;
+#[cfg(target_os = "linux")]
+pub mod vmstat;
+#[cfg(target_os = "linux")]
+pub mod zoneinfo;
 
 #[cfg(target_os = "macos")]
 pub mod platform_macos;
 #[cfg(target_os = "windows")]
 pub mod platform_windows;
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::SystemTime;
-use serde::{Serialize, Deserialize};
 
 mod systemtime_iso8601 {
     use serde::{self, Deserialize, Deserializer, Serializer};
@@ -155,7 +155,8 @@ mod systemtime_iso8601 {
     fn parse_iso8601(s: &str) -> Result<SystemTime, String> {
         // Parse "YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ"
         let s = s.trim_end_matches('Z');
-        let (date_part, time_part) = s.split_once('T')
+        let (date_part, time_part) = s
+            .split_once('T')
             .ok_or_else(|| "missing T separator".to_string())?;
         let date_parts: Vec<&str> = date_part.split('-').collect();
         if date_parts.len() != 3 {
@@ -294,63 +295,169 @@ impl Snapshot {
     #[cfg(target_os = "linux")]
     pub fn capture() -> anyhow::Result<Self> {
         let mut entries = BTreeMap::new();
-        if let Ok(e) = meminfo::parse() { entries.insert("meminfo".into(), e); }
-        if let Ok(e) = uptime::parse() { entries.insert("uptime".into(), e); }
-        if let Ok(e) = loadavg::parse() { entries.insert("loadavg".into(), e); }
-        if let Ok(e) = version::parse() { entries.insert("version".into(), e); }
-        if let Ok(e) = mounts::parse() { entries.insert("mounts".into(), e); }
-        if let Ok(e) = partitions::parse() { entries.insert("partitions".into(), e); }
-        if let Ok(e) = cpuinfo::parse() { entries.insert("cpuinfo".into(), e); }
-        if let Ok(e) = stat::parse() { entries.insert("stat".into(), e); }
-        if let Ok(e) = net_dev::parse() { entries.insert("net/dev".into(), e); }
-        if let Ok(e) = diskstats::parse() { entries.insert("diskstats".into(), e); }
-        if let Ok(e) = processes::parse() { entries.insert("processes".into(), e); }
-        if let Ok(e) = swaps::parse() { entries.insert("swaps".into(), e); }
-        if let Ok(e) = buddyinfo::parse() { entries.insert("buddyinfo".into(), e); }
-        if let Ok(e) = cgroups::parse() { entries.insert("cgroups".into(), e); }
-        if let Ok(e) = cmdline::parse() { entries.insert("cmdline".into(), e); }
-        if let Ok(e) = consoles::parse() { entries.insert("consoles".into(), e); }
-        if let Ok(e) = crypto::parse() { entries.insert("crypto".into(), e); }
-        if let Ok(e) = devices::parse() { entries.insert("devices".into(), e); }
-        if let Ok(e) = filesystems::parse() { entries.insert("filesystems".into(), e); }
-        if let Ok(e) = interrupts::parse() { entries.insert("interrupts".into(), e); }
-        if let Ok(e) = iomem::parse() { entries.insert("iomem".into(), e); }
-        if let Ok(e) = ioports::parse() { entries.insert("ioports".into(), e); }
-        if let Ok(e) = locks::parse() { entries.insert("locks".into(), e); }
-        if let Ok(e) = modules::parse() { entries.insert("modules".into(), e); }
-        if let Ok(e) = vmstat::parse() { entries.insert("vmstat".into(), e); }
-        if let Ok(e) = zoneinfo::parse() { entries.insert("zoneinfo".into(), e); }
-        if let Ok(e) = softirqs::parse() { entries.insert("softirqs".into(), e); }
-        if let Ok(e) = misc::parse() { entries.insert("misc".into(), e); }
-        if let Ok(e) = pressure::parse() { entries.insert("pressure".into(), e); }
-        if let Ok(e) = net_tcp::parse() { entries.insert("net/tcp".into(), e); }
-        if let Ok(e) = net_udp::parse() { entries.insert("net/udp".into(), e); }
-        if let Ok(e) = net_unix::parse() { entries.insert("net/unix".into(), e); }
-        if let Ok(e) = net_arp::parse() { entries.insert("net/arp".into(), e); }
-        if let Ok(e) = net_route::parse() { entries.insert("net/route".into(), e); }
-        if let Ok(e) = net_sockstat::parse() { entries.insert("net/sockstat".into(), e); }
-        if let Ok(e) = net_snmp::parse() { entries.insert("net/snmp".into(), e); }
-        if let Ok(e) = net_netstat::parse() { entries.insert("net/netstat".into(), e); }
-        if let Ok(e) = net_wireless::parse() { entries.insert("net/wireless".into(), e); }
-        if let Ok(e) = slabinfo::parse() { entries.insert("slabinfo".into(), e); }
-        if let Ok(e) = pagetypeinfo::parse() { entries.insert("pagetypeinfo".into(), e); }
-        if let Ok(e) = schedstat::parse() { entries.insert("schedstat".into(), e); }
-        if let Ok(e) = dma::parse() { entries.insert("dma".into(), e); }
-        if let Ok(e) = timer_list::parse() { entries.insert("timer_list".into(), e); }
+        if let Ok(e) = meminfo::parse() {
+            entries.insert("meminfo".into(), e);
+        }
+        if let Ok(e) = uptime::parse() {
+            entries.insert("uptime".into(), e);
+        }
+        if let Ok(e) = loadavg::parse() {
+            entries.insert("loadavg".into(), e);
+        }
+        if let Ok(e) = version::parse() {
+            entries.insert("version".into(), e);
+        }
+        if let Ok(e) = mounts::parse() {
+            entries.insert("mounts".into(), e);
+        }
+        if let Ok(e) = partitions::parse() {
+            entries.insert("partitions".into(), e);
+        }
+        if let Ok(e) = cpuinfo::parse() {
+            entries.insert("cpuinfo".into(), e);
+        }
+        if let Ok(e) = stat::parse() {
+            entries.insert("stat".into(), e);
+        }
+        if let Ok(e) = net_dev::parse() {
+            entries.insert("net/dev".into(), e);
+        }
+        if let Ok(e) = diskstats::parse() {
+            entries.insert("diskstats".into(), e);
+        }
+        if let Ok(e) = processes::parse() {
+            entries.insert("processes".into(), e);
+        }
+        if let Ok(e) = swaps::parse() {
+            entries.insert("swaps".into(), e);
+        }
+        if let Ok(e) = buddyinfo::parse() {
+            entries.insert("buddyinfo".into(), e);
+        }
+        if let Ok(e) = cgroups::parse() {
+            entries.insert("cgroups".into(), e);
+        }
+        if let Ok(e) = cmdline::parse() {
+            entries.insert("cmdline".into(), e);
+        }
+        if let Ok(e) = consoles::parse() {
+            entries.insert("consoles".into(), e);
+        }
+        if let Ok(e) = crypto::parse() {
+            entries.insert("crypto".into(), e);
+        }
+        if let Ok(e) = devices::parse() {
+            entries.insert("devices".into(), e);
+        }
+        if let Ok(e) = filesystems::parse() {
+            entries.insert("filesystems".into(), e);
+        }
+        if let Ok(e) = interrupts::parse() {
+            entries.insert("interrupts".into(), e);
+        }
+        if let Ok(e) = iomem::parse() {
+            entries.insert("iomem".into(), e);
+        }
+        if let Ok(e) = ioports::parse() {
+            entries.insert("ioports".into(), e);
+        }
+        if let Ok(e) = locks::parse() {
+            entries.insert("locks".into(), e);
+        }
+        if let Ok(e) = modules::parse() {
+            entries.insert("modules".into(), e);
+        }
+        if let Ok(e) = vmstat::parse() {
+            entries.insert("vmstat".into(), e);
+        }
+        if let Ok(e) = zoneinfo::parse() {
+            entries.insert("zoneinfo".into(), e);
+        }
+        if let Ok(e) = softirqs::parse() {
+            entries.insert("softirqs".into(), e);
+        }
+        if let Ok(e) = misc::parse() {
+            entries.insert("misc".into(), e);
+        }
+        if let Ok(e) = pressure::parse() {
+            entries.insert("pressure".into(), e);
+        }
+        if let Ok(e) = net_tcp::parse() {
+            entries.insert("net/tcp".into(), e);
+        }
+        if let Ok(e) = net_udp::parse() {
+            entries.insert("net/udp".into(), e);
+        }
+        if let Ok(e) = net_unix::parse() {
+            entries.insert("net/unix".into(), e);
+        }
+        if let Ok(e) = net_arp::parse() {
+            entries.insert("net/arp".into(), e);
+        }
+        if let Ok(e) = net_route::parse() {
+            entries.insert("net/route".into(), e);
+        }
+        if let Ok(e) = net_sockstat::parse() {
+            entries.insert("net/sockstat".into(), e);
+        }
+        if let Ok(e) = net_snmp::parse() {
+            entries.insert("net/snmp".into(), e);
+        }
+        if let Ok(e) = net_netstat::parse() {
+            entries.insert("net/netstat".into(), e);
+        }
+        if let Ok(e) = net_wireless::parse() {
+            entries.insert("net/wireless".into(), e);
+        }
+        if let Ok(e) = slabinfo::parse() {
+            entries.insert("slabinfo".into(), e);
+        }
+        if let Ok(e) = pagetypeinfo::parse() {
+            entries.insert("pagetypeinfo".into(), e);
+        }
+        if let Ok(e) = schedstat::parse() {
+            entries.insert("schedstat".into(), e);
+        }
+        if let Ok(e) = dma::parse() {
+            entries.insert("dma".into(), e);
+        }
+        if let Ok(e) = timer_list::parse() {
+            entries.insert("timer_list".into(), e);
+        }
 
         // /sys and system metrics
-        if let Ok(e) = crate::sys::df::parse() { entries.insert("df".into(), e); }
-        if let Ok(e) = crate::sys::thermal::parse() { entries.insert("thermal".into(), e); }
-        if let Ok(e) = crate::sys::file_nr::parse() { entries.insert("file-nr".into(), e); }
-        if let Ok(e) = crate::sys::gpu::parse() { entries.insert("gpu".into(), e); }
-        if let Ok(e) = crate::sys::systemd::parse() { entries.insert("systemd".into(), e); }
+        if let Ok(e) = crate::sys::df::parse() {
+            entries.insert("df".into(), e);
+        }
+        if let Ok(e) = crate::sys::thermal::parse() {
+            entries.insert("thermal".into(), e);
+        }
+        if let Ok(e) = crate::sys::file_nr::parse() {
+            entries.insert("file-nr".into(), e);
+        }
+        if let Ok(e) = crate::sys::gpu::parse() {
+            entries.insert("gpu".into(), e);
+        }
+        if let Ok(e) = crate::sys::systemd::parse() {
+            entries.insert("systemd".into(), e);
+        }
 
         // Network deep-dive
-        if let Ok(e) = crate::net::ip_route::parse() { entries.insert("ip/route".into(), e); }
-        if let Ok(e) = crate::net::ip_neighbor::parse() { entries.insert("ip/neighbor".into(), e); }
-        if let Ok(e) = crate::net::ss_summary::parse() { entries.insert("ss".into(), e); }
-        if let Ok(e) = crate::net::dns::parse() { entries.insert("dns".into(), e); }
-        if let Ok(e) = crate::net::conntrack::parse() { entries.insert("conntrack".into(), e); }
+        if let Ok(e) = crate::net::ip_route::parse() {
+            entries.insert("ip/route".into(), e);
+        }
+        if let Ok(e) = crate::net::ip_neighbor::parse() {
+            entries.insert("ip/neighbor".into(), e);
+        }
+        if let Ok(e) = crate::net::ss_summary::parse() {
+            entries.insert("ss".into(), e);
+        }
+        if let Ok(e) = crate::net::dns::parse() {
+            entries.insert("dns".into(), e);
+        }
+        if let Ok(e) = crate::net::conntrack::parse() {
+            entries.insert("conntrack".into(), e);
+        }
 
         // Plugins
         for (key, entry) in crate::plugin::load_plugins() {
@@ -418,10 +525,12 @@ mod tests {
     fn make_test_snapshot(fields: Vec<(&str, &str, FieldValue)>) -> Snapshot {
         let mut entries = BTreeMap::new();
         for (source_key, field_name, value) in fields {
-            let entry = entries.entry(source_key.to_string()).or_insert_with(|| ProcEntry {
-                source: format!("/proc/{}", source_key),
-                fields: Vec::new(),
-            });
+            let entry = entries
+                .entry(source_key.to_string())
+                .or_insert_with(|| ProcEntry {
+                    source: format!("/proc/{}", source_key),
+                    fields: Vec::new(),
+                });
             entry.fields.push(Field {
                 name: field_name.to_string(),
                 value,
@@ -486,22 +595,30 @@ mod tests {
     #[test]
     fn diff_identical_snapshots_returns_empty() {
         let snap = make_test_snapshot(vec![
-            ("meminfo", "MemTotal", FieldValue::Bytes(16 * 1024 * 1024 * 1024)),
+            (
+                "meminfo",
+                "MemTotal",
+                FieldValue::Bytes(16 * 1024 * 1024 * 1024),
+            ),
             ("loadavg", "load_1min", FieldValue::Float(0.50)),
         ]);
         let diffs = diff_snapshots(&snap, &snap);
-        assert!(diffs.is_empty(), "Expected no diffs for identical snapshots, got {}", diffs.len());
+        assert!(
+            diffs.is_empty(),
+            "Expected no diffs for identical snapshots, got {}",
+            diffs.len()
+        );
     }
 
     // T6: diff_snapshots — changed Bytes field
     #[test]
     fn diff_detects_bytes_change() {
-        let snap1 = make_test_snapshot(vec![
-            ("meminfo", "MemTotal", FieldValue::Bytes(16 * 1024 * 1024 * 1024)),
-        ]);
-        let snap2 = make_test_snapshot(vec![
-            ("meminfo", "MemTotal", FieldValue::Bytes(999999)),
-        ]);
+        let snap1 = make_test_snapshot(vec![(
+            "meminfo",
+            "MemTotal",
+            FieldValue::Bytes(16 * 1024 * 1024 * 1024),
+        )]);
+        let snap2 = make_test_snapshot(vec![("meminfo", "MemTotal", FieldValue::Bytes(999999))]);
         let diffs = diff_snapshots(&snap1, &snap2);
         assert!(!diffs.is_empty(), "Expected diffs for changed Bytes field");
         assert_eq!(diffs[0].source, "meminfo");
@@ -511,16 +628,15 @@ mod tests {
     // T7: diff_snapshots — small Float change below threshold
     #[test]
     fn diff_ignores_small_float_change() {
-        let snap1 = make_test_snapshot(vec![
-            ("loadavg", "load_1min", FieldValue::Float(0.50)),
-        ]);
-        let snap2 = make_test_snapshot(vec![
-            ("loadavg", "load_1min", FieldValue::Float(0.5005)),
-        ]);
+        let snap1 = make_test_snapshot(vec![("loadavg", "load_1min", FieldValue::Float(0.50))]);
+        let snap2 = make_test_snapshot(vec![("loadavg", "load_1min", FieldValue::Float(0.5005))]);
         let diffs = diff_snapshots(&snap1, &snap2);
         let loadavg_diffs: Vec<_> = diffs.iter().filter(|d| d.source == "loadavg").collect();
-        assert!(loadavg_diffs.is_empty(),
-            "Expected no diffs for small float change (< 0.001), got {}", loadavg_diffs.len());
+        assert!(
+            loadavg_diffs.is_empty(),
+            "Expected no diffs for small float change (< 0.001), got {}",
+            loadavg_diffs.len()
+        );
     }
 
     // BL-020: FieldValue PartialEq
@@ -545,9 +661,7 @@ mod tests {
     // T11: systemtime_iso8601 round-trip
     #[test]
     fn systemtime_roundtrip_via_json() {
-        let snap = make_test_snapshot(vec![
-            ("uptime", "uptime", FieldValue::Duration(86400.0)),
-        ]);
+        let snap = make_test_snapshot(vec![("uptime", "uptime", FieldValue::Duration(86400.0))]);
         let json = serde_json::to_string(&snap).unwrap();
         let restored: Snapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(snap.timestamp, restored.timestamp);
@@ -563,9 +677,15 @@ mod tests {
             "Expected at least 10 entries, got {}",
             snap.entries.len()
         );
-        assert!(snap.entries.contains_key("meminfo"), "Missing meminfo entry");
+        assert!(
+            snap.entries.contains_key("meminfo"),
+            "Missing meminfo entry"
+        );
         assert!(snap.entries.contains_key("uptime"), "Missing uptime entry");
-        assert!(snap.entries.contains_key("loadavg"), "Missing loadavg entry");
+        assert!(
+            snap.entries.contains_key("loadavg"),
+            "Missing loadavg entry"
+        );
     }
 
     // T18: All parsers individually don't panic
@@ -648,7 +768,12 @@ mod parser_content_tests {
         let pct = field_by_name(&entry, "idle_pct").unwrap();
         if let FieldValue::Float(v) = pct.value {
             let expected = 98765.43 / 12345.67 * 100.0;
-            assert!((v - expected).abs() < 0.01, "idle_pct = {} expected ~{}", v, expected);
+            assert!(
+                (v - expected).abs() < 0.01,
+                "idle_pct = {} expected ~{}",
+                v,
+                expected
+            );
         } else {
             panic!("idle_pct should be Float");
         }
@@ -677,12 +802,30 @@ mod parser_content_tests {
     fn loadavg_parse_content() {
         let entry = loadavg::parse_content("0.50 0.75 1.00 3/150 12345\n").unwrap();
         assert_eq!(entry.source, "/proc/loadavg");
-        assert_eq!(field_by_name(&entry, "load_1min").unwrap().value, FieldValue::Float(0.50));
-        assert_eq!(field_by_name(&entry, "load_5min").unwrap().value, FieldValue::Float(0.75));
-        assert_eq!(field_by_name(&entry, "load_15min").unwrap().value, FieldValue::Float(1.00));
-        assert_eq!(field_by_name(&entry, "running_threads").unwrap().value, FieldValue::Integer(3));
-        assert_eq!(field_by_name(&entry, "total_threads").unwrap().value, FieldValue::Integer(150));
-        assert_eq!(field_by_name(&entry, "last_pid").unwrap().value, FieldValue::Integer(12345));
+        assert_eq!(
+            field_by_name(&entry, "load_1min").unwrap().value,
+            FieldValue::Float(0.50)
+        );
+        assert_eq!(
+            field_by_name(&entry, "load_5min").unwrap().value,
+            FieldValue::Float(0.75)
+        );
+        assert_eq!(
+            field_by_name(&entry, "load_15min").unwrap().value,
+            FieldValue::Float(1.00)
+        );
+        assert_eq!(
+            field_by_name(&entry, "running_threads").unwrap().value,
+            FieldValue::Integer(3)
+        );
+        assert_eq!(
+            field_by_name(&entry, "total_threads").unwrap().value,
+            FieldValue::Integer(150)
+        );
+        assert_eq!(
+            field_by_name(&entry, "last_pid").unwrap().value,
+            FieldValue::Integer(12345)
+        );
     }
 
     #[test]
@@ -730,7 +873,10 @@ HugePages_Total:       0
         let fixture = "This is not a valid line\nMemTotal:       1024 kB\n";
         let entry = meminfo::parse_content(fixture).unwrap();
         assert_eq!(entry.fields.len(), 1);
-        assert_eq!(field_by_name(&entry, "MemTotal").unwrap().value, FieldValue::Bytes(1024 * 1024));
+        assert_eq!(
+            field_by_name(&entry, "MemTotal").unwrap().value,
+            FieldValue::Bytes(1024 * 1024)
+        );
     }
 
     // =========================================================================
@@ -745,7 +891,10 @@ HugePages_Total:       0
         let raw = field_by_name(&entry, "raw").unwrap();
         assert!(matches!(&raw.value, FieldValue::Text(s) if s.contains("Linux version")));
         let kv = field_by_name(&entry, "kernel_version").unwrap();
-        assert_eq!(kv.value, FieldValue::Text("6.6.87.2-microsoft-standard-WSL2".into()));
+        assert_eq!(
+            kv.value,
+            FieldValue::Text("6.6.87.2-microsoft-standard-WSL2".into())
+        );
         let comp = field_by_name(&entry, "compiler").unwrap();
         assert_eq!(comp.value, FieldValue::Text("gcc version 12.2.0".into()));
     }
@@ -774,19 +923,48 @@ procs_blocked 1
 ";
         let entry = stat::parse_content(fixture).unwrap();
         assert_eq!(entry.source, "/proc/stat");
-        assert_eq!(field_by_name(&entry, "cpu_user").unwrap().value, FieldValue::Integer(1000));
-        assert_eq!(field_by_name(&entry, "cpu_system").unwrap().value, FieldValue::Integer(500));
-        assert_eq!(field_by_name(&entry, "cpu_idle").unwrap().value, FieldValue::Integer(8000));
-        assert_eq!(field_by_name(&entry, "cpu_iowait").unwrap().value, FieldValue::Integer(100));
-        assert_eq!(field_by_name(&entry, "forks_total").unwrap().value, FieldValue::Integer(5000));
-        assert_eq!(field_by_name(&entry, "procs_running").unwrap().value, FieldValue::Integer(3));
-        assert_eq!(field_by_name(&entry, "procs_blocked").unwrap().value, FieldValue::Integer(1));
-        assert_eq!(field_by_name(&entry, "context_switches").unwrap().value, FieldValue::Integer(987654));
+        assert_eq!(
+            field_by_name(&entry, "cpu_user").unwrap().value,
+            FieldValue::Integer(1000)
+        );
+        assert_eq!(
+            field_by_name(&entry, "cpu_system").unwrap().value,
+            FieldValue::Integer(500)
+        );
+        assert_eq!(
+            field_by_name(&entry, "cpu_idle").unwrap().value,
+            FieldValue::Integer(8000)
+        );
+        assert_eq!(
+            field_by_name(&entry, "cpu_iowait").unwrap().value,
+            FieldValue::Integer(100)
+        );
+        assert_eq!(
+            field_by_name(&entry, "forks_total").unwrap().value,
+            FieldValue::Integer(5000)
+        );
+        assert_eq!(
+            field_by_name(&entry, "procs_running").unwrap().value,
+            FieldValue::Integer(3)
+        );
+        assert_eq!(
+            field_by_name(&entry, "procs_blocked").unwrap().value,
+            FieldValue::Integer(1)
+        );
+        assert_eq!(
+            field_by_name(&entry, "context_switches").unwrap().value,
+            FieldValue::Integer(987654)
+        );
         // cpu_usage_pct: busy = total - idle - iowait = 9900 - 8000 - 100 = 1800
         // total = 1000+200+500+8000+100+50+30+20 = 9900
         if let FieldValue::Float(pct) = field_by_name(&entry, "cpu_usage_pct").unwrap().value {
             let expected = 1800.0 / 9900.0 * 100.0;
-            assert!((pct - expected).abs() < 0.1, "cpu_usage_pct={} expected ~{}", pct, expected);
+            assert!(
+                (pct - expected).abs() < 0.1,
+                "cpu_usage_pct={} expected ~{}",
+                pct,
+                expected
+            );
         } else {
             panic!("cpu_usage_pct should be Float");
         }
@@ -805,7 +983,10 @@ procs_blocked 1
     fn cmdline_parse_content() {
         let fixture = "BOOT_IMAGE=/vmlinuz root=/dev/sda1 ro quiet splash\n";
         let entry = cmdline::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "param_count").unwrap().value, FieldValue::Integer(5));
+        assert_eq!(
+            field_by_name(&entry, "param_count").unwrap().value,
+            FieldValue::Integer(5)
+        );
         if let FieldValue::Text(s) = &field_by_name(&entry, "cmdline").unwrap().value {
             assert!(s.contains("BOOT_IMAGE"));
         }
@@ -814,7 +995,10 @@ procs_blocked 1
     #[test]
     fn cmdline_empty() {
         let entry = cmdline::parse_content("\n").unwrap();
-        assert_eq!(field_by_name(&entry, "param_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "param_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     // =========================================================================
@@ -828,7 +1012,10 @@ proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
 /dev/sda1 / ext4 rw,relatime 0 0
 ";
         let entry = mounts::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "count").unwrap().value, FieldValue::Integer(3));
+        assert_eq!(
+            field_by_name(&entry, "count").unwrap().value,
+            FieldValue::Integer(3)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "mounts").unwrap().value {
             assert_eq!(rows.len(), 3);
             assert_eq!(rows[2][0], "/dev/sda1");
@@ -839,7 +1026,10 @@ proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
     #[test]
     fn mounts_empty() {
         let entry = mounts::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     // =========================================================================
@@ -854,7 +1044,10 @@ major minor  #blocks  name
    8        1  104856576 sda1
 ";
         let entry = partitions::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "partitions").unwrap().value {
             assert_eq!(rows[0][0], "sda");
         }
@@ -881,11 +1074,17 @@ cpu cores\t: 6
 flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sse sse2 avx avx2 hypervisor
 ";
         let entry = cpuinfo::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "logical_cpus").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "logical_cpus").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Text(m) = &field_by_name(&entry, "model").unwrap().value {
             assert!(m.contains("i7-9750H"));
         }
-        assert_eq!(field_by_name(&entry, "cores_per_socket").unwrap().value, FieldValue::Integer(6));
+        assert_eq!(
+            field_by_name(&entry, "cores_per_socket").unwrap().value,
+            FieldValue::Integer(6)
+        );
         if let FieldValue::Text(flags) = &field_by_name(&entry, "key_flags").unwrap().value {
             assert!(flags.contains("sse"));
             assert!(flags.contains("avx2"));
@@ -905,9 +1104,18 @@ Inter-|   Receive                                                |  Transmit
   eth0: 5000000    3000    0    0    0     0          0         0  2000000    1500    0    0    0     0       0          0
 ";
         let entry = net_dev::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "interface_count").unwrap().value, FieldValue::Integer(2));
-        assert_eq!(field_by_name(&entry, "total_rx").unwrap().value, FieldValue::Bytes(6000000));
-        assert_eq!(field_by_name(&entry, "total_tx").unwrap().value, FieldValue::Bytes(3000000));
+        assert_eq!(
+            field_by_name(&entry, "interface_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
+        assert_eq!(
+            field_by_name(&entry, "total_rx").unwrap().value,
+            FieldValue::Bytes(6000000)
+        );
+        assert_eq!(
+            field_by_name(&entry, "total_tx").unwrap().value,
+            FieldValue::Bytes(3000000)
+        );
     }
 
     // =========================================================================
@@ -922,7 +1130,10 @@ Inter-|   Receive                                                |  Transmit
 ";
         let entry = diskstats::parse_content(fixture).unwrap();
         // sda has activity, sda1 does not (0 reads/writes -> skipped)
-        assert_eq!(field_by_name(&entry, "active_devices").unwrap().value, FieldValue::Integer(1));
+        assert_eq!(
+            field_by_name(&entry, "active_devices").unwrap().value,
+            FieldValue::Integer(1)
+        );
     }
 
     // =========================================================================
@@ -935,15 +1146,24 @@ Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority
 /dev/sda2                               partition\t2097148\t\t524288\t\t-2
 ";
         let entry = swaps::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "total_size").unwrap().value, FieldValue::Bytes(2097148 * 1024));
-        assert_eq!(field_by_name(&entry, "total_used").unwrap().value, FieldValue::Bytes(524288 * 1024));
+        assert_eq!(
+            field_by_name(&entry, "total_size").unwrap().value,
+            FieldValue::Bytes(2097148 * 1024)
+        );
+        assert_eq!(
+            field_by_name(&entry, "total_used").unwrap().value,
+            FieldValue::Bytes(524288 * 1024)
+        );
     }
 
     #[test]
     fn swaps_no_swap() {
         let fixture = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
         let entry = swaps::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "total_size").unwrap().value, FieldValue::Bytes(0));
+        assert_eq!(
+            field_by_name(&entry, "total_size").unwrap().value,
+            FieldValue::Bytes(0)
+        );
         if let FieldValue::Float(pct) = field_by_name(&entry, "usage_pct").unwrap().value {
             assert!((pct - 0.0).abs() < 0.001);
         }
@@ -959,7 +1179,10 @@ Node 0, zone      DMA      1      1      0      1      2      1      1      0   
 Node 0, zone    DMA32    100     80     50     30     20     10      5      3      2      1      0
 ";
         let entry = buddyinfo::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "zone_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "zone_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     // =========================================================================
@@ -974,7 +1197,10 @@ cpu\t2\t80\t1
 memory\t3\t80\t1
 ";
         let entry = cgroups::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "controller_count").unwrap().value, FieldValue::Integer(3));
+        assert_eq!(
+            field_by_name(&entry, "controller_count").unwrap().value,
+            FieldValue::Integer(3)
+        );
     }
 
     // =========================================================================
@@ -987,7 +1213,10 @@ tty0                 -WU (EC p a)    4:7
 ttyS0                -W- (E  p  )    4:64
 ";
         let entry = consoles::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "console_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "console_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     // =========================================================================
@@ -1007,7 +1236,10 @@ module       : kernel
 type         : shash
 ";
         let entry = crypto::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "algorithm_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "algorithm_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "algorithms").unwrap().value {
             assert_eq!(rows[0][0], "aes");
             assert_eq!(rows[1][0], "sha256");
@@ -1030,10 +1262,13 @@ Block devices:
   11 sr
 ";
         let entry = devices::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "device_count").unwrap().value, FieldValue::Integer(5));
+        assert_eq!(
+            field_by_name(&entry, "device_count").unwrap().value,
+            FieldValue::Integer(5)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "devices").unwrap().value {
             assert_eq!(rows[0][0], "Character"); // type
-            assert_eq!(rows[0][2], "mem");       // name
+            assert_eq!(rows[0][2], "mem"); // name
             assert_eq!(rows[3][0], "Block");
         }
     }
@@ -1050,12 +1285,15 @@ nodev\ttmpfs
 \txfs
 ";
         let entry = filesystems::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "filesystem_count").unwrap().value, FieldValue::Integer(4));
+        assert_eq!(
+            field_by_name(&entry, "filesystem_count").unwrap().value,
+            FieldValue::Integer(4)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "filesystems").unwrap().value {
             assert_eq!(rows[0][0], "sysfs");
             assert_eq!(rows[0][1], "yes"); // nodev
             assert_eq!(rows[2][0], "ext4");
-            assert_eq!(rows[2][1], "no");  // not nodev
+            assert_eq!(rows[2][1], "no"); // not nodev
         }
     }
 
@@ -1071,8 +1309,14 @@ nodev\ttmpfs
 NMI:          5          3   Non-maskable interrupts
 ";
         let entry = interrupts::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "cpu_count").unwrap().value, FieldValue::Integer(2));
-        assert_eq!(field_by_name(&entry, "irq_count").unwrap().value, FieldValue::Integer(3));
+        assert_eq!(
+            field_by_name(&entry, "cpu_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
+        assert_eq!(
+            field_by_name(&entry, "irq_count").unwrap().value,
+            FieldValue::Integer(3)
+        );
     }
 
     // =========================================================================
@@ -1086,7 +1330,10 @@ NMI:          5          3   Non-maskable interrupts
 000a0000-000bffff : PCI Bus 0000:00
 ";
         let entry = iomem::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "region_count").unwrap().value, FieldValue::Integer(3));
+        assert_eq!(
+            field_by_name(&entry, "region_count").unwrap().value,
+            FieldValue::Integer(3)
+        );
     }
 
     // =========================================================================
@@ -1100,7 +1347,10 @@ NMI:          5          3   Non-maskable interrupts
   0020-0021 : pic1
 ";
         let entry = ioports::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "region_count").unwrap().value, FieldValue::Integer(3));
+        assert_eq!(
+            field_by_name(&entry, "region_count").unwrap().value,
+            FieldValue::Integer(3)
+        );
     }
 
     // =========================================================================
@@ -1113,13 +1363,19 @@ NMI:          5          3   Non-maskable interrupts
 2: FLOCK  ADVISORY  READ  5678 08:01:131074 0 EOF
 ";
         let entry = locks::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "lock_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "lock_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     #[test]
     fn locks_empty() {
         let entry = locks::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "lock_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "lock_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     // =========================================================================
@@ -1132,7 +1388,10 @@ nf_tables 311296 0 - Live 0xffffffff81000000
 nf_conntrack 176128 1 nf_tables, Live 0xffffffff81100000
 ";
         let entry = modules::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "module_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "module_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     // =========================================================================
@@ -1148,8 +1407,14 @@ pgmajfault 100
 ";
         let entry = vmstat::parse_content(fixture).unwrap();
         assert_eq!(entry.fields.len(), 4);
-        assert_eq!(field_by_name(&entry, "nr_free_pages").unwrap().value, FieldValue::Integer(12345));
-        assert_eq!(field_by_name(&entry, "pgmajfault").unwrap().value, FieldValue::Integer(100));
+        assert_eq!(
+            field_by_name(&entry, "nr_free_pages").unwrap().value,
+            FieldValue::Integer(12345)
+        );
+        assert_eq!(
+            field_by_name(&entry, "pgmajfault").unwrap().value,
+            FieldValue::Integer(100)
+        );
     }
 
     #[test]
@@ -1180,10 +1445,13 @@ Node 0, zone    DMA32
         high     1500
 ";
         let entry = zoneinfo::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "zone_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "zone_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "zones").unwrap().value {
-            assert_eq!(rows[0][1], "100");  // free pages
-            assert_eq!(rows[0][2], "10");   // min
+            assert_eq!(rows[0][1], "100"); // free pages
+            assert_eq!(rows[0][2], "10"); // min
             assert_eq!(rows[1][1], "5000"); // free pages
         }
     }
@@ -1201,7 +1469,10 @@ Node 0, zone    DMA32
       NET_RX:       5000       6000
 ";
         let entry = softirqs::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "softirq_count").unwrap().value, FieldValue::Integer(4));
+        assert_eq!(
+            field_by_name(&entry, "softirq_count").unwrap().value,
+            FieldValue::Integer(4)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "softirqs").unwrap().value {
             assert_eq!(rows[0][0], "HI");
             assert_eq!(rows[0][1], "0"); // 0+0
@@ -1220,7 +1491,10 @@ Node 0, zone    DMA32
 200 tun
 ";
         let entry = misc::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "device_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "device_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     // =========================================================================
@@ -1236,7 +1510,8 @@ Node 0, zone    DMA32
             ("cpu", cpu_fixture),
             ("io", io_fixture),
             ("memory", memory_fixture),
-        ]).unwrap();
+        ])
+        .unwrap();
 
         let cpu_some_avg10 = field_by_name(&entry, "cpu_some_avg10").unwrap();
         assert_eq!(cpu_some_avg10.value, FieldValue::Float(0.50));
@@ -1257,10 +1532,13 @@ Node 0, zone    DMA32
    1: 0100007F:01BB C0A80001:D234 01 00000000:00000000 00:00000000 00000000  1000        0 12346
 ";
         let entry = net_tcp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "connection_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "connection_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "connections").unwrap().value {
-            assert_eq!(rows[0][3], "LISTEN");       // state 0A
-            assert_eq!(rows[1][3], "ESTABLISHED");  // state 01
+            assert_eq!(rows[0][3], "LISTEN"); // state 0A
+            assert_eq!(rows[1][3], "ESTABLISHED"); // state 01
             // Check IP parsing: 0100007F -> 127.0.0.1, port 0050 -> 80
             assert!(rows[0][1].starts_with("127.0.0.1:80"));
         }
@@ -1276,7 +1554,10 @@ Node 0, zone    DMA32
    0: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 9876 2 0000000000000000 0
 ";
         let entry = net_udp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "socket_count").unwrap().value, FieldValue::Integer(1));
+        assert_eq!(
+            field_by_name(&entry, "socket_count").unwrap().value,
+            FieldValue::Integer(1)
+        );
     }
 
     // =========================================================================
@@ -1290,7 +1571,10 @@ Num       RefCount Protocol Flags    Type St Inode Path
 0000000000000001: 00000002 00000000 00010000 0001 01 12346
 ";
         let entry = net_unix::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "socket_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "socket_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "sockets").unwrap().value {
             assert_eq!(rows[0][4], "/run/dbus/system_bus_socket");
             assert!(rows[1][4].is_empty()); // no path
@@ -1308,7 +1592,10 @@ IP address       HW type     Flags       HW address            Mask     Device
 10.0.0.1         0x1         0x2         11:22:33:44:55:66     *        eth0
 ";
         let entry = net_arp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "entry_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "entry_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "entries").unwrap().value {
             assert_eq!(rows[0][0], "192.168.1.1");
             assert_eq!(rows[0][1], "aa:bb:cc:dd:ee:ff");
@@ -1326,7 +1613,10 @@ eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0
 eth0\t0001A8C0\t00000000\t0001\t0\t0\t100\tFFFFFF00\t0\t0\t0
 ";
         let entry = net_route::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "route_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "route_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "routes").unwrap().value {
             assert_eq!(rows[0][0], "eth0");
             // 00000000 -> 0.0.0.0, 0101A8C0 -> 192.168.1.1
@@ -1349,10 +1639,22 @@ RAW: inuse 0
 FRAG: inuse 0 memory 0
 ";
         let entry = net_sockstat::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "sockets_used").unwrap().value, FieldValue::Integer(500));
-        assert_eq!(field_by_name(&entry, "TCP_inuse").unwrap().value, FieldValue::Integer(50));
-        assert_eq!(field_by_name(&entry, "TCP_tw").unwrap().value, FieldValue::Integer(10));
-        assert_eq!(field_by_name(&entry, "UDP_inuse").unwrap().value, FieldValue::Integer(20));
+        assert_eq!(
+            field_by_name(&entry, "sockets_used").unwrap().value,
+            FieldValue::Integer(500)
+        );
+        assert_eq!(
+            field_by_name(&entry, "TCP_inuse").unwrap().value,
+            FieldValue::Integer(50)
+        );
+        assert_eq!(
+            field_by_name(&entry, "TCP_tw").unwrap().value,
+            FieldValue::Integer(10)
+        );
+        assert_eq!(
+            field_by_name(&entry, "UDP_inuse").unwrap().value,
+            FieldValue::Integer(20)
+        );
     }
 
     // =========================================================================
@@ -1367,9 +1669,18 @@ Tcp: ActiveOpens PassiveOpens InSegs OutSegs
 Tcp: 100 200 5000 6000
 ";
         let entry = net_snmp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "Ip_Forwarding").unwrap().value, FieldValue::Integer(1));
-        assert_eq!(field_by_name(&entry, "Ip_InReceives").unwrap().value, FieldValue::Integer(123456));
-        assert_eq!(field_by_name(&entry, "Tcp_ActiveOpens").unwrap().value, FieldValue::Integer(100));
+        assert_eq!(
+            field_by_name(&entry, "Ip_Forwarding").unwrap().value,
+            FieldValue::Integer(1)
+        );
+        assert_eq!(
+            field_by_name(&entry, "Ip_InReceives").unwrap().value,
+            FieldValue::Integer(123456)
+        );
+        assert_eq!(
+            field_by_name(&entry, "Tcp_ActiveOpens").unwrap().value,
+            FieldValue::Integer(100)
+        );
     }
 
     // =========================================================================
@@ -1384,8 +1695,14 @@ IpExt: InOctets OutOctets
 IpExt: 999999 888888
 ";
         let entry = net_netstat::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "TcpExt_TCPTimeouts").unwrap().value, FieldValue::Integer(150));
-        assert_eq!(field_by_name(&entry, "IpExt_InOctets").unwrap().value, FieldValue::Integer(999999));
+        assert_eq!(
+            field_by_name(&entry, "TcpExt_TCPTimeouts").unwrap().value,
+            FieldValue::Integer(150)
+        );
+        assert_eq!(
+            field_by_name(&entry, "IpExt_InOctets").unwrap().value,
+            FieldValue::Integer(999999)
+        );
     }
 
     // =========================================================================
@@ -1399,7 +1716,10 @@ Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
  wlan0: 0001   70.  -40.  -95.       0      0      0      0      0        0
 ";
         let entry = net_wireless::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "interface_count").unwrap().value, FieldValue::Integer(1));
+        assert_eq!(
+            field_by_name(&entry, "interface_count").unwrap().value,
+            FieldValue::Integer(1)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "interfaces").unwrap().value {
             assert_eq!(rows[0][0], "wlan0");
         }
@@ -1412,7 +1732,10 @@ Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
  face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
 ";
         let entry = net_wireless::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "interface_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "interface_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     // =========================================================================
@@ -1427,7 +1750,10 @@ kmalloc-256         1000    1200    256   32    2 : tunables    0    0    0 : sl
 dentry              5000    5500    192   21    1 : tunables    0    0    0 : slabdata    262    262      0
 ";
         let entry = slabinfo::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "cache_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "cache_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "caches").unwrap().value {
             assert_eq!(rows[0][0], "kmalloc-256");
             assert_eq!(rows[1][0], "dentry");
@@ -1451,7 +1777,10 @@ Node 0, zone      DMA            1            0            3
 ";
         let entry = pagetypeinfo::parse_content(fixture).unwrap();
         // Parser skips lines starting with "Node" + containing "type" in the free pages section
-        assert_eq!(field_by_name(&entry, "entry_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "entry_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     // =========================================================================
@@ -1466,8 +1795,14 @@ cpu0 100 200 300 400 500 600 700 800 900
 cpu1 110 210 310 410 510 610 710 810 910
 ";
         let entry = schedstat::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "version").unwrap().value, FieldValue::Text("15".into()));
-        assert_eq!(field_by_name(&entry, "cpu_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "version").unwrap().value,
+            FieldValue::Text("15".into())
+        );
+        assert_eq!(
+            field_by_name(&entry, "cpu_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     // =========================================================================
@@ -1479,7 +1814,10 @@ cpu1 110 210 310 410 510 610 710 810 910
  4: cascade
 ";
         let entry = dma::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "channel_count").unwrap().value, FieldValue::Integer(1));
+        assert_eq!(
+            field_by_name(&entry, "channel_count").unwrap().value,
+            FieldValue::Integer(1)
+        );
         if let FieldValue::Table(rows) = &field_by_name(&entry, "channels").unwrap().value {
             assert_eq!(rows[0][0], "4");
             assert_eq!(rows[0][1], "cascade");
@@ -1489,7 +1827,10 @@ cpu1 110 210 310 410 510 610 710 810 910
     #[test]
     fn dma_empty() {
         let entry = dma::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "channel_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "channel_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     // =========================================================================
@@ -1511,12 +1852,21 @@ clock 1:
   .base: 0xffff88003fc16e40
 ";
         let entry = timer_list::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "version").unwrap().value, FieldValue::Text("v0.9".into()));
+        assert_eq!(
+            field_by_name(&entry, "version").unwrap().value,
+            FieldValue::Text("v0.9".into())
+        );
         if let FieldValue::Text(now) = &field_by_name(&entry, "now").unwrap().value {
             assert_eq!(now, "nsecs");
         }
-        assert_eq!(field_by_name(&entry, "clock_count").unwrap().value, FieldValue::Integer(2));
-        assert_eq!(field_by_name(&entry, "timer_count").unwrap().value, FieldValue::Integer(2));
+        assert_eq!(
+            field_by_name(&entry, "clock_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
+        assert_eq!(
+            field_by_name(&entry, "timer_count").unwrap().value,
+            FieldValue::Integer(2)
+        );
     }
 
     // =========================================================================
@@ -1550,106 +1900,156 @@ clock 1:
     fn partitions_header_only() {
         let fixture = "major minor  #blocks  name\n\n";
         let entry = partitions::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn cpuinfo_empty() {
         let entry = cpuinfo::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "logical_cpus").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "logical_cpus").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn crypto_single_entry_no_trailing_newline() {
         let fixture = "name         : test\ndriver       : test-drv\nmodule       : kernel\ntype         : cipher";
         let entry = crypto::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "algorithm_count").unwrap().value, FieldValue::Integer(1));
+        assert_eq!(
+            field_by_name(&entry, "algorithm_count").unwrap().value,
+            FieldValue::Integer(1)
+        );
     }
 
     #[test]
     fn mounts_short_line() {
         let fixture = "short\n";
         let entry = mounts::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn modules_empty() {
         let entry = modules::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "module_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "module_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn zoneinfo_empty() {
         let entry = zoneinfo::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "zone_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "zone_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn net_tcp_empty() {
         let fixture = "  sl  local_address rem_address   st\n";
         let entry = net_tcp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "connection_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "connection_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn net_udp_empty() {
         let fixture = "  sl  local_address rem_address   st\n";
         let entry = net_udp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "socket_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "socket_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn net_arp_empty() {
-        let fixture = "IP address       HW type     Flags       HW address            Mask     Device\n";
+        let fixture =
+            "IP address       HW type     Flags       HW address            Mask     Device\n";
         let entry = net_arp::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "entry_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "entry_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn net_route_empty() {
-        let fixture = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n";
+        let fixture =
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n";
         let entry = net_route::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "route_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "route_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn buddyinfo_empty() {
         let entry = buddyinfo::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "zone_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "zone_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn cgroups_only_comments() {
         let fixture = "#subsys_name\thierarchy\tnum_cgroups\tenabled\n";
         let entry = cgroups::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "controller_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "controller_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn softirqs_empty() {
         let fixture = "                    CPU0\n";
         let entry = softirqs::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "softirq_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "softirq_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn diskstats_no_activity() {
         let fixture = "   8       0 sda 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
         let entry = diskstats::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "active_devices").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "active_devices").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn devices_empty() {
         let entry = devices::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "device_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "device_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn filesystems_empty() {
         let entry = filesystems::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "filesystem_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "filesystem_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
@@ -1667,73 +2067,115 @@ clock 1:
     #[test]
     fn schedstat_empty() {
         let entry = schedstat::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "version").unwrap().value, FieldValue::Text("".into()));
-        assert_eq!(field_by_name(&entry, "cpu_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "version").unwrap().value,
+            FieldValue::Text("".into())
+        );
+        assert_eq!(
+            field_by_name(&entry, "cpu_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn slabinfo_header_only() {
         let fixture = "slabinfo - version: 2.1\n# name ...\n";
         let entry = slabinfo::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "cache_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "cache_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn timer_list_empty() {
         let entry = timer_list::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "clock_count").unwrap().value, FieldValue::Integer(0));
-        assert_eq!(field_by_name(&entry, "timer_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "clock_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
+        assert_eq!(
+            field_by_name(&entry, "timer_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn consoles_empty() {
         let entry = consoles::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "console_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "console_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn misc_empty() {
         let entry = misc::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "device_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "device_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn locks_malformed_short_line() {
         let fixture = "1: POSIX\n";
         let entry = locks::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "lock_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "lock_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn iomem_empty() {
         let entry = iomem::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "region_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "region_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn ioports_empty() {
         let entry = ioports::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "region_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "region_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn interrupts_empty() {
         let entry = interrupts::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "cpu_count").unwrap().value, FieldValue::Integer(0));
-        assert_eq!(field_by_name(&entry, "irq_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "cpu_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
+        assert_eq!(
+            field_by_name(&entry, "irq_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn net_unix_empty() {
         let fixture = "Num       RefCount Protocol Flags    Type St Inode Path\n";
         let entry = net_unix::parse_content(fixture).unwrap();
-        assert_eq!(field_by_name(&entry, "socket_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "socket_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]
     fn pagetypeinfo_empty() {
         let entry = pagetypeinfo::parse_content("").unwrap();
-        assert_eq!(field_by_name(&entry, "entry_count").unwrap().value, FieldValue::Integer(0));
+        assert_eq!(
+            field_by_name(&entry, "entry_count").unwrap().value,
+            FieldValue::Integer(0)
+        );
     }
 
     #[test]

@@ -2,9 +2,7 @@ use crate::proc::{Field, FieldValue, ProcEntry};
 use std::process::Command;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
-    let output = Command::new("ip")
-        .args(["neighbor", "show"])
-        .output()?;
+    let output = Command::new("ip").args(["neighbor", "show"]).output()?;
 
     if !output.status.success() {
         anyhow::bail!("ip neighbor show failed");
@@ -23,7 +21,8 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         let ip = parts[0].to_string();
 
         let get_val = |key: &str| -> String {
-            parts.iter()
+            parts
+                .iter()
                 .position(|&p| p == key)
                 .and_then(|i| parts.get(i + 1))
                 .map(|s| s.to_string())
@@ -34,9 +33,7 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         let lladdr = get_val("lladdr");
 
         // State is typically the last token
-        let state = parts.last()
-            .map(|s| s.to_string())
-            .unwrap_or_default();
+        let state = parts.last().map(|s| s.to_string()).unwrap_or_default();
 
         if state == "FAILED" {
             failed_count += 1;

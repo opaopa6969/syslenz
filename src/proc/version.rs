@@ -9,14 +9,12 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
 pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let text = content.trim();
 
-    let mut fields = vec![
-        Field {
-            name: "raw".into(),
-            value: FieldValue::Text(text.to_string()),
-            unit: None,
-            description: "Full kernel version string".into(),
-        },
-    ];
+    let mut fields = vec![Field {
+        name: "raw".into(),
+        value: FieldValue::Text(text.to_string()),
+        unit: None,
+        description: "Full kernel version string".into(),
+    }];
 
     // Extract kernel version (e.g., "Linux version 6.6.87")
     if let Some(ver_start) = text.find("version ") {

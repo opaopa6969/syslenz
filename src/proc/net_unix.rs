@@ -20,7 +20,11 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
             let sock_type = parts[4].to_string();
             let state = parts[5].to_string();
             let inode = parts[6].to_string();
-            let path = if parts.len() >= 8 { parts[7].to_string() } else { String::new() };
+            let path = if parts.len() >= 8 {
+                parts[7].to_string()
+            } else {
+                String::new()
+            };
             rows.push(vec![refcount, sock_type, state, inode, path]);
         }
     }

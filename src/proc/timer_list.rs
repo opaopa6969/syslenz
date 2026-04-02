@@ -14,7 +14,10 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("Timer List Version:") {
-            let version = trimmed.split_once(':').map(|(_, v)| v.trim().to_string()).unwrap_or_default();
+            let version = trimmed
+                .split_once(':')
+                .map(|(_, v)| v.trim().to_string())
+                .unwrap_or_default();
             fields.push(Field {
                 name: "version".into(),
                 value: FieldValue::Text(version),

@@ -19,11 +19,11 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
             total_size += size;
             total_used += used;
             rows.push(vec![
-                parts[0].to_string(),   // filename
-                parts[1].to_string(),   // type
-                format_kb(size),        // size
-                format_kb(used),        // used
-                parts[4].to_string(),   // priority
+                parts[0].to_string(), // filename
+                parts[1].to_string(), // type
+                format_kb(size),      // size
+                format_kb(used),      // used
+                parts[4].to_string(), // priority
             ]);
         }
     }
@@ -45,7 +45,11 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
             },
             Field {
                 name: "usage_pct".into(),
-                value: FieldValue::Float(if total_size > 0 { total_used as f64 / total_size as f64 * 100.0 } else { 0.0 }),
+                value: FieldValue::Float(if total_size > 0 {
+                    total_used as f64 / total_size as f64 * 100.0
+                } else {
+                    0.0
+                }),
                 unit: Some("%".into()),
                 description: "Swap usage percentage".into(),
             },

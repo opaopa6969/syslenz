@@ -47,7 +47,10 @@ pub fn format_prometheus(snapshot: &Snapshot) -> String {
 /// It captures a fresh snapshot for every scrape request.
 pub fn run_prometheus_server(bind_addr: &str) -> anyhow::Result<()> {
     let listener = TcpListener::bind(bind_addr)?;
-    eprintln!("syslenz: Prometheus metrics endpoint on http://{}/metrics", bind_addr);
+    eprintln!(
+        "syslenz: Prometheus metrics endpoint on http://{}/metrics",
+        bind_addr
+    );
 
     for stream in listener.incoming() {
         match stream {
@@ -159,9 +162,12 @@ mod tests {
 
     #[test]
     fn format_bytes_field() {
-        let snap = make_snapshot(vec![
-            ("meminfo", "MemTotal", FieldValue::Bytes(67100098560), "Total usable RAM"),
-        ]);
+        let snap = make_snapshot(vec![(
+            "meminfo",
+            "MemTotal",
+            FieldValue::Bytes(67100098560),
+            "Total usable RAM",
+        )]);
         let output = format_prometheus(&snap);
         assert!(output.contains("# HELP syslenz_meminfo_MemTotal Total usable RAM"));
         assert!(output.contains("# TYPE syslenz_meminfo_MemTotal gauge"));
@@ -170,18 +176,24 @@ mod tests {
 
     #[test]
     fn format_float_field() {
-        let snap = make_snapshot(vec![
-            ("loadavg", "load_1min", FieldValue::Float(2.11), "1-minute load average"),
-        ]);
+        let snap = make_snapshot(vec![(
+            "loadavg",
+            "load_1min",
+            FieldValue::Float(2.11),
+            "1-minute load average",
+        )]);
         let output = format_prometheus(&snap);
         assert!(output.contains("syslenz_loadavg_load_1min 2.11"));
     }
 
     #[test]
     fn format_duration_field() {
-        let snap = make_snapshot(vec![
-            ("uptime", "uptime", FieldValue::Duration(86400.5), "System uptime"),
-        ]);
+        let snap = make_snapshot(vec![(
+            "uptime",
+            "uptime",
+            FieldValue::Duration(86400.5),
+            "System uptime",
+        )]);
         let output = format_prometheus(&snap);
         assert!(output.contains("syslenz_uptime_uptime 86400.5"));
     }
@@ -189,8 +201,18 @@ mod tests {
     #[test]
     fn skips_text_and_table() {
         let snap = make_snapshot(vec![
-            ("version", "version_string", FieldValue::Text("Linux 6.1".into()), "Kernel version"),
-            ("processes", "procs", FieldValue::Table(vec![vec!["a".into()]]), "Process list"),
+            (
+                "version",
+                "version_string",
+                FieldValue::Text("Linux 6.1".into()),
+                "Kernel version",
+            ),
+            (
+                "processes",
+                "procs",
+                FieldValue::Table(vec![vec!["a".into()]]),
+                "Process list",
+            ),
         ]);
         let output = format_prometheus(&snap);
         assert!(!output.contains("syslenz_version_version_string"));
@@ -200,8 +222,18 @@ mod tests {
     #[test]
     fn sanitizes_slashes_and_dashes() {
         let snap = make_snapshot(vec![
-            ("net/dev", "rx_bytes", FieldValue::Bytes(1234), "Received bytes"),
-            ("file-nr", "allocated", FieldValue::Integer(5000), "Allocated FDs"),
+            (
+                "net/dev",
+                "rx_bytes",
+                FieldValue::Bytes(1234),
+                "Received bytes",
+            ),
+            (
+                "file-nr",
+                "allocated",
+                FieldValue::Integer(5000),
+                "Allocated FDs",
+            ),
         ]);
         let output = format_prometheus(&snap);
         assert!(output.contains("syslenz_net_dev_rx_bytes 1234"));

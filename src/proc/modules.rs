@@ -37,7 +37,8 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 name: "modules".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Loaded kernel modules (name, size, refcount, dependencies, state)".into(),
+                description: "Loaded kernel modules (name, size, refcount, dependencies, state)"
+                    .into(),
             },
         ],
     })

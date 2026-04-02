@@ -10,10 +10,30 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
     let mut fields = Vec::new();
 
     let pseudo_fs = [
-        "proc", "sysfs", "tmpfs", "devpts", "devtmpfs", "cgroup", "cgroup2",
-        "pstore", "securityfs", "debugfs", "tracefs", "hugetlbfs", "mqueue",
-        "fusectl", "configfs", "binfmt_misc", "autofs", "efivarfs", "bpf",
-        "nsfs", "ramfs", "rpc_pipefs", "nfsd", "overlay",
+        "proc",
+        "sysfs",
+        "tmpfs",
+        "devpts",
+        "devtmpfs",
+        "cgroup",
+        "cgroup2",
+        "pstore",
+        "securityfs",
+        "debugfs",
+        "tracefs",
+        "hugetlbfs",
+        "mqueue",
+        "fusectl",
+        "configfs",
+        "binfmt_misc",
+        "autofs",
+        "efivarfs",
+        "bpf",
+        "nsfs",
+        "ramfs",
+        "rpc_pipefs",
+        "nfsd",
+        "overlay",
     ];
 
     let mut table_rows: Vec<Vec<String>> = Vec::new();
@@ -82,7 +102,8 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         name: "filesystems".into(),
         value: FieldValue::Table(table_rows),
         unit: None,
-        description: "Filesystem usage table: Device, MountPoint, Total, Used, Available, Use%".into(),
+        description: "Filesystem usage table: Device, MountPoint, Total, Used, Available, Use%"
+            .into(),
     });
 
     fields.push(Field {

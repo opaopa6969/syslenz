@@ -11,10 +11,7 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
 
     for line in content.lines() {
         if let Some((range, desc)) = line.split_once(':') {
-            rows.push(vec![
-                range.trim().to_string(),
-                desc.trim().to_string(),
-            ]);
+            rows.push(vec![range.trim().to_string(), desc.trim().to_string()]);
         }
     }
 

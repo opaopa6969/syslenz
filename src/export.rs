@@ -1,6 +1,6 @@
-use std::path::Path;
-use anyhow::Result;
 use crate::proc::Snapshot;
+use anyhow::Result;
+use std::path::Path;
 
 /// Write a single snapshot as pretty-printed JSON.
 pub fn export_snapshot(snapshot: &Snapshot, path: &Path) -> Result<()> {
@@ -33,51 +33,56 @@ pub fn import_series(path: &Path) -> Result<Vec<Snapshot>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proc::{ProcEntry, Field, FieldValue, Snapshot};
+    use crate::proc::{Field, FieldValue, ProcEntry, Snapshot};
     use std::collections::BTreeMap;
     use std::time::SystemTime;
 
     fn make_test_snapshot() -> Snapshot {
         let mut entries = BTreeMap::new();
-        entries.insert("meminfo".into(), ProcEntry {
-            source: "/proc/meminfo".into(),
-            fields: vec![
-                Field {
-                    name: "MemTotal".into(),
-                    value: FieldValue::Bytes(16 * 1024 * 1024 * 1024),
-                    unit: Some("kB".into()),
-                    description: "Total usable RAM".into(),
-                },
-                Field {
-                    name: "MemFree".into(),
-                    value: FieldValue::Bytes(8 * 1024 * 1024 * 1024),
-                    unit: Some("kB".into()),
-                    description: "Free memory".into(),
-                },
-            ],
-        });
-        entries.insert("loadavg".into(), ProcEntry {
-            source: "/proc/loadavg".into(),
-            fields: vec![
-                Field {
+        entries.insert(
+            "meminfo".into(),
+            ProcEntry {
+                source: "/proc/meminfo".into(),
+                fields: vec![
+                    Field {
+                        name: "MemTotal".into(),
+                        value: FieldValue::Bytes(16 * 1024 * 1024 * 1024),
+                        unit: Some("kB".into()),
+                        description: "Total usable RAM".into(),
+                    },
+                    Field {
+                        name: "MemFree".into(),
+                        value: FieldValue::Bytes(8 * 1024 * 1024 * 1024),
+                        unit: Some("kB".into()),
+                        description: "Free memory".into(),
+                    },
+                ],
+            },
+        );
+        entries.insert(
+            "loadavg".into(),
+            ProcEntry {
+                source: "/proc/loadavg".into(),
+                fields: vec![Field {
                     name: "load_1min".into(),
                     value: FieldValue::Float(0.50),
                     unit: None,
                     description: "1-minute load average".into(),
-                },
-            ],
-        });
-        entries.insert("uptime".into(), ProcEntry {
-            source: "/proc/uptime".into(),
-            fields: vec![
-                Field {
+                }],
+            },
+        );
+        entries.insert(
+            "uptime".into(),
+            ProcEntry {
+                source: "/proc/uptime".into(),
+                fields: vec![Field {
                     name: "uptime".into(),
                     value: FieldValue::Duration(86400.0),
                     unit: Some("seconds".into()),
                     description: "System uptime".into(),
-                },
-            ],
-        });
+                }],
+            },
+        );
         Snapshot {
             timestamp: SystemTime::now(),
             entries,
@@ -96,10 +101,16 @@ mod tests {
 
         assert_eq!(original.entries.len(), restored.entries.len());
         for (key, entry) in &original.entries {
-            let restored_entry = restored.entries.get(key)
+            let restored_entry = restored
+                .entries
+                .get(key)
                 .unwrap_or_else(|| panic!("Missing key '{}' in restored snapshot", key));
-            assert_eq!(entry.fields.len(), restored_entry.fields.len(),
-                "Field count mismatch for source '{}'", key);
+            assert_eq!(
+                entry.fields.len(),
+                restored_entry.fields.len(),
+                "Field count mismatch for source '{}'",
+                key
+            );
             for (f1, f2) in entry.fields.iter().zip(restored_entry.fields.iter()) {
                 assert_eq!(f1.name, f2.name);
                 assert_eq!(f1.description, f2.description);

@@ -21,7 +21,13 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
             let quality_link = parts.get(2).unwrap_or(&"0").to_string();
             let quality_level = parts.get(3).unwrap_or(&"0").to_string();
             let quality_noise = parts.get(4).unwrap_or(&"0").to_string();
-            rows.push(vec![iface, status, quality_link, quality_level, quality_noise]);
+            rows.push(vec![
+                iface,
+                status,
+                quality_link,
+                quality_level,
+                quality_noise,
+            ]);
         }
     }
 

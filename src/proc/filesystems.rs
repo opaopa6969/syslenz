@@ -15,7 +15,10 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
             continue;
         }
         let (nodev, fsname) = if trimmed.starts_with("nodev") {
-            ("yes".to_string(), trimmed.trim_start_matches("nodev").trim().to_string())
+            (
+                "yes".to_string(),
+                trimmed.trim_start_matches("nodev").trim().to_string(),
+            )
         } else {
             ("no".to_string(), trimmed.to_string())
         };

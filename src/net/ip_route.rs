@@ -2,9 +2,7 @@ use crate::proc::{Field, FieldValue, ProcEntry};
 use std::process::Command;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
-    let output = Command::new("ip")
-        .args(["route", "show"])
-        .output()?;
+    let output = Command::new("ip").args(["route", "show"]).output()?;
 
     if !output.status.success() {
         anyhow::bail!("ip route show failed");
@@ -23,7 +21,8 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         let destination = parts[0].to_string();
 
         let get_val = |key: &str| -> String {
-            parts.iter()
+            parts
+                .iter()
                 .position(|&p| p == key)
                 .and_then(|i| parts.get(i + 1))
                 .map(|s| s.to_string())
@@ -40,14 +39,7 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
             default_gateway = gateway.clone();
         }
 
-        rows.push(vec![
-            destination,
-            gateway,
-            device,
-            protocol,
-            scope,
-            metric,
-        ]);
+        rows.push(vec![destination, gateway, device, protocol, scope, metric]);
     }
 
     let route_count = rows.len() as i64;
@@ -75,7 +67,8 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
                 name: "routes".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Routing table: Destination, Gateway, Device, Protocol, Scope, Metric".into(),
+                description: "Routing table: Destination, Gateway, Device, Protocol, Scope, Metric"
+                    .into(),
             },
         ],
     })

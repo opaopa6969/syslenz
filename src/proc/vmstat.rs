@@ -240,7 +240,10 @@ fn describe_vmstat_field_by_prefix(name: &str) -> String {
         return format!("Pages skipped in {} zone during reclaim", zone);
     }
     if name.starts_with("nr_") {
-        return format!("Page count: {}", name.replace('_', " ").trim_start_matches("nr "));
+        return format!(
+            "Page count: {}",
+            name.replace('_', " ").trim_start_matches("nr ")
+        );
     }
     if name.starts_with("pgsteal_") {
         return format!("Pages reclaimed by {}", &name["pgsteal_".len()..]);
@@ -249,19 +252,34 @@ fn describe_vmstat_field_by_prefix(name: &str) -> String {
         return format!("Pages scanned by {}", &name["pgscan_".len()..]);
     }
     if name.starts_with("compact_") {
-        return format!("Memory compaction: {}", name.replace('_', " ").trim_start_matches("compact "));
+        return format!(
+            "Memory compaction: {}",
+            name.replace('_', " ").trim_start_matches("compact ")
+        );
     }
     if name.starts_with("thp_") {
-        return format!("Transparent huge page: {}", name.replace('_', " ").trim_start_matches("thp "));
+        return format!(
+            "Transparent huge page: {}",
+            name.replace('_', " ").trim_start_matches("thp ")
+        );
     }
     if name.starts_with("numa_") {
-        return format!("NUMA allocation: {}", name.replace('_', " ").trim_start_matches("numa "));
+        return format!(
+            "NUMA allocation: {}",
+            name.replace('_', " ").trim_start_matches("numa ")
+        );
     }
     if name.starts_with("workingset_") {
-        return format!("Working set: {}", name.replace('_', " ").trim_start_matches("workingset "));
+        return format!(
+            "Working set: {}",
+            name.replace('_', " ").trim_start_matches("workingset ")
+        );
     }
     if name.starts_with("unevictable_") {
-        return format!("Unevictable pages: {}", name.replace('_', " ").trim_start_matches("unevictable "));
+        return format!(
+            "Unevictable pages: {}",
+            name.replace('_', " ").trim_start_matches("unevictable ")
+        );
     }
     // Final fallback - still provide something
     name.replace('_', " ")

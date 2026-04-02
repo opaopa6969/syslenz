@@ -10,30 +10,78 @@ use std::time::SystemTime;
 pub fn capture() -> anyhow::Result<Snapshot> {
     let mut entries = BTreeMap::new();
 
-    if let Ok(e) = parse_meminfo() { entries.insert("meminfo".into(), e); }
-    if let Ok(e) = parse_uptime() { entries.insert("uptime".into(), e); }
-    if let Ok(e) = parse_loadavg() { entries.insert("loadavg".into(), e); }
-    if let Ok(e) = parse_cpuinfo() { entries.insert("cpuinfo".into(), e); }
-    if let Ok(e) = parse_version() { entries.insert("version".into(), e); }
-    if let Ok(e) = parse_mounts() { entries.insert("mounts".into(), e); }
-    if let Ok(e) = parse_net_dev() { entries.insert("net/dev".into(), e); }
-    if let Ok(e) = parse_processes() { entries.insert("processes".into(), e); }
-    if let Ok(e) = parse_diskstats() { entries.insert("diskstats".into(), e); }
-    if let Ok(e) = parse_df() { entries.insert("df".into(), e); }
-    if let Ok(e) = parse_thermal() { entries.insert("thermal".into(), e); }
-    if let Ok(e) = parse_battery() { entries.insert("battery".into(), e); }
-    if let Ok(e) = parse_fd() { entries.insert("file-nr".into(), e); }
-    if let Ok(e) = parse_top_summary() { entries.insert("top_summary".into(), e); }
-    if let Ok(e) = parse_network_connections() { entries.insert("net/connections".into(), e); }
-    if let Ok(e) = parse_launchd_services() { entries.insert("launchd".into(), e); }
-    if let Ok(e) = parse_diskutil() { entries.insert("diskutil".into(), e); }
-    if let Ok(e) = parse_network_config() { entries.insert("net/config".into(), e); }
-    if let Ok(e) = parse_system_profile() { entries.insert("system_profile".into(), e); }
-    if let Ok(e) = parse_open_files() { entries.insert("open_files".into(), e); }
-    if let Ok(e) = parse_dns_config() { entries.insert("dns".into(), e); }
-    if let Ok(e) = parse_software_update() { entries.insert("software_update".into(), e); }
-    if let Ok(e) = parse_power_management() { entries.insert("power_management".into(), e); }
-    if let Ok(e) = parse_kernel_extensions() { entries.insert("kernel_extensions".into(), e); }
+    if let Ok(e) = parse_meminfo() {
+        entries.insert("meminfo".into(), e);
+    }
+    if let Ok(e) = parse_uptime() {
+        entries.insert("uptime".into(), e);
+    }
+    if let Ok(e) = parse_loadavg() {
+        entries.insert("loadavg".into(), e);
+    }
+    if let Ok(e) = parse_cpuinfo() {
+        entries.insert("cpuinfo".into(), e);
+    }
+    if let Ok(e) = parse_version() {
+        entries.insert("version".into(), e);
+    }
+    if let Ok(e) = parse_mounts() {
+        entries.insert("mounts".into(), e);
+    }
+    if let Ok(e) = parse_net_dev() {
+        entries.insert("net/dev".into(), e);
+    }
+    if let Ok(e) = parse_processes() {
+        entries.insert("processes".into(), e);
+    }
+    if let Ok(e) = parse_diskstats() {
+        entries.insert("diskstats".into(), e);
+    }
+    if let Ok(e) = parse_df() {
+        entries.insert("df".into(), e);
+    }
+    if let Ok(e) = parse_thermal() {
+        entries.insert("thermal".into(), e);
+    }
+    if let Ok(e) = parse_battery() {
+        entries.insert("battery".into(), e);
+    }
+    if let Ok(e) = parse_fd() {
+        entries.insert("file-nr".into(), e);
+    }
+    if let Ok(e) = parse_top_summary() {
+        entries.insert("top_summary".into(), e);
+    }
+    if let Ok(e) = parse_network_connections() {
+        entries.insert("net/connections".into(), e);
+    }
+    if let Ok(e) = parse_launchd_services() {
+        entries.insert("launchd".into(), e);
+    }
+    if let Ok(e) = parse_diskutil() {
+        entries.insert("diskutil".into(), e);
+    }
+    if let Ok(e) = parse_network_config() {
+        entries.insert("net/config".into(), e);
+    }
+    if let Ok(e) = parse_system_profile() {
+        entries.insert("system_profile".into(), e);
+    }
+    if let Ok(e) = parse_open_files() {
+        entries.insert("open_files".into(), e);
+    }
+    if let Ok(e) = parse_dns_config() {
+        entries.insert("dns".into(), e);
+    }
+    if let Ok(e) = parse_software_update() {
+        entries.insert("software_update".into(), e);
+    }
+    if let Ok(e) = parse_power_management() {
+        entries.insert("power_management".into(), e);
+    }
+    if let Ok(e) = parse_kernel_extensions() {
+        entries.insert("kernel_extensions".into(), e);
+    }
 
     Ok(Snapshot {
         timestamp: SystemTime::now(),
@@ -68,7 +116,9 @@ fn parse_meminfo() -> anyhow::Result<ProcEntry> {
 
     for line in vm_stat.lines() {
         let parts: Vec<&str> = line.split(':').collect();
-        if parts.len() != 2 { continue; }
+        if parts.len() != 2 {
+            continue;
+        }
         let val: u64 = parts[1].trim().trim_end_matches('.').parse().unwrap_or(0);
         match parts[0].trim() {
             "Pages free" => free_pages = val,
@@ -90,13 +140,48 @@ fn parse_meminfo() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "sysctl hw.memsize + vm_stat".into(),
         fields: vec![
-            Field { name: "MemTotal".into(), value: FieldValue::Bytes(total), unit: None, description: "Total physical memory".into() },
-            Field { name: "MemFree".into(), value: FieldValue::Bytes(free), unit: None, description: "Free memory (not used at all)".into() },
-            Field { name: "MemAvailable".into(), value: FieldValue::Bytes(available), unit: None, description: "Available memory (free + reclaimable)".into() },
-            Field { name: "Active".into(), value: FieldValue::Bytes(active), unit: None, description: "Recently used memory".into() },
-            Field { name: "Inactive".into(), value: FieldValue::Bytes(inactive), unit: None, description: "Not recently used, reclaimable".into() },
-            Field { name: "Wired".into(), value: FieldValue::Bytes(wired), unit: None, description: "Memory that cannot be paged out".into() },
-            Field { name: "Compressed".into(), value: FieldValue::Bytes(compressed), unit: None, description: "Memory compressed by the compressor".into() },
+            Field {
+                name: "MemTotal".into(),
+                value: FieldValue::Bytes(total),
+                unit: None,
+                description: "Total physical memory".into(),
+            },
+            Field {
+                name: "MemFree".into(),
+                value: FieldValue::Bytes(free),
+                unit: None,
+                description: "Free memory (not used at all)".into(),
+            },
+            Field {
+                name: "MemAvailable".into(),
+                value: FieldValue::Bytes(available),
+                unit: None,
+                description: "Available memory (free + reclaimable)".into(),
+            },
+            Field {
+                name: "Active".into(),
+                value: FieldValue::Bytes(active),
+                unit: None,
+                description: "Recently used memory".into(),
+            },
+            Field {
+                name: "Inactive".into(),
+                value: FieldValue::Bytes(inactive),
+                unit: None,
+                description: "Not recently used, reclaimable".into(),
+            },
+            Field {
+                name: "Wired".into(),
+                value: FieldValue::Bytes(wired),
+                unit: None,
+                description: "Memory that cannot be paged out".into(),
+            },
+            Field {
+                name: "Compressed".into(),
+                value: FieldValue::Bytes(compressed),
+                unit: None,
+                description: "Memory compressed by the compressor".into(),
+            },
         ],
     })
 }
@@ -105,7 +190,8 @@ fn parse_uptime() -> anyhow::Result<ProcEntry> {
     let boot_str = sysctl_string("kern.boottime")?;
     // Format: "{ sec = 1234567890, usec = 0 } ..."
     let sec_val = boot_str
-        .split("sec = ").nth(1)
+        .split("sec = ")
+        .nth(1)
         .and_then(|s| s.split(',').next())
         .and_then(|s| s.trim().parse::<u64>().ok())
         .unwrap_or(0);
@@ -118,9 +204,12 @@ fn parse_uptime() -> anyhow::Result<ProcEntry> {
 
     Ok(ProcEntry {
         source: "sysctl kern.boottime".into(),
-        fields: vec![
-            Field { name: "uptime".into(), value: FieldValue::Duration(uptime_secs), unit: Some("seconds".into()), description: "Time since boot".into() },
-        ],
+        fields: vec![Field {
+            name: "uptime".into(),
+            value: FieldValue::Duration(uptime_secs),
+            unit: Some("seconds".into()),
+            description: "Time since boot".into(),
+        }],
     })
 }
 
@@ -136,9 +225,24 @@ fn parse_loadavg() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "sysctl vm.loadavg".into(),
         fields: vec![
-            Field { name: "load1".into(), value: FieldValue::Float(*nums.first().unwrap_or(&0.0)), unit: None, description: "1-minute load average".into() },
-            Field { name: "load5".into(), value: FieldValue::Float(*nums.get(1).unwrap_or(&0.0)), unit: None, description: "5-minute load average".into() },
-            Field { name: "load15".into(), value: FieldValue::Float(*nums.get(2).unwrap_or(&0.0)), unit: None, description: "15-minute load average".into() },
+            Field {
+                name: "load1".into(),
+                value: FieldValue::Float(*nums.first().unwrap_or(&0.0)),
+                unit: None,
+                description: "1-minute load average".into(),
+            },
+            Field {
+                name: "load5".into(),
+                value: FieldValue::Float(*nums.get(1).unwrap_or(&0.0)),
+                unit: None,
+                description: "5-minute load average".into(),
+            },
+            Field {
+                name: "load15".into(),
+                value: FieldValue::Float(*nums.get(2).unwrap_or(&0.0)),
+                unit: None,
+                description: "15-minute load average".into(),
+            },
         ],
     })
 }
@@ -152,10 +256,30 @@ fn parse_cpuinfo() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "sysctl machdep.cpu".into(),
         fields: vec![
-            Field { name: "model_name".into(), value: FieldValue::Text(brand), unit: None, description: "CPU model name".into() },
-            Field { name: "physical_cores".into(), value: FieldValue::Integer(cores as i64), unit: None, description: "Physical CPU cores".into() },
-            Field { name: "logical_cores".into(), value: FieldValue::Integer(logical as i64), unit: None, description: "Logical CPU cores (with HT)".into() },
-            Field { name: "frequency".into(), value: FieldValue::Bytes(freq), unit: Some("Hz".into()), description: "CPU frequency".into() },
+            Field {
+                name: "model_name".into(),
+                value: FieldValue::Text(brand),
+                unit: None,
+                description: "CPU model name".into(),
+            },
+            Field {
+                name: "physical_cores".into(),
+                value: FieldValue::Integer(cores as i64),
+                unit: None,
+                description: "Physical CPU cores".into(),
+            },
+            Field {
+                name: "logical_cores".into(),
+                value: FieldValue::Integer(logical as i64),
+                unit: None,
+                description: "Logical CPU cores (with HT)".into(),
+            },
+            Field {
+                name: "frequency".into(),
+                value: FieldValue::Bytes(freq),
+                unit: Some("Hz".into()),
+                description: "CPU frequency".into(),
+            },
         ],
     })
 }
@@ -168,9 +292,24 @@ fn parse_version() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "sysctl kern.osrelease".into(),
         fields: vec![
-            Field { name: "os_type".into(), value: FieldValue::Text(os_type), unit: None, description: "Operating system type".into() },
-            Field { name: "os_release".into(), value: FieldValue::Text(version), unit: None, description: "Kernel release version".into() },
-            Field { name: "os_version".into(), value: FieldValue::Text(os_version), unit: None, description: "macOS product version".into() },
+            Field {
+                name: "os_type".into(),
+                value: FieldValue::Text(os_type),
+                unit: None,
+                description: "Operating system type".into(),
+            },
+            Field {
+                name: "os_release".into(),
+                value: FieldValue::Text(version),
+                unit: None,
+                description: "Kernel release version".into(),
+            },
+            Field {
+                name: "os_version".into(),
+                value: FieldValue::Text(os_version),
+                unit: None,
+                description: "macOS product version".into(),
+            },
         ],
     })
 }
@@ -178,50 +317,65 @@ fn parse_version() -> anyhow::Result<ProcEntry> {
 fn parse_mounts() -> anyhow::Result<ProcEntry> {
     let output = Command::new("mount").output()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let rows: Vec<Vec<String>> = text.lines().filter_map(|line| {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 {
-            Some(vec![
-                parts[0].to_string(),
-                parts[2].to_string(),
-                parts[4].trim_matches(|c| c == '(' || c == ')' || c == ',').to_string(),
-            ])
-        } else {
-            None
-        }
-    }).collect();
+    let rows: Vec<Vec<String>> = text
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 5 {
+                Some(vec![
+                    parts[0].to_string(),
+                    parts[2].to_string(),
+                    parts[4]
+                        .trim_matches(|c| c == '(' || c == ')' || c == ',')
+                        .to_string(),
+                ])
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Ok(ProcEntry {
         source: "mount".into(),
-        fields: vec![
-            Field { name: "mounts".into(), value: FieldValue::Table(rows), unit: None, description: "Mounted filesystems".into() },
-        ],
+        fields: vec![Field {
+            name: "mounts".into(),
+            value: FieldValue::Table(rows),
+            unit: None,
+            description: "Mounted filesystems".into(),
+        }],
     })
 }
 
 fn parse_net_dev() -> anyhow::Result<ProcEntry> {
     let output = Command::new("netstat").arg("-ibn").output()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let rows: Vec<Vec<String>> = text.lines().skip(1).filter_map(|line| {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 7 {
-            Some(vec![
-                parts[0].to_string(),  // Interface
-                parts[4].to_string(),  // Ibytes
-                parts[3].to_string(),  // Ipkts
-                parts[6].to_string(),  // Obytes
-                parts[5].to_string(),  // Opkts
-            ])
-        } else {
-            None
-        }
-    }).collect();
+    let rows: Vec<Vec<String>> = text
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 7 {
+                Some(vec![
+                    parts[0].to_string(), // Interface
+                    parts[4].to_string(), // Ibytes
+                    parts[3].to_string(), // Ipkts
+                    parts[6].to_string(), // Obytes
+                    parts[5].to_string(), // Opkts
+                ])
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Ok(ProcEntry {
         source: "netstat -ibn".into(),
-        fields: vec![
-            Field { name: "interfaces".into(), value: FieldValue::Table(rows), unit: None, description: "Network interface statistics".into() },
-        ],
+        fields: vec![Field {
+            name: "interfaces".into(),
+            value: FieldValue::Table(rows),
+            unit: None,
+            description: "Network interface statistics".into(),
+        }],
     })
 }
 
@@ -231,23 +385,32 @@ fn parse_processes() -> anyhow::Result<ProcEntry> {
         .output()
         .or_else(|_| {
             // macOS ps syntax differs
-            Command::new("ps").args(["-eo", "pid,comm,stat,rss,uid"]).output()
+            Command::new("ps")
+                .args(["-eo", "pid,comm,stat,rss,uid"])
+                .output()
         })?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let rows: Vec<Vec<String>> = text.lines().skip(1).filter_map(|line| {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 {
-            Some(parts.iter().map(|s| s.to_string()).collect())
-        } else {
-            None
-        }
-    }).collect();
+    let rows: Vec<Vec<String>> = text
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 5 {
+                Some(parts.iter().map(|s| s.to_string()).collect())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Ok(ProcEntry {
         source: "ps -eo".into(),
-        fields: vec![
-            Field { name: "processes".into(), value: FieldValue::Table(rows), unit: None, description: "Running processes".into() },
-        ],
+        fields: vec![Field {
+            name: "processes".into(),
+            value: FieldValue::Table(rows),
+            unit: None,
+            description: "Running processes".into(),
+        }],
     })
 }
 
@@ -291,7 +454,8 @@ fn parse_df() -> anyhow::Result<ProcEntry> {
         name: "filesystems".into(),
         value: FieldValue::Table(table_rows),
         unit: None,
-        description: "Filesystem usage table: Filesystem, Size, Used, Available, Use%, MountedOn".into(),
+        description: "Filesystem usage table: Filesystem, Size, Used, Available, Use%, MountedOn"
+            .into(),
     });
 
     if let Some(pct) = root_use_pct {
@@ -391,7 +555,8 @@ fn parse_battery() -> anyhow::Result<ProcEntry> {
         if let Some(pct_pos) = line.find('%') {
             // Walk backwards from '%' to find start of number
             let before = &line[..pct_pos];
-            let num_start = before.rfind(|c: char| !c.is_ascii_digit() && c != '.')
+            let num_start = before
+                .rfind(|c: char| !c.is_ascii_digit() && c != '.')
                 .map(|i| i + 1)
                 .unwrap_or(0);
             if let Ok(pct) = before[num_start..].parse::<f64>() {
@@ -405,7 +570,10 @@ fn parse_battery() -> anyhow::Result<ProcEntry> {
         }
 
         // Extract status: charging, discharging, charged, finishing charge, etc.
-        let status = if line.contains("charging;") && !line.contains("discharging") && !line.contains("not charging") {
+        let status = if line.contains("charging;")
+            && !line.contains("discharging")
+            && !line.contains("not charging")
+        {
             "charging"
         } else if line.contains("discharging") {
             "discharging"
@@ -476,9 +644,24 @@ fn parse_fd() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "sysctl kern.maxfiles / kern.num_files".into(),
         fields: vec![
-            Field { name: "fd_max".into(), value: FieldValue::Integer(fd_max), unit: None, description: "Maximum number of file descriptors".into() },
-            Field { name: "fd_current".into(), value: FieldValue::Integer(fd_current), unit: None, description: "Currently open file descriptors".into() },
-            Field { name: "fd_usage_pct".into(), value: FieldValue::Float(usage_pct), unit: Some("%".into()), description: "File descriptor usage percentage".into() },
+            Field {
+                name: "fd_max".into(),
+                value: FieldValue::Integer(fd_max),
+                unit: None,
+                description: "Maximum number of file descriptors".into(),
+            },
+            Field {
+                name: "fd_current".into(),
+                value: FieldValue::Integer(fd_current),
+                unit: None,
+                description: "Currently open file descriptors".into(),
+            },
+            Field {
+                name: "fd_usage_pct".into(),
+                value: FieldValue::Float(usage_pct),
+                unit: Some("%".into()),
+                description: "File descriptor usage percentage".into(),
+            },
         ],
     })
 }
@@ -600,20 +783,27 @@ fn parse_top_summary() -> anyhow::Result<ProcEntry> {
 fn parse_diskstats() -> anyhow::Result<ProcEntry> {
     let output = Command::new("iostat").arg("-d").output()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let rows: Vec<Vec<String>> = text.lines().skip(2).filter_map(|line| {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 {
-            Some(parts.iter().map(|s| s.to_string()).collect())
-        } else {
-            None
-        }
-    }).collect();
+    let rows: Vec<Vec<String>> = text
+        .lines()
+        .skip(2)
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                Some(parts.iter().map(|s| s.to_string()).collect())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     Ok(ProcEntry {
         source: "iostat -d".into(),
-        fields: vec![
-            Field { name: "disks".into(), value: FieldValue::Table(rows), unit: None, description: "Disk I/O statistics".into() },
-        ],
+        fields: vec![Field {
+            name: "disks".into(),
+            value: FieldValue::Table(rows),
+            unit: None,
+            description: "Disk I/O statistics".into(),
+        }],
     })
 }
 
@@ -657,22 +847,42 @@ fn parse_network_connections() -> anyhow::Result<ProcEntry> {
             _ => {}
         }
 
-        rows.push(vec![
-            proto.to_string(),
-            local_addr,
-            remote_addr,
-            state,
-        ]);
+        rows.push(vec![proto.to_string(), local_addr, remote_addr, state]);
     }
 
     Ok(ProcEntry {
         source: "netstat -an".into(),
         fields: vec![
-            Field { name: "connections".into(), value: FieldValue::Table(rows), unit: None, description: "Network connections: Protocol, LocalAddr, RemoteAddr, State".into() },
-            Field { name: "established".into(), value: FieldValue::Integer(established), unit: None, description: "Number of established connections".into() },
-            Field { name: "time_wait".into(), value: FieldValue::Integer(time_wait), unit: None, description: "Number of connections in TIME_WAIT state".into() },
-            Field { name: "close_wait".into(), value: FieldValue::Integer(close_wait), unit: None, description: "Number of connections in CLOSE_WAIT state".into() },
-            Field { name: "listen".into(), value: FieldValue::Integer(listen), unit: None, description: "Number of listening sockets".into() },
+            Field {
+                name: "connections".into(),
+                value: FieldValue::Table(rows),
+                unit: None,
+                description: "Network connections: Protocol, LocalAddr, RemoteAddr, State".into(),
+            },
+            Field {
+                name: "established".into(),
+                value: FieldValue::Integer(established),
+                unit: None,
+                description: "Number of established connections".into(),
+            },
+            Field {
+                name: "time_wait".into(),
+                value: FieldValue::Integer(time_wait),
+                unit: None,
+                description: "Number of connections in TIME_WAIT state".into(),
+            },
+            Field {
+                name: "close_wait".into(),
+                value: FieldValue::Integer(close_wait),
+                unit: None,
+                description: "Number of connections in CLOSE_WAIT state".into(),
+            },
+            Field {
+                name: "listen".into(),
+                value: FieldValue::Integer(listen),
+                unit: None,
+                description: "Number of listening sockets".into(),
+            },
         ],
     })
 }
@@ -712,9 +922,24 @@ fn parse_launchd_services() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "launchctl list".into(),
         fields: vec![
-            Field { name: "services".into(), value: FieldValue::Table(rows), unit: None, description: "Launchd services: PID, Status, Label".into() },
-            Field { name: "running_count".into(), value: FieldValue::Integer(running_count), unit: None, description: "Number of services with a running PID".into() },
-            Field { name: "error_count".into(), value: FieldValue::Integer(error_count), unit: None, description: "Number of services with non-zero exit status".into() },
+            Field {
+                name: "services".into(),
+                value: FieldValue::Table(rows),
+                unit: None,
+                description: "Launchd services: PID, Status, Label".into(),
+            },
+            Field {
+                name: "running_count".into(),
+                value: FieldValue::Integer(running_count),
+                unit: None,
+                description: "Number of services with a running PID".into(),
+            },
+            Field {
+                name: "error_count".into(),
+                value: FieldValue::Integer(error_count),
+                unit: None,
+                description: "Number of services with non-zero exit status".into(),
+            },
         ],
     })
 }
@@ -777,20 +1002,18 @@ fn parse_diskutil() -> anyhow::Result<ProcEntry> {
                 i += 1;
             }
             let name = name_parts.join(" ");
-            rows.push(vec![
-                current_device.clone(),
-                disk_type,
-                size_str,
-                name,
-            ]);
+            rows.push(vec![current_device.clone(), disk_type, size_str, name]);
         }
     }
 
     Ok(ProcEntry {
         source: "diskutil list".into(),
-        fields: vec![
-            Field { name: "volumes".into(), value: FieldValue::Table(rows), unit: None, description: "Disk volumes: Device, Type, Size, Name".into() },
-        ],
+        fields: vec![Field {
+            name: "volumes".into(),
+            value: FieldValue::Table(rows),
+            unit: None,
+            description: "Disk volumes: Device, Type, Size, Name".into(),
+        }],
     })
 }
 
@@ -808,7 +1031,8 @@ fn parse_network_config() -> anyhow::Result<ProcEntry> {
     let if_text = String::from_utf8_lossy(&if_output.stdout);
 
     // Parse ifconfig into a map of device -> (address, status)
-    let mut if_map: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+    let mut if_map: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
     let mut current_iface = String::new();
     let mut current_addr = String::new();
     let mut current_status = String::new();
@@ -816,7 +1040,10 @@ fn parse_network_config() -> anyhow::Result<ProcEntry> {
         if !line.starts_with('\t') && !line.starts_with(' ') {
             // Save previous interface
             if !current_iface.is_empty() {
-                if_map.insert(current_iface.clone(), (current_addr.clone(), current_status.clone()));
+                if_map.insert(
+                    current_iface.clone(),
+                    (current_addr.clone(), current_status.clone()),
+                );
             }
             current_iface = line.split(':').next().unwrap_or("").to_string();
             current_addr = String::new();
@@ -847,17 +1074,13 @@ fn parse_network_config() -> anyhow::Result<ProcEntry> {
             port = p.to_string();
         } else if let Some(d) = trimmed.strip_prefix("Device: ") {
             device = d.to_string();
-        } else if trimmed.is_empty() || trimmed.starts_with("VLAN") || trimmed.starts_with("Ethernet") {
+        } else if trimmed.is_empty()
+            || trimmed.starts_with("VLAN")
+            || trimmed.starts_with("Ethernet")
+        {
             if !port.is_empty() && !device.is_empty() {
-                let (addr, status) = if_map.get(&device)
-                    .cloned()
-                    .unwrap_or_default();
-                rows.push(vec![
-                    port.clone(),
-                    device.clone(),
-                    addr,
-                    status,
-                ]);
+                let (addr, status) = if_map.get(&device).cloned().unwrap_or_default();
+                rows.push(vec![port.clone(), device.clone(), addr, status]);
             }
             port.clear();
             device.clear();
@@ -865,17 +1088,18 @@ fn parse_network_config() -> anyhow::Result<ProcEntry> {
     }
     // Handle last entry if file does not end with blank line
     if !port.is_empty() && !device.is_empty() {
-        let (addr, status) = if_map.get(&device)
-            .cloned()
-            .unwrap_or_default();
+        let (addr, status) = if_map.get(&device).cloned().unwrap_or_default();
         rows.push(vec![port, device, addr, status]);
     }
 
     Ok(ProcEntry {
         source: "networksetup -listallhardwareports + ifconfig".into(),
-        fields: vec![
-            Field { name: "ports".into(), value: FieldValue::Table(rows), unit: None, description: "Network hardware ports: Port, Device, Address, Status".into() },
-        ],
+        fields: vec![Field {
+            name: "ports".into(),
+            value: FieldValue::Table(rows),
+            unit: None,
+            description: "Network hardware ports: Port, Device, Address, Status".into(),
+        }],
     })
 }
 
@@ -904,7 +1128,9 @@ fn parse_system_profile() -> anyhow::Result<ProcEntry> {
                 "Model Identifier" => model_id = val,
                 "Chip" | "Processor Name" => chip = val,
                 "Memory" | "Total Number of Cores" => {
-                    if key == "Memory" { memory = val; }
+                    if key == "Memory" {
+                        memory = val;
+                    }
                 }
                 "Serial Number (system)" | "Serial Number" => serial_number = val,
                 _ => {}
@@ -919,11 +1145,36 @@ fn parse_system_profile() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "system_profiler SPHardwareDataType".into(),
         fields: vec![
-            Field { name: "model_name".into(), value: FieldValue::Text(model_name), unit: None, description: "Mac model name".into() },
-            Field { name: "model_id".into(), value: FieldValue::Text(model_id), unit: None, description: "Mac model identifier".into() },
-            Field { name: "chip".into(), value: FieldValue::Text(chip), unit: None, description: "Processor or Apple Silicon chip".into() },
-            Field { name: "memory".into(), value: FieldValue::Text(memory), unit: None, description: "Total installed memory".into() },
-            Field { name: "serial_number".into(), value: FieldValue::Text(serial_number), unit: None, description: "System serial number".into() },
+            Field {
+                name: "model_name".into(),
+                value: FieldValue::Text(model_name),
+                unit: None,
+                description: "Mac model name".into(),
+            },
+            Field {
+                name: "model_id".into(),
+                value: FieldValue::Text(model_id),
+                unit: None,
+                description: "Mac model identifier".into(),
+            },
+            Field {
+                name: "chip".into(),
+                value: FieldValue::Text(chip),
+                unit: None,
+                description: "Processor or Apple Silicon chip".into(),
+            },
+            Field {
+                name: "memory".into(),
+                value: FieldValue::Text(memory),
+                unit: None,
+                description: "Total installed memory".into(),
+            },
+            Field {
+                name: "serial_number".into(),
+                value: FieldValue::Text(serial_number),
+                unit: None,
+                description: "System serial number".into(),
+            },
         ],
     })
 }
@@ -943,17 +1194,38 @@ fn parse_open_files() -> anyhow::Result<ProcEntry> {
     };
 
     let mut fields = vec![
-        Field { name: "fd_max".into(), value: FieldValue::Integer(fd_max), unit: None, description: "System-wide maximum file descriptors".into() },
-        Field { name: "fd_current".into(), value: FieldValue::Integer(fd_current), unit: None, description: "Currently open file descriptors system-wide".into() },
-        Field { name: "fd_max_per_proc".into(), value: FieldValue::Integer(fd_max_per_proc), unit: None, description: "Maximum file descriptors per process".into() },
-        Field { name: "fd_usage_pct".into(), value: FieldValue::Float(usage_pct), unit: Some("%".into()), description: "File descriptor usage percentage".into() },
+        Field {
+            name: "fd_max".into(),
+            value: FieldValue::Integer(fd_max),
+            unit: None,
+            description: "System-wide maximum file descriptors".into(),
+        },
+        Field {
+            name: "fd_current".into(),
+            value: FieldValue::Integer(fd_current),
+            unit: None,
+            description: "Currently open file descriptors system-wide".into(),
+        },
+        Field {
+            name: "fd_max_per_proc".into(),
+            value: FieldValue::Integer(fd_max_per_proc),
+            unit: None,
+            description: "Maximum file descriptors per process".into(),
+        },
+        Field {
+            name: "fd_usage_pct".into(),
+            value: FieldValue::Float(usage_pct),
+            unit: Some("%".into()),
+            description: "File descriptor usage percentage".into(),
+        },
     ];
 
     // Try to get per-process top consumers via lsof
     if let Ok(output) = Command::new("lsof").args(["-n", "-P"]).output() {
         if output.status.success() {
             let text = String::from_utf8_lossy(&output.stdout);
-            let mut proc_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+            let mut proc_counts: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
             let mut total_open: i64 = 0;
             for line in text.lines().skip(1) {
                 total_open += 1;
@@ -973,9 +1245,11 @@ fn parse_open_files() -> anyhow::Result<ProcEntry> {
             // Top 10 consumers
             let mut top: Vec<(String, i64)> = proc_counts.into_iter().collect();
             top.sort_by(|a, b| b.1.cmp(&a.1));
-            let top_rows: Vec<Vec<String>> = top.into_iter().take(10).map(|(cmd, count)| {
-                vec![cmd, count.to_string()]
-            }).collect();
+            let top_rows: Vec<Vec<String>> = top
+                .into_iter()
+                .take(10)
+                .map(|(cmd, count)| vec![cmd, count.to_string()])
+                .collect();
 
             fields.push(Field {
                 name: "top_consumers".into(),
@@ -1030,9 +1304,24 @@ fn parse_dns_config() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "scutil --dns".into(),
         fields: vec![
-            Field { name: "nameservers".into(), value: FieldValue::Table(nameservers), unit: None, description: "Configured DNS nameservers".into() },
-            Field { name: "search_domains".into(), value: FieldValue::Text(search_domains.join(", ")), unit: None, description: "DNS search domains".into() },
-            Field { name: "resolver_count".into(), value: FieldValue::Integer(resolver_count), unit: None, description: "Number of DNS resolver configurations".into() },
+            Field {
+                name: "nameservers".into(),
+                value: FieldValue::Table(nameservers),
+                unit: None,
+                description: "Configured DNS nameservers".into(),
+            },
+            Field {
+                name: "search_domains".into(),
+                value: FieldValue::Text(search_domains.join(", ")),
+                unit: None,
+                description: "DNS search domains".into(),
+            },
+            Field {
+                name: "resolver_count".into(),
+                value: FieldValue::Integer(resolver_count),
+                unit: None,
+                description: "Number of DNS resolver configurations".into(),
+            },
         ],
     })
 }
@@ -1065,8 +1354,18 @@ fn parse_software_update() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "softwareupdate -l".into(),
         fields: vec![
-            Field { name: "updates_available".into(), value: FieldValue::Integer(count), unit: None, description: "Number of available software updates".into() },
-            Field { name: "update_list".into(), value: FieldValue::Text(list_text), unit: None, description: "List of available software updates".into() },
+            Field {
+                name: "updates_available".into(),
+                value: FieldValue::Integer(count),
+                unit: None,
+                description: "Number of available software updates".into(),
+            },
+            Field {
+                name: "update_list".into(),
+                value: FieldValue::Text(list_text),
+                unit: None,
+                description: "List of available software updates".into(),
+            },
         ],
     })
 }
@@ -1087,11 +1386,7 @@ fn parse_power_management() -> anyhow::Result<ProcEntry> {
         let trimmed = line.trim();
         // "Currently drawing from 'AC Power'" or "'Battery Power'"
         if trimmed.starts_with("Currently drawing from") {
-            power_source = trimmed
-                .split('\'')
-                .nth(1)
-                .unwrap_or("unknown")
-                .to_string();
+            power_source = trimmed.split('\'').nth(1).unwrap_or("unknown").to_string();
             continue;
         }
         // Key-value lines like " sleep               10 (sleep prevented by ...)" or " sleep  1"
@@ -1112,10 +1407,30 @@ fn parse_power_management() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "pmset -g".into(),
         fields: vec![
-            Field { name: "power_source".into(), value: FieldValue::Text(power_source), unit: None, description: "Current power source (AC Power or Battery Power)".into() },
-            Field { name: "sleep_setting".into(), value: FieldValue::Text(sleep_setting), unit: Some("minutes".into()), description: "System sleep timeout in minutes (0 = never)".into() },
-            Field { name: "display_sleep".into(), value: FieldValue::Text(display_sleep), unit: Some("minutes".into()), description: "Display sleep timeout in minutes".into() },
-            Field { name: "disk_sleep".into(), value: FieldValue::Text(disk_sleep), unit: Some("minutes".into()), description: "Disk sleep timeout in minutes".into() },
+            Field {
+                name: "power_source".into(),
+                value: FieldValue::Text(power_source),
+                unit: None,
+                description: "Current power source (AC Power or Battery Power)".into(),
+            },
+            Field {
+                name: "sleep_setting".into(),
+                value: FieldValue::Text(sleep_setting),
+                unit: Some("minutes".into()),
+                description: "System sleep timeout in minutes (0 = never)".into(),
+            },
+            Field {
+                name: "display_sleep".into(),
+                value: FieldValue::Text(display_sleep),
+                unit: Some("minutes".into()),
+                description: "Display sleep timeout in minutes".into(),
+            },
+            Field {
+                name: "disk_sleep".into(),
+                value: FieldValue::Text(disk_sleep),
+                unit: Some("minutes".into()),
+                description: "Disk sleep timeout in minutes".into(),
+            },
         ],
     })
 }
@@ -1138,7 +1453,8 @@ fn parse_kernel_extensions() -> anyhow::Result<ProcEntry> {
         // kextstat columns: Index Refs Address Size Wired Name (Version) ...
         if parts.len() >= 6 {
             let name = parts[5].to_string();
-            let version = parts.get(6)
+            let version = parts
+                .get(6)
                 .unwrap_or(&"")
                 .trim_matches(|c| c == '(' || c == ')')
                 .to_string();
@@ -1152,8 +1468,18 @@ fn parse_kernel_extensions() -> anyhow::Result<ProcEntry> {
     Ok(ProcEntry {
         source: "kextstat".into(),
         fields: vec![
-            Field { name: "third_party_kexts".into(), value: FieldValue::Table(rows), unit: None, description: "Third-party kernel extensions: Name, Version, Size".into() },
-            Field { name: "kext_count".into(), value: FieldValue::Integer(kext_count), unit: None, description: "Number of loaded third-party kernel extensions".into() },
+            Field {
+                name: "third_party_kexts".into(),
+                value: FieldValue::Table(rows),
+                unit: None,
+                description: "Third-party kernel extensions: Name, Version, Size".into(),
+            },
+            Field {
+                name: "kext_count".into(),
+                value: FieldValue::Integer(kext_count),
+                unit: None,
+                description: "Number of loaded third-party kernel extensions".into(),
+            },
         ],
     })
 }

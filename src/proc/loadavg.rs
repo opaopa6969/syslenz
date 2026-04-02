@@ -9,7 +9,10 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
 pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let parts: Vec<&str> = content.trim().split_whitespace().collect();
     if parts.len() < 5 {
-        anyhow::bail!("invalid loadavg format: expected 5 fields, got {}", parts.len());
+        anyhow::bail!(
+            "invalid loadavg format: expected 5 fields, got {}",
+            parts.len()
+        );
     }
 
     let load1: f64 = parts[0].parse()?;

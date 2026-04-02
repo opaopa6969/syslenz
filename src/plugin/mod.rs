@@ -42,7 +42,11 @@ pub fn load_plugins() -> BTreeMap<String, ProcEntry> {
                 entries.insert(key, entry);
             }
             Err(e) => {
-                eprintln!("[syslenz] plugin {:?} skipped: {}", path.file_name().unwrap_or_default(), e);
+                eprintln!(
+                    "[syslenz] plugin {:?} skipped: {}",
+                    path.file_name().unwrap_or_default(),
+                    e
+                );
             }
         }
     }
@@ -54,7 +58,10 @@ fn plugin_directory() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(xdg).join("syslenz").join("plugins")
     } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".config").join("syslenz").join("plugins")
+        PathBuf::from(home)
+            .join(".config")
+            .join("syslenz")
+            .join("plugins")
     } else {
         PathBuf::from("/tmp/syslenz/plugins")
     }
@@ -99,17 +106,29 @@ fn wait_with_timeout(
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Process exited, collect output
-                let stdout = child.stdout.take().map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).unwrap_or(0);
-                    buf
-                }).unwrap_or_default();
-                let stderr = child.stderr.take().map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).unwrap_or(0);
-                    buf
-                }).unwrap_or_default();
-                return Ok(std::process::Output { status, stdout, stderr });
+                let stdout = child
+                    .stdout
+                    .take()
+                    .map(|mut s| {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut s, &mut buf).unwrap_or(0);
+                        buf
+                    })
+                    .unwrap_or_default();
+                let stderr = child
+                    .stderr
+                    .take()
+                    .map(|mut s| {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut s, &mut buf).unwrap_or(0);
+                        buf
+                    })
+                    .unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
             }
             Ok(None) => {
                 // Still running

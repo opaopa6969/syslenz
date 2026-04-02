@@ -47,29 +47,41 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("TcpExt", "SyncookiesFailed") => "Invalid TCP SYN cookies received".into(),
         ("TcpExt", "EmbryonicRsts") => "RSTs received for embryonic (SYN_RECV) connections".into(),
         ("TcpExt", "PruneCalled") => "Times socket buffer memory pruning was called".into(),
-        ("TcpExt", "RcvPruned") => "Packets pruned from receive queue due to memory pressure".into(),
+        ("TcpExt", "RcvPruned") => {
+            "Packets pruned from receive queue due to memory pressure".into()
+        }
         ("TcpExt", "OfoPruned") => "Packets pruned from out-of-order queue".into(),
-        ("TcpExt", "OutOfWindowIcmps") => "ICMP messages dropped because they were out of window".into(),
+        ("TcpExt", "OutOfWindowIcmps") => {
+            "ICMP messages dropped because they were out of window".into()
+        }
         ("TcpExt", "LockDroppedIcmps") => "ICMP messages dropped because socket was locked".into(),
         ("TcpExt", "ArpFilter") => "Packets filtered by ARP filter".into(),
         ("TcpExt", "TW") => "TIME-WAIT sockets recycled by timeout".into(),
         ("TcpExt", "TWRecycled") => "TIME-WAIT sockets recycled by timestamp".into(),
         ("TcpExt", "TWKilled") => "TIME-WAIT sockets destroyed".into(),
-        ("TcpExt", "PAWSActive") => "Active connections rejected by PAWS (Protection Against Wrapped Sequences)".into(),
+        ("TcpExt", "PAWSActive") => {
+            "Active connections rejected by PAWS (Protection Against Wrapped Sequences)".into()
+        }
         ("TcpExt", "PAWSEstab") => "Established connections packets rejected by PAWS".into(),
         ("TcpExt", "DelayedACKs") => "Delayed ACKs sent".into(),
-        ("TcpExt", "DelayedACKLocked") => "Delayed ACKs further delayed because socket was locked".into(),
+        ("TcpExt", "DelayedACKLocked") => {
+            "Delayed ACKs further delayed because socket was locked".into()
+        }
         ("TcpExt", "DelayedACKLost") => "Quick ACK mode activated due to delayed ACK loss".into(),
         ("TcpExt", "ListenOverflows") => "Times listen queue overflowed".into(),
         ("TcpExt", "ListenDrops") => "SYNs dropped due to listen queue full".into(),
-        ("TcpExt", "TCPHPHits") => "TCP header prediction hits (fast-path packet processing)".into(),
+        ("TcpExt", "TCPHPHits") => {
+            "TCP header prediction hits (fast-path packet processing)".into()
+        }
         ("TcpExt", "TCPPureAcks") => "Pure ACKs received (no data)".into(),
         ("TcpExt", "TCPHPAcks") => "ACKs received via header prediction fast path".into(),
         ("TcpExt", "TCPRenoRecovery") => "TCP recoveries using Reno fast recovery".into(),
         ("TcpExt", "TCPSackRecovery") => "TCP recoveries using SACK".into(),
         ("TcpExt", "TCPSACKReneging") => "SACK data the receiver reneged on".into(),
         ("TcpExt", "TCPSACKReorder") => "Reordering events detected via SACK".into(),
-        ("TcpExt", "TCPRenoReorder") => "Reordering events detected via Reno fast retransmit".into(),
+        ("TcpExt", "TCPRenoReorder") => {
+            "Reordering events detected via Reno fast retransmit".into()
+        }
         ("TcpExt", "TCPTSReorder") => "Reordering events detected via timestamp".into(),
         ("TcpExt", "TCPFullUndo") => "Full undo after spurious congestion detection".into(),
         ("TcpExt", "TCPPartialUndo") => "Partial undo after spurious congestion detection".into(),
@@ -84,9 +96,15 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("TcpExt", "TCPTimeouts") => "TCP connection timeouts".into(),
         ("TcpExt", "TCPLossProbes") => "TCP loss probes sent (TLP)".into(),
         ("TcpExt", "TCPLossProbeRecovery") => "Recoveries triggered by loss probes".into(),
-        ("TcpExt", "TCPRenoRecoveryFail") => "Reno recovery failures (entered recovery but failed)".into(),
-        ("TcpExt", "TCPSackRecoveryFail") => "SACK recovery failures (entered recovery but failed)".into(),
-        ("TcpExt", "TCPRcvCollapsed") => "Packets collapsed in receive queue (memory pressure)".into(),
+        ("TcpExt", "TCPRenoRecoveryFail") => {
+            "Reno recovery failures (entered recovery but failed)".into()
+        }
+        ("TcpExt", "TCPSackRecoveryFail") => {
+            "SACK recovery failures (entered recovery but failed)".into()
+        }
+        ("TcpExt", "TCPRcvCollapsed") => {
+            "Packets collapsed in receive queue (memory pressure)".into()
+        }
         ("TcpExt", "TCPBacklogCoalesce") => "Packets coalesced in socket backlog".into(),
         ("TcpExt", "TCPDSACKOldSent") => "DSACK sent for old (already received) data".into(),
         ("TcpExt", "TCPDSACKOfoSent") => "DSACK sent for out-of-order data".into(),
@@ -104,19 +122,25 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("TcpExt", "TCPDSACKIgnoredOld") => "DSACK blocks ignored (old)".into(),
         ("TcpExt", "TCPDSACKIgnoredNoUndo") => "DSACK blocks ignored (no undo)".into(),
         ("TcpExt", "TCPSpuriousRTOs") => "Spurious retransmission timeouts detected".into(),
-        ("TcpExt", "TCPMD5NotFound") => "TCP segments with expected but missing MD5 signature".into(),
+        ("TcpExt", "TCPMD5NotFound") => {
+            "TCP segments with expected but missing MD5 signature".into()
+        }
         ("TcpExt", "TCPMD5Unexpected") => "TCP segments with unexpected MD5 signature".into(),
         ("TcpExt", "TCPMD5Failure") => "TCP segments with failed MD5 signature check".into(),
         ("TcpExt", "TCPSackShifted") => "SACK data shifted in retransmit queue".into(),
         ("TcpExt", "TCPSackMerged") => "SACK blocks merged in retransmit queue".into(),
-        ("TcpExt", "TCPSackShiftFallback") => "SACK shift fallbacks to traditional processing".into(),
+        ("TcpExt", "TCPSackShiftFallback") => {
+            "SACK shift fallbacks to traditional processing".into()
+        }
         ("TcpExt", "TCPBacklogDrop") => "Segments dropped from socket backlog".into(),
         ("TcpExt", "PFMemallocDrop") => "Segments dropped in pfmemalloc context".into(),
         ("TcpExt", "TCPMinTTLDrop") => "Segments dropped below minimum TTL threshold".into(),
         ("TcpExt", "TCPDeferAcceptDrop") => "Segments dropped with TCP_DEFER_ACCEPT set".into(),
         ("TcpExt", "IPReversePathFilter") => "Packets dropped by reverse path filter".into(),
         ("TcpExt", "TCPTimeWaitOverflow") => "TIME-WAIT bucket overflows".into(),
-        ("TcpExt", "TCPReqQFullDoCookies") => "Times SYN cookies were used due to full request queue".into(),
+        ("TcpExt", "TCPReqQFullDoCookies") => {
+            "Times SYN cookies were used due to full request queue".into()
+        }
         ("TcpExt", "TCPReqQFullDrop") => "SYNs dropped because request queue was full".into(),
         ("TcpExt", "TCPRetransFail") => "Failed retransmit attempts".into(),
         ("TcpExt", "TCPRcvCoalesce") => "Segments coalesced in receive queue".into(),
@@ -129,19 +153,31 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("TcpExt", "TCPFastOpenActiveFail") => "Failed TCP Fast Open connection attempts".into(),
         ("TcpExt", "TCPFastOpenPassive") => "TCP Fast Open connections accepted".into(),
         ("TcpExt", "TCPFastOpenPassiveFail") => "Failed TCP Fast Open accept attempts".into(),
-        ("TcpExt", "TCPFastOpenListenOverflow") => "TCP Fast Open requests dropped due to listen queue overflow".into(),
+        ("TcpExt", "TCPFastOpenListenOverflow") => {
+            "TCP Fast Open requests dropped due to listen queue overflow".into()
+        }
         ("TcpExt", "TCPFastOpenCookieReqd") => "TCP Fast Open SYNs requiring a cookie".into(),
         ("TcpExt", "TCPFastOpenBlackhole") => "TCP Fast Open blackhole events detected".into(),
-        ("TcpExt", "TCPSpuriousRtxHostQueues") => "Spurious retransmits caused by host queues".into(),
+        ("TcpExt", "TCPSpuriousRtxHostQueues") => {
+            "Spurious retransmits caused by host queues".into()
+        }
         ("TcpExt", "BusyPollRxPackets") => "Packets received via busy polling".into(),
         ("TcpExt", "TCPAutoCorking") => "Times TCP auto-corking was applied".into(),
         ("TcpExt", "TCPFromZeroWindowAdv") => "Transitions from zero-window to non-zero".into(),
-        ("TcpExt", "TCPToZeroWindowAdv") => "Transitions from non-zero window to zero-window".into(),
+        ("TcpExt", "TCPToZeroWindowAdv") => {
+            "Transitions from non-zero window to zero-window".into()
+        }
         ("TcpExt", "TCPWantZeroWindowAdv") => "Times zero-window advertisement was wanted".into(),
         ("TcpExt", "TCPSynRetrans") => "SYN-ACK retransmits (server-side)".into(),
-        ("TcpExt", "TCPOrigDataSent") => "Original data segments sent (excluding retransmits)".into(),
-        ("TcpExt", "TCPHystartTrainDetect") => "Hystart training phase congestion detections".into(),
-        ("TcpExt", "TCPHystartTrainCwnd") => "Hystart congestion window at training detection".into(),
+        ("TcpExt", "TCPOrigDataSent") => {
+            "Original data segments sent (excluding retransmits)".into()
+        }
+        ("TcpExt", "TCPHystartTrainDetect") => {
+            "Hystart training phase congestion detections".into()
+        }
+        ("TcpExt", "TCPHystartTrainCwnd") => {
+            "Hystart congestion window at training detection".into()
+        }
         ("TcpExt", "TCPHystartDelayDetect") => "Hystart delay-based congestion detections".into(),
         ("TcpExt", "TCPHystartDelayCwnd") => "Hystart congestion window at delay detection".into(),
         ("TcpExt", "TCPACKSkippedSynRecv") => "ACKs skipped in SYN-RECV state".into(),
@@ -154,17 +190,23 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("TcpExt", "TCPKeepAlive") => "TCP keepalive probes sent".into(),
         ("TcpExt", "TCPMTUPFail") => "TCP MTU path discovery failures".into(),
         ("TcpExt", "TCPMTUPSuccess") => "TCP MTU path discovery successes".into(),
-        ("TcpExt", "TCPDelivered") => "TCP segments delivered to application (including retransmits)".into(),
+        ("TcpExt", "TCPDelivered") => {
+            "TCP segments delivered to application (including retransmits)".into()
+        }
         ("TcpExt", "TCPDeliveredCE") => "TCP segments delivered with ECN CE mark".into(),
         ("TcpExt", "TCPAckCompressed") => "Compressed ACKs sent (GRO)".into(),
         ("TcpExt", "TCPZeroWindowDrop") => "Segments dropped due to zero receive window".into(),
         ("TcpExt", "TCPRcvQDrop") => "Segments dropped from receive queue".into(),
         ("TcpExt", "TCPWqueueTooBig") => "Times write queue exceeded limit".into(),
-        ("TcpExt", "TCPFastOpenPassiveAltKey") => "TCP Fast Open passive connections using alternate key".into(),
+        ("TcpExt", "TCPFastOpenPassiveAltKey") => {
+            "TCP Fast Open passive connections using alternate key".into()
+        }
 
         // --- IpExt ---
         ("IpExt", "InNoRoutes") => "Inbound packets dropped due to no route".into(),
-        ("IpExt", "InTruncatedPkts") => "Inbound packets dropped because they were truncated".into(),
+        ("IpExt", "InTruncatedPkts") => {
+            "Inbound packets dropped because they were truncated".into()
+        }
         ("IpExt", "InMcastPkts") => "Multicast packets received".into(),
         ("IpExt", "OutMcastPkts") => "Multicast packets sent".into(),
         ("IpExt", "InBcastPkts") => "Broadcast packets received".into(),
@@ -188,13 +230,17 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("MPTcpExt", "MPCapableSYNACKRX") => "MPTCP capable SYN-ACK segments received".into(),
         ("MPTcpExt", "MPCapableACKRX") => "MPTCP capable ACK segments received".into(),
         ("MPTcpExt", "MPCapableFallbackACK") => "MPTCP fallback to regular TCP on ACK".into(),
-        ("MPTcpExt", "MPCapableFallbackSYNACK") => "MPTCP fallback to regular TCP on SYN-ACK".into(),
+        ("MPTcpExt", "MPCapableFallbackSYNACK") => {
+            "MPTCP fallback to regular TCP on SYN-ACK".into()
+        }
         ("MPTcpExt", "MPFallbackTokenInit") => "MPTCP token init fallback events".into(),
         ("MPTcpExt", "MPTCPRetrans") => "MPTCP segments retransmitted".into(),
         ("MPTcpExt", "MPJoinNoTokenFound") => "MPTCP join requests with no token found".into(),
         ("MPTcpExt", "MPJoinSynRx") => "MPTCP join SYN segments received".into(),
         ("MPTcpExt", "MPJoinSynAckRx") => "MPTCP join SYN-ACK segments received".into(),
-        ("MPTcpExt", "MPJoinSynAckHMacFailure") => "MPTCP join SYN-ACK HMAC validation failures".into(),
+        ("MPTcpExt", "MPJoinSynAckHMacFailure") => {
+            "MPTCP join SYN-ACK HMAC validation failures".into()
+        }
         ("MPTcpExt", "MPJoinAckRx") => "MPTCP join ACK segments received".into(),
         ("MPTcpExt", "MPJoinAckHMacFailure") => "MPTCP join ACK HMAC validation failures".into(),
         ("MPTcpExt", "DSSNotMatching") => "MPTCP DSS segments not matching".into(),
@@ -208,7 +254,9 @@ fn describe_netstat_field(category: &str, field: &str) -> String {
         ("MPTcpExt", "EchoAdd") => "MPTCP ADD_ADDR echo options sent".into(),
         ("MPTcpExt", "PortAdd") => "MPTCP port-based ADD_ADDR options received".into(),
         ("MPTcpExt", "MPJoinPortSynRx") => "MPTCP port-based join SYN segments received".into(),
-        ("MPTcpExt", "MPJoinPortSynAckRx") => "MPTCP port-based join SYN-ACK segments received".into(),
+        ("MPTcpExt", "MPJoinPortSynAckRx") => {
+            "MPTCP port-based join SYN-ACK segments received".into()
+        }
         ("MPTcpExt", "MPJoinPortAckRx") => "MPTCP port-based join ACK segments received".into(),
         ("MPTcpExt", "MismatchPortSynRx") => "MPTCP join SYN segments with mismatched port".into(),
         ("MPTcpExt", "MismatchPortAckRx") => "MPTCP join ACK segments with mismatched port".into(),

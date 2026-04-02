@@ -11,7 +11,9 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
 
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 14 { continue; }
+        if parts.len() < 14 {
+            continue;
+        }
 
         let name = parts[2];
         // Skip partition numbers (e.g., sda1) — only show whole devices and interesting ones
@@ -22,7 +24,9 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
         let io_in_progress: u64 = parts[11].parse().unwrap_or(0);
 
         // Skip devices with zero activity
-        if reads_completed == 0 && writes_completed == 0 { continue; }
+        if reads_completed == 0 && writes_completed == 0 {
+            continue;
+        }
 
         // Sectors are typically 512 bytes
         let bytes_read = sectors_read * 512;
@@ -53,7 +57,8 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 name: "devices".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Disks (name, reads, read bytes, writes, written bytes, in-flight)".into(),
+                description: "Disks (name, reads, read bytes, writes, written bytes, in-flight)"
+                    .into(),
             },
         ],
     })

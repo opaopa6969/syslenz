@@ -2274,3 +2274,68 @@ Phase 7: リリース準備
 | `src/proc/version.rs` | parse_content() 分離, テスト (T15) | Phase 2 |
 | `src/proc/stat.rs` | parse_content() 分離, テスト (T16) | Phase 2 |
 | `README.md` | 全面刷新 (新構造、バッジ、GIF、Why セクション、折りたたみ Sources) | Phase 7 |
+
+---
+
+## 9. Article Overlay 仕様 (Session 018/019)
+
+### 9.1 目的
+
+syslenz を「値を表示するツール」から「理解を提供するツール」へ拡張する。
+
+- 対象読者: 初学者〜上級者（全レベル）
+- 方針: 記事は多いほど良い。量産可能な構造で数百メトリクスへ展開する。
+
+### 9.2 教育面の二層構造
+
+- Help Panel: 即時判断向け短文（既存）
+- Article Overlay: 学習定着向け長文（新規）
+
+### 9.3 記事種別
+
+1. Metric Article (`source.field`)
+2. Group Article (`source.stem_distribution`)
+3. Concept Article (`concept.*`)
+
+### 9.4 Group 解決ルール (MVP)
+
+`*_min`, `*_max`, `*_count` を同一 stem の distribution 記事へ集約する。
+
+例:
+- `net/netstat.TCPRtoMin`
+- `net/netstat.TCPRtoMax`
+- `net/netstat.TCPRtoCount`
+
+→ `net/netstat.TCPRto_distribution`
+
+### 9.5 TUI 仕様
+
+- `A`: Article Overlay 開閉
+- `Esc` / `q`: 閉じる
+- `j/k`, `PgUp/PgDn`: 本文スクロール
+- `Tab`: SEE ALSO 選択移動
+- `Enter`: metric/article へのジャンプ
+
+### 9.6 Web 仕様
+
+- `A` + Article ボタンでオーバーレイ開閉
+- `/api/article` で記事を取得
+- SEE ALSO クリックで metric/article ジャンプ
+
+### 9.7 記事テンプレート (量産用)
+
+1. これは何か
+2. なぜ重要か
+3. どう読むか
+4. よくある誤解
+5. 診断フロー
+6. 失敗例
+7. SEE ALSO
+
+### 9.8 受け入れ条件 (MVP)
+
+- [ ] 未定義メトリクスでも fallback 記事が開く
+- [ ] `*_min/*_max/*_count` で group 記事が優先される
+- [ ] TUI/Web で同等に記事を閲覧可能
+- [ ] SEE ALSO から少なくとも metric ジャンプ可能
+

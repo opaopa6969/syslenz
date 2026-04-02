@@ -53,20 +53,43 @@ impl Category {
     pub fn related_sources(&self) -> &'static [&'static str] {
         match self {
             Category::Memory => &[
-                "meminfo", "vmstat", "swaps", "buddyinfo", "pressure",
-                "zoneinfo", "slabinfo", "pagetypeinfo",
+                "meminfo",
+                "vmstat",
+                "swaps",
+                "buddyinfo",
+                "pressure",
+                "zoneinfo",
+                "slabinfo",
+                "pagetypeinfo",
             ],
             Category::CpuLoad => &[
-                "stat", "loadavg", "cpuinfo", "pressure", "schedstat",
-                "softirqs", "interrupts",
+                "stat",
+                "loadavg",
+                "cpuinfo",
+                "pressure",
+                "schedstat",
+                "softirqs",
+                "interrupts",
             ],
             Category::Network => &[
-                "net/dev", "net/tcp", "net/udp", "net/unix", "net/arp",
-                "net/route", "net/sockstat", "net/snmp", "net/netstat",
+                "net/dev",
+                "net/tcp",
+                "net/udp",
+                "net/unix",
+                "net/arp",
+                "net/route",
+                "net/sockstat",
+                "net/snmp",
+                "net/netstat",
                 "net/wireless",
             ],
             Category::Storage => &[
-                "diskstats", "df", "mounts", "partitions", "pressure", "locks",
+                "diskstats",
+                "df",
+                "mounts",
+                "partitions",
+                "pressure",
+                "locks",
             ],
             Category::Process => &["processes", "file-nr", "stat"],
             Category::Hardware => &["thermal", "cpuinfo"],
@@ -110,30 +133,42 @@ impl LearningPath {
 
     pub fn description(&self, locale: Locale) -> &'static str {
         match (self, locale) {
-            (LearningPath::Beginner, Locale::En) => "\
+            (LearningPath::Beginner, Locale::En) => {
+                "\
 Start with Memory to understand caching and MemAvailable, then move to \
 CPU/Load for utilization vs demand, then Storage and Process basics. \
-Finish with Network and Hardware for a complete picture.",
-            (LearningPath::Beginner, Locale::Ja) => "\
+Finish with Network and Hardware for a complete picture."
+            }
+            (LearningPath::Beginner, Locale::Ja) => {
+                "\
 まずメモリでキャッシュとMemAvailableを理解し、次にCPU/負荷で使用率と\
 需要の違いを学び、ストレージとプロセスの基礎に進みます。最後にネットワーク\
-とハードウェアで全体像を完成させます。",
-            (LearningPath::PerformanceDiagnosis, Locale::En) => "\
+とハードウェアで全体像を完成させます。"
+            }
+            (LearningPath::PerformanceDiagnosis, Locale::En) => {
+                "\
 Learn to trace slowness from symptoms to root cause: CPU load and \
 pressure, then I/O saturation in Storage, memory pressure and swap \
-storms, process contention, and thermal throttling in Hardware.",
-            (LearningPath::PerformanceDiagnosis, Locale::Ja) => "\
+storms, process contention, and thermal throttling in Hardware."
+            }
+            (LearningPath::PerformanceDiagnosis, Locale::Ja) => {
+                "\
 症状から根本原因まで遅延を追跡する方法を学びます：CPU負荷と圧力、\
 ストレージのI/O飽和、メモリ圧力とスワップストーム、プロセス競合、\
-ハードウェアのサーマルスロットリング。",
-            (LearningPath::ServerHealth, Locale::En) => "\
+ハードウェアのサーマルスロットリング。"
+            }
+            (LearningPath::ServerHealth, Locale::En) => {
+                "\
 Focus on capacity indicators: disk space trends in Storage, memory \
 headroom, file descriptor limits in Process, NIC saturation in \
-Network, and thermal envelope in Hardware.",
-            (LearningPath::ServerHealth, Locale::Ja) => "\
+Network, and thermal envelope in Hardware."
+            }
+            (LearningPath::ServerHealth, Locale::Ja) => {
+                "\
 容量指標に注目：ストレージのディスク容量推移、メモリの余裕、プロセスの\
 ファイルディスクリプタ上限、ネットワークのNIC飽和度、ハードウェアの\
-熱的余裕。",
+熱的余裕。"
+            }
         }
     }
 

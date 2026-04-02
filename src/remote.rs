@@ -44,7 +44,16 @@ fn control_socket_dir() -> PathBuf {
 /// Return the ControlPath for a given host. The socket is placed under
 /// [`control_socket_dir`] using the host string (sanitized).
 fn control_path_for(host: &str) -> PathBuf {
-    let sanitized: String = host.chars().map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' }).collect();
+    let sanitized: String = host
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
     control_socket_dir().join(format!("ctl-{}", sanitized))
 }
 
@@ -53,9 +62,12 @@ fn ssh_control_args(host: &str) -> Vec<String> {
     let ctl = control_path_for(host);
     let ctl_str = ctl.to_string_lossy().to_string();
     vec![
-        "-o".to_string(), format!("ControlPath={}", ctl_str),
-        "-o".to_string(), "ControlMaster=auto".to_string(),
-        "-o".to_string(), "ControlPersist=60".to_string(),
+        "-o".to_string(),
+        format!("ControlPath={}", ctl_str),
+        "-o".to_string(),
+        "ControlMaster=auto".to_string(),
+        "-o".to_string(),
+        "ControlPersist=60".to_string(),
     ]
 }
 
@@ -153,10 +165,7 @@ pub fn capture_remote(host: &str) -> anyhow::Result<Snapshot> {
 /// the stream is resilient to momentary network blips.  After
 /// `MAX_CONSECUTIVE_FAILURES` consecutive failures the thread gives up and
 /// exits.
-pub fn stream_remote(
-    host: &str,
-    interval_ms: u64,
-) -> anyhow::Result<mpsc::Receiver<Snapshot>> {
+pub fn stream_remote(host: &str, interval_ms: u64) -> anyhow::Result<mpsc::Receiver<Snapshot>> {
     const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
     let host = host.to_owned();
@@ -227,7 +236,9 @@ pub fn capture_docker(container: &str) -> anyhow::Result<Snapshot> {
                 "syslenz is not installed in container '{container}'. \
                  Install it: docker exec {container} sh -c 'curl -L <url> -o /usr/local/bin/syslenz && chmod +x /usr/local/bin/syslenz'"
             )
-        } else if stderr_buf.contains("No such container") || stderr_buf.contains("no such container") {
+        } else if stderr_buf.contains("No such container")
+            || stderr_buf.contains("no such container")
+        {
             format!("Container '{container}' not found. Check `docker ps`.")
         } else {
             format!(
@@ -311,10 +322,7 @@ pub fn capture_tcp(addr: &str) -> anyhow::Result<Snapshot> {
 }
 
 /// Stream snapshots from a syslenz TCP server.
-pub fn stream_tcp(
-    addr: &str,
-    interval_ms: u64,
-) -> anyhow::Result<mpsc::Receiver<Snapshot>> {
+pub fn stream_tcp(addr: &str, interval_ms: u64) -> anyhow::Result<mpsc::Receiver<Snapshot>> {
     const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
     let addr = addr.to_owned();

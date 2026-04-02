@@ -2,9 +2,7 @@ use crate::proc::{Field, FieldValue, ProcEntry};
 use std::process::Command;
 
 pub fn parse() -> anyhow::Result<ProcEntry> {
-    let output = Command::new("ss")
-        .arg("-s")
-        .output()?;
+    let output = Command::new("ss").arg("-s").output()?;
 
     if !output.status.success() {
         anyhow::bail!("ss -s failed");
@@ -82,7 +80,10 @@ fn extract_named_value(s: &str, name: &str) -> i64 {
     s.split(name)
         .nth(1)
         .and_then(|after| {
-            after.trim_start().split(|c: char| !c.is_ascii_digit()).next()
+            after
+                .trim_start()
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
         })
         .and_then(|v| v.parse().ok())
         .unwrap_or(0)

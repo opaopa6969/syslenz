@@ -17,14 +17,20 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let mut flags = String::new();
 
     for line in content.lines() {
-        let Some((key, val)) = line.split_once(':') else { continue };
+        let Some((key, val)) = line.split_once(':') else {
+            continue;
+        };
         let key = key.trim();
         let val = val.trim();
 
         match key {
             "processor" => cpu_count += 1,
             "model name" if model_name.is_empty() => model_name = val.to_string(),
-            "cpu MHz" => { if let Ok(v) = val.parse::<f64>() { mhz = v; } }
+            "cpu MHz" => {
+                if let Ok(v) = val.parse::<f64>() {
+                    mhz = v;
+                }
+            }
             "cache size" if cache_size.is_empty() => cache_size = val.to_string(),
             "cpu cores" if cores_per_socket == 0 => {
                 cores_per_socket = val.parse().unwrap_or(0);
@@ -68,11 +74,27 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     // Parse key flags
     let key_flags: Vec<&str> = flags
         .split_whitespace()
-        .filter(|f| matches!(*f,
-            "sse" | "sse2" | "sse3" | "ssse3" | "sse4_1" | "sse4_2" |
-            "avx" | "avx2" | "avx512f" | "aes" | "vmx" | "svm" |
-            "hypervisor" | "ht" | "lm" | "nx"
-        ))
+        .filter(|f| {
+            matches!(
+                *f,
+                "sse"
+                    | "sse2"
+                    | "sse3"
+                    | "ssse3"
+                    | "sse4_1"
+                    | "sse4_2"
+                    | "avx"
+                    | "avx2"
+                    | "avx512f"
+                    | "aes"
+                    | "vmx"
+                    | "svm"
+                    | "hypervisor"
+                    | "ht"
+                    | "lm"
+                    | "nx"
+            )
+        })
         .collect();
 
     fields.push(Field {

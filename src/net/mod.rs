@@ -1,10 +1,10 @@
 #[cfg(target_os = "linux")]
-pub mod ip_route;
-#[cfg(target_os = "linux")]
-pub mod ip_neighbor;
-#[cfg(target_os = "linux")]
-pub mod ss_summary;
+pub mod conntrack;
 #[cfg(target_os = "linux")]
 pub mod dns;
 #[cfg(target_os = "linux")]
-pub mod conntrack;
+pub mod ip_neighbor;
+#[cfg(target_os = "linux")]
+pub mod ip_route;
+#[cfg(target_os = "linux")]
+pub mod ss_summary;

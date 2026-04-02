@@ -13,13 +13,20 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         // Format: id: type mode lock_type pid major:minor:inode start end
         if parts.len() >= 8 {
-            let lock_type = parts[1].to_string();   // POSIX or FLOCK
-            let mode = parts[3].to_string();         // READ or WRITE
+            let lock_type = parts[1].to_string(); // POSIX or FLOCK
+            let mode = parts[3].to_string(); // READ or WRITE
             let pid = parts[4].to_string();
             let inode_info = parts[5].to_string();
             let range_start = parts.get(6).unwrap_or(&"?").to_string();
             let range_end = parts.get(7).unwrap_or(&"?").to_string();
-            rows.push(vec![lock_type, mode, pid, inode_info, range_start, range_end]);
+            rows.push(vec![
+                lock_type,
+                mode,
+                pid,
+                inode_info,
+                range_start,
+                range_end,
+            ]);
         }
     }
 

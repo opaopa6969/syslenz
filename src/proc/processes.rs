@@ -10,7 +10,9 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         let name_str = name.to_string_lossy();
 
         // Only numeric directories (PIDs)
-        if !name_str.chars().all(|c| c.is_ascii_digit()) { continue; }
+        if !name_str.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
 
         let pid = name_str.to_string();
         let base = format!("/proc/{}", pid);
@@ -33,13 +35,17 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
                         "State" => state = val.trim().to_string(),
                         "VmRSS" => {
                             let parts: Vec<&str> = val.trim().split_whitespace().collect();
-                            vm_rss = parts.first()
+                            vm_rss = parts
+                                .first()
                                 .and_then(|v| v.parse::<u64>().ok())
-                                .unwrap_or(0) * 1024; // kB to bytes
+                                .unwrap_or(0)
+                                * 1024; // kB to bytes
                         }
                         "Threads" => threads = val.trim().parse().unwrap_or(0),
                         "Uid" => {
-                            uid = val.trim().split_whitespace()
+                            uid = val
+                                .trim()
+                                .split_whitespace()
                                 .next()
                                 .unwrap_or("")
                                 .to_string();
@@ -50,7 +56,9 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
             }
         }
 
-        if comm.is_empty() { continue; }
+        if comm.is_empty() {
+            continue;
+        }
 
         rows.push(vec![
             pid,
@@ -64,7 +72,9 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
 
     // Sort by PID numerically
     rows.sort_by(|a, b| {
-        a[0].parse::<u64>().unwrap_or(0).cmp(&b[0].parse::<u64>().unwrap_or(0))
+        a[0].parse::<u64>()
+            .unwrap_or(0)
+            .cmp(&b[0].parse::<u64>().unwrap_or(0))
     });
 
     let count = rows.len() as i64;

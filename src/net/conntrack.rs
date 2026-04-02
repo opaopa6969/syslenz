@@ -15,22 +15,20 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
     // If neither is available, try `conntrack -C` as fallback
     let conntrack_count = match conntrack_count {
         Some(c) => Some(c),
-        None => {
-            std::process::Command::new("conntrack")
-                .arg("-C")
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        String::from_utf8_lossy(&o.stdout)
-                            .trim()
-                            .parse::<i64>()
-                            .ok()
-                    } else {
-                        None
-                    }
-                })
-        }
+        None => std::process::Command::new("conntrack")
+            .arg("-C")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim()
+                        .parse::<i64>()
+                        .ok()
+                } else {
+                    None
+                }
+            }),
     };
 
     // If we have neither count nor max, connection tracking is not available

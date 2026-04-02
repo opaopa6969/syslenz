@@ -10,7 +10,11 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
             Err(_) => continue,
         };
 
-        let proto = if *path == "/proc/net/tcp" { "tcp" } else { "tcp6" };
+        let proto = if *path == "/proc/net/tcp" {
+            "tcp"
+        } else {
+            "tcp6"
+        };
         parse_proto_content(proto, &content, &mut rows);
     }
 
@@ -34,13 +38,7 @@ fn parse_proto_content(proto: &str, content: &str, rows: &mut Vec<Vec<String>>) 
             let remote = parse_addr(parts[2]);
             let state = decode_tcp_state(parts[3]);
             let uid = parts.get(7).unwrap_or(&"?").to_string();
-            rows.push(vec![
-                proto.to_string(),
-                local,
-                remote,
-                state,
-                uid,
-            ]);
+            rows.push(vec![proto.to_string(), local, remote, state, uid]);
         }
     }
 }

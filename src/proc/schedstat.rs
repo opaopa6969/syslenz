@@ -48,7 +48,9 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
         name: "cpu_stats".into(),
         value: FieldValue::Table(rows),
         unit: None,
-        description: "Per-CPU scheduler stats (cpu, yld_count, sched_count, sched_goidle, ttwu_count, ...)".into(),
+        description:
+            "Per-CPU scheduler stats (cpu, yld_count, sched_count, sched_goidle, ttwu_count, ...)"
+                .into(),
     });
 
     Ok(ProcEntry {

@@ -12,7 +12,9 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let mut total_tx: u64 = 0;
 
     for line in content.lines().skip(2) {
-        let Some((iface, stats)) = line.split_once(':') else { continue };
+        let Some((iface, stats)) = line.split_once(':') else {
+            continue;
+        };
         let iface = iface.trim();
         let nums: Vec<u64> = stats
             .split_whitespace()
@@ -63,7 +65,8 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 name: "interfaces".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Network interfaces (name, RX bytes, RX pkts, TX bytes, TX pkts)".into(),
+                description: "Network interfaces (name, RX bytes, RX pkts, TX bytes, TX pkts)"
+                    .into(),
             },
         ],
     })

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-02 "Fleet, Articles, Live Controls"
+
+### Added
+- All features from v1.4.0 and v1.3.1 merged into a single release.
+
 ## [1.4.0] - 2026-03-29 "Teach, Connect, Scale"
 
 ### Added

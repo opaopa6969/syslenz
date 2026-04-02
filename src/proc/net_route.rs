@@ -41,7 +41,8 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 name: "routes".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Routing table (iface, destination, gateway, mask, flags, metric)".into(),
+                description: "Routing table (iface, destination, gateway, mask, flags, metric)"
+                    .into(),
             },
         ],
     })

@@ -11,7 +11,14 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
 
     // List all service units
     let output = Command::new("systemctl")
-        .args(["list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend"])
+        .args([
+            "list-units",
+            "--type=service",
+            "--all",
+            "--no-pager",
+            "--plain",
+            "--no-legend",
+        ])
         .output()
         .map_err(|e| anyhow::anyhow!("systemctl not found or failed to execute: {}", e))?;
 
@@ -41,7 +48,11 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
         }
 
         // Filter out non-whitespace splits
-        let cols: Vec<&str> = parts.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let cols: Vec<&str> = parts
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
         if cols.len() < 4 {
             continue;
         }

@@ -10,9 +10,13 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
     let mut fields = Vec::new();
 
     for line in content.lines() {
-        let Some((key, rest)) = line.split_once(':') else { continue };
+        let Some((key, rest)) = line.split_once(':') else {
+            continue;
+        };
         let parts: Vec<&str> = rest.trim().split_whitespace().collect();
-        if parts.is_empty() { continue; }
+        if parts.is_empty() {
+            continue;
+        }
 
         let value: u64 = match parts[0].parse() {
             Ok(v) => v,
@@ -76,7 +80,9 @@ fn describe_meminfo_field(name: &str) -> String {
         "KernelStack" => "Memory used by kernel thread stacks".into(),
         "PageTables" => "Memory used by page table entries".into(),
         "SecPageTables" => "Memory used by secondary page tables (KVM, IOMMU)".into(),
-        "NFS_Unstable" => "NFS pages sent but not yet committed (always 0 on modern kernels)".into(),
+        "NFS_Unstable" => {
+            "NFS pages sent but not yet committed (always 0 on modern kernels)".into()
+        }
         "Bounce" => "Bounce buffer memory for block device I/O".into(),
         "WritebackTmp" => "Temporary writeback memory used by FUSE".into(),
         "CommitLimit" => "Total memory available for allocation (based on overcommit ratio)".into(),

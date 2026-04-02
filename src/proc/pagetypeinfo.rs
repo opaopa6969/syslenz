@@ -30,7 +30,10 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         if parts.len() >= 5 {
             // Node X, zone ZoneName, type TypeName count0 count1 ...
-            let row: Vec<String> = parts.iter().map(|s| s.trim_end_matches(',').to_string()).collect();
+            let row: Vec<String> = parts
+                .iter()
+                .map(|s| s.trim_end_matches(',').to_string())
+                .collect();
             rows.push(row);
         }
     }

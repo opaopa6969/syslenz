@@ -55,7 +55,11 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 });
                 fields.push(Field {
                     name: "cpu_usage_pct".into(),
-                    value: FieldValue::Float(if total > 0 { busy as f64 / total as f64 * 100.0 } else { 0.0 }),
+                    value: FieldValue::Float(if total > 0 {
+                        busy as f64 / total as f64 * 100.0
+                    } else {
+                        0.0
+                    }),
                     unit: Some("%".into()),
                     description: "Overall CPU usage (cumulative)".into(),
                 });

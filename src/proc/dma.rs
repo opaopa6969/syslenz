@@ -11,10 +11,7 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
 
     for line in content.lines() {
         if let Some((channel, name)) = line.split_once(':') {
-            rows.push(vec![
-                channel.trim().to_string(),
-                name.trim().to_string(),
-            ]);
+            rows.push(vec![channel.trim().to_string(), name.trim().to_string()]);
         }
     }
 

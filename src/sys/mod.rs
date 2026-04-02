@@ -1,10 +1,10 @@
 #[cfg(target_os = "linux")]
 pub mod df;
 #[cfg(target_os = "linux")]
-pub mod thermal;
-#[cfg(target_os = "linux")]
 pub mod file_nr;
 #[cfg(target_os = "linux")]
 pub mod gpu;
 #[cfg(target_os = "linux")]
 pub mod systemd;
+#[cfg(target_os = "linux")]
+pub mod thermal;

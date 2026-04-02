@@ -177,7 +177,11 @@ pub fn source_max_severity<'a>(alerts: &'a [AlertEvent], source: &'a str) -> Opt
 }
 
 /// Check if a specific field in a source is firing an alert.
-pub fn field_alert_severity<'a>(alerts: &'a [AlertEvent], source: &str, field: &str) -> Option<&'a str> {
+pub fn field_alert_severity<'a>(
+    alerts: &'a [AlertEvent],
+    source: &str,
+    field: &str,
+) -> Option<&'a str> {
     for a in alerts {
         if a.firing && a.source == source && a.field == field {
             return Some(&a.severity);
@@ -200,7 +204,9 @@ pub fn execute_actions(rules: &[AlertRule], events: &[AlertEvent], prev_firing: 
         if prev_firing.contains(&event.rule_index) {
             continue;
         }
-        if let Some(ref action_template) = rules.get(event.rule_index).and_then(|r| r.action.as_ref()) {
+        if let Some(ref action_template) =
+            rules.get(event.rule_index).and_then(|r| r.action.as_ref())
+        {
             let cmd = action_template
                 .replace("{message}", &event.message)
                 .replace("{source}", &event.source)

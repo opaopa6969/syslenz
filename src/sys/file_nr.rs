@@ -48,7 +48,8 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
             name: "fd_usage_pct".into(),
             value: FieldValue::Float(usage_pct),
             unit: Some("%".into()),
-            description: "File descriptor usage percentage: (allocated - unused) / max * 100".into(),
+            description: "File descriptor usage percentage: (allocated - unused) / max * 100"
+                .into(),
         },
     ];
 

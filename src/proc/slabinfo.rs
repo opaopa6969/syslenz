@@ -17,12 +17,12 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
         // Format: name active_objs num_objs objsize objperslab pagesperslab ...
         if parts.len() >= 6 {
             rows.push(vec![
-                parts[0].to_string(),  // cache name
-                parts[1].to_string(),  // active_objs
-                parts[2].to_string(),  // num_objs
-                parts[3].to_string(),  // objsize
-                parts[4].to_string(),  // objperslab
-                parts[5].to_string(),  // pagesperslab
+                parts[0].to_string(), // cache name
+                parts[1].to_string(), // active_objs
+                parts[2].to_string(), // num_objs
+                parts[3].to_string(), // objsize
+                parts[4].to_string(), // objperslab
+                parts[5].to_string(), // pagesperslab
             ]);
         }
     }
@@ -42,7 +42,9 @@ pub fn parse_content(content: &str) -> anyhow::Result<ProcEntry> {
                 name: "caches".into(),
                 value: FieldValue::Table(rows),
                 unit: None,
-                description: "Slab caches (name, active_objs, num_objs, objsize, objperslab, pagesperslab)".into(),
+                description:
+                    "Slab caches (name, active_objs, num_objs, objsize, objperslab, pagesperslab)"
+                        .into(),
             },
         ],
     })

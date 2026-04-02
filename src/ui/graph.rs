@@ -1,13 +1,13 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Sparkline},
-    Frame,
 };
 
-use crate::proc::FieldValue;
 use super::app::App;
+use crate::proc::FieldValue;
 
 fn extract_numeric(value: &FieldValue) -> Option<f64> {
     match value {
@@ -66,7 +66,7 @@ pub fn draw_graph(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // stats
-            Constraint::Min(4),   // sparkline
+            Constraint::Min(4),    // sparkline
         ])
         .split(area);
 
@@ -81,15 +81,17 @@ pub fn draw_graph(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("  Current: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             format_value(current_val),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  ({} samples)", values.len()),
             Style::default().fg(Color::DarkGray),
         ),
     ]);
-    let stats_paragraph = Paragraph::new(stats)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let stats_paragraph =
+        Paragraph::new(stats).block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(stats_paragraph, chunks[0]);
 
     // Normalize values for sparkline (u64 range 0..100)
@@ -104,11 +106,7 @@ pub fn draw_graph(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let sparkline = Sparkline::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Sparkline "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(" Sparkline "))
         .data(&sparkline_data)
         .style(Style::default().fg(Color::Green));
     f.render_widget(sparkline, chunks[1]);
