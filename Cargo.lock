@@ -1600,7 +1600,7 @@ dependencies = [
 
 [[package]]
 name = "syslenz"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "axum 0.8.8",

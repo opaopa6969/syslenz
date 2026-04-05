@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-04-06 "Docker Hub + Web Parity"
+
+### Added
+- **Docker Hub** — `docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz` (no build needed)
+  - Multi-platform: `linux/amd64` + `linux/arm64`, default CMD `--web 3000`
+  - Tags: `latest`, `vX.Y.Z`, `X.Y` floating minor
+- **release.yml: docker job** — auto-push to Docker Hub on every version tag
+- **Web UI: sidebar tree/flat toggle** — `t` key groups sources by path prefix
+- **Web UI: TableView RT stability** — view persists across auto-refresh cycles
+- **Web UI: j/k navigation in TableView** — keyboard row navigation with highlight
+- **Web UI: ProcessDetail view** — Enter on processes row → full `/proc/[pid]` detail
+- **Web UI: graph y-axis fixed** — all-time min/max prevents pikon rescaling
+- **Web UI: time window selection** — `[`/`]` keys + buttons (30s/1m/2m/5m/15m/1h)
+- **JA process detail help** — all ~60 status fields, 7 io fields, inline descriptions in Japanese
+
+### Fixed
+- TUI graph pikon: min/max now computed from ALL snapshots, not just visible window
+- TUI TableView RT cancel: `table_view_source` pins source by name, bypasses index drift
+- Dockerfile: multi-platform musl build, default CMD `--web 3000`
+
 ## [1.6.0] - 2026-04-02 "Full Article Coverage"
 
 ### Added
