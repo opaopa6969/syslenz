@@ -569,11 +569,15 @@ fn run(
                     KeyCode::Char('[') => {
                         if matches!(app.view, ui::app::View::Diff) {
                             app.diff_older();
+                        } else {
+                            app.graph_time_window_shrink();
                         }
                     }
                     KeyCode::Char(']') => {
                         if matches!(app.view, ui::app::View::Diff) {
                             app.diff_newer();
+                        } else {
+                            app.graph_time_window_grow();
                         }
                     }
                     KeyCode::Char('d') => {
@@ -622,6 +626,9 @@ fn run(
                     }
                     KeyCode::Char('A') => {
                         app.toggle_article_overlay();
+                    }
+                    KeyCode::Char('t') => {
+                        app.toggle_sidebar_tree();
                     }
                     KeyCode::Char('c') => {
                         // Copy current field value to clipboard

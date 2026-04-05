@@ -28,8 +28,31 @@ pub enum ViewData {
     Graph(GraphData),
     Diagnostics(DiagnosticsData),
     CategoryGuide(CategoryGuideData),
-    /// BL-074: Tutorial view data.
+    /// BL-074: Interactive tutorial view data.
     Tutorial(TutorialData),
+    /// Per-process detail drilldown view data.
+    ProcessDetail(ProcessDetailData),
+}
+
+/// A single field shown in the ProcessDetail view.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessDetailField {
+    pub name: String,
+    pub value: String,
+    pub description: String,
+    /// Non-empty when this field is a table (e.g., limits, open_fds).
+    pub table_headers: Vec<String>,
+    pub table_rows: Vec<Vec<String>>,
+}
+
+/// Data for the ProcessDetail view.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessDetailData {
+    pub pid: String,
+    pub comm: String,
+    pub fields: Vec<ProcessDetailField>,
+    pub scroll: usize,
+    pub error: Option<String>,
 }
 
 /// BL-074: Tutorial step data.
@@ -337,6 +360,21 @@ fn adjust_history_for_axis(values: Vec<u64>, zero_axis: bool) -> Vec<u64> {
     values.into_iter().map(|v| v - baseline).collect()
 }
 
+fn format_bytes_detail(bytes: u64) -> String {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    const MIB: u64 = 1024 * 1024;
+    const KIB: u64 = 1024;
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.2} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 impl App {
     /// Build the main content ViewData from the current app state.
     pub fn build_view_data(&self) -> ViewData {
@@ -350,6 +388,117 @@ impl App {
             View::Diagnostics => ViewData::Diagnostics(self.build_diagnostics_data()),
             View::CategoryGuide => ViewData::CategoryGuide(self.build_category_guide_data()),
             View::Tutorial => ViewData::Tutorial(self.build_tutorial_data()),
+            View::ProcessDetail => ViewData::ProcessDetail(self.build_process_detail_data()),
+        }
+    }
+
+    fn build_process_detail_data(&self) -> ProcessDetailData {
+        let pid = match &self.detailed_pid {
+            Some(p) => p.clone(),
+            None => {
+                return ProcessDetailData {
+                    pid: String::new(),
+                    comm: String::new(),
+                    fields: Vec::new(),
+                    scroll: 0,
+                    error: Some("No process selected.".into()),
+                };
+            }
+        };
+
+        match crate::proc::processes::parse_detail(&pid, self.locale) {
+            Err(e) => ProcessDetailData {
+                pid: pid.clone(),
+                comm: String::new(),
+                fields: Vec::new(),
+                scroll: self.field_scroll,
+                error: Some(format!("Failed to read /proc/{}: {}", pid, e)),
+            },
+            Ok(entry) => {
+                let comm = entry
+                    .fields
+                    .iter()
+                    .find(|f| f.name == "status.Name")
+                    .and_then(|f| {
+                        if let crate::proc::FieldValue::Text(ref s) = f.value {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        entry.fields.first().and_then(|f| {
+                            if let crate::proc::FieldValue::Text(ref s) = f.value {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or_default();
+
+                let fields = entry
+                    .fields
+                    .into_iter()
+                    .map(|f| {
+                        let (value, table_headers, table_rows) =
+                            match f.value {
+                                crate::proc::FieldValue::Table(rows) => {
+                                    let headers = match f.name.as_str() {
+                                        "limits" => vec![
+                                            "Limit".into(),
+                                            "Soft".into(),
+                                            "Hard".into(),
+                                            "Units".into(),
+                                        ],
+                                        "open_fds" => {
+                                            vec!["FD".into(), "Target".into()]
+                                        }
+                                        _ => rows
+                                            .first()
+                                            .map(|r| {
+                                                (0..r.len())
+                                                    .map(|i| format!("Col{}", i + 1))
+                                                    .collect()
+                                            })
+                                            .unwrap_or_default(),
+                                    };
+                                    (String::new(), headers, rows)
+                                }
+                                crate::proc::FieldValue::Integer(n) => {
+                                    (n.to_string(), Vec::new(), Vec::new())
+                                }
+                                crate::proc::FieldValue::Float(n) => {
+                                    (format!("{:.2}", n), Vec::new(), Vec::new())
+                                }
+                                crate::proc::FieldValue::Bytes(n) => {
+                                    (format_bytes_detail(n), Vec::new(), Vec::new())
+                                }
+                                crate::proc::FieldValue::Text(s) => {
+                                    (s, Vec::new(), Vec::new())
+                                }
+                                crate::proc::FieldValue::Duration(s) => {
+                                    (format!("{:.1}s", s), Vec::new(), Vec::new())
+                                }
+                            };
+                        ProcessDetailField {
+                            name: f.name,
+                            value,
+                            description: f.description,
+                            table_headers,
+                            table_rows,
+                        }
+                    })
+                    .collect();
+
+                ProcessDetailData {
+                    pid,
+                    comm,
+                    fields,
+                    scroll: self.field_scroll,
+                    error: None,
+                }
+            }
         }
     }
 
@@ -431,6 +580,13 @@ impl App {
                     "チュートリアル"
                 } else {
                     "TUTORIAL"
+                }
+            }
+            View::ProcessDetail => {
+                if l == Locale::Ja {
+                    "プロセス詳細"
+                } else {
+                    "PROCESS DETAIL"
                 }
             }
         };
@@ -997,9 +1153,9 @@ impl App {
     }
 
     fn build_table_view_data(&self) -> TableViewData {
-        let source_name = self.current_source_name().to_string();
+        let source_name = self.table_view_source_name().to_string();
 
-        let fields = match self.current_entry_fields() {
+        let fields = match self.table_view_entry_fields() {
             Some(f) => f,
             None => {
                 return TableViewData {
@@ -1030,7 +1186,7 @@ impl App {
             };
         };
 
-        let header_titles: Vec<String> = match self.current_source_name() {
+        let header_titles: Vec<String> = match self.table_view_source_name() {
             "mounts" => vec!["Device", "Mountpoint", "FSType", "Options"],
             "partitions" => vec!["Name", "Size", "Major", "Minor"],
             "net/dev" => vec!["Interface", "RX Bytes", "RX Pkts", "TX Bytes", "TX Pkts"],

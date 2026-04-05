@@ -158,6 +158,8 @@ struct ViewQuery {
     source: Option<String>,
     /// G20-10: URL state sharing — select field by name
     field: Option<String>,
+    /// PID for ProcessDetail view
+    pid: Option<String>,
 }
 
 #[cfg(feature = "web")]
@@ -180,7 +182,9 @@ async fn view_handler(
     let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
 
     // G20-10: If source/field are specified, auto-select detail view
-    let view = if params.source.is_some() {
+    let view = if params.pid.is_some() {
+        View::ProcessDetail
+    } else if params.source.is_some() {
         View::Detail
     } else {
         match params.view.as_deref() {
@@ -191,6 +195,7 @@ async fn view_handler(
             Some("graph") => View::Graph,
             Some("diagnostics") => View::Diagnostics,
             Some("category") => View::CategoryGuide,
+            Some("processdetail") => View::ProcessDetail,
             _ => View::Dashboard,
         }
     };
@@ -209,7 +214,7 @@ async fn view_handler(
         0
     };
 
-    let app = build_minimal_app(snapshot, history, source_keys, view, locale, selected_source, selected_field);
+    let app = build_minimal_app(snapshot, history, source_keys, view, locale, selected_source, selected_field, params.pid);
 
     let view_data = app.build_view_data();
     Json(view_data)
@@ -225,6 +230,7 @@ fn build_minimal_app(
     locale: Locale,
     selected_source: usize,
     selected_field: usize,
+    detailed_pid: Option<String>,
 ) -> crate::ui::app::App {
     use crate::ui::app::{App, Focus, HostState, ConnectionStatus};
 
@@ -283,6 +289,10 @@ fn build_minimal_app(
         view_history: Vec::new(),
         selected_diagnostic: 0,
         selected_related_metric: None,
+        sidebar_tree: false,
+        graph_time_window: 60,
+        table_view_source: None,
+        detailed_pid,
         article_overlay: None,
         article_content_lines: 0,
         article_visible_height: 0,
@@ -388,7 +398,7 @@ async fn field_help_handler(
         let app = build_minimal_app(
             snapshot, history, source_keys,
             crate::ui::app::View::Detail, locale,
-            selected_source, selected_field_idx,
+            selected_source, selected_field_idx, None,
         );
         crate::ui::render::get_contextual_hint_for_api(&app, source, field)
     };
@@ -605,6 +615,36 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
 /* Enter to expand hint */
 .table-hint{{color:var(--cyan);font-size:11px;margin-left:6px;opacity:0.7}}
 
+/* Sidebar tree mode */
+.src-dir{{padding:4px 8px;font-size:11px;color:var(--yellow);font-weight:bold;cursor:default;user-select:none;letter-spacing:.3px}}
+.src-item.depth1{{padding-left:22px}}
+.tree-toggle{{background:none;border:none;color:var(--fg-dim);font:inherit;font-size:10px;cursor:pointer;padding:0 4px}}
+.tree-toggle:hover{{color:var(--blue)}}
+
+/* Time window buttons */
+.time-win-btns{{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}}
+.time-win-btn{{background:var(--bg-sel);color:var(--fg-dim);border:1px solid var(--border);padding:2px 7px;border-radius:4px;cursor:pointer;font:inherit;font-size:10px}}
+.time-win-btn:hover{{background:var(--border)}}
+.time-win-btn.active{{background:var(--blue);color:var(--bg-dark);font-weight:bold;border-color:var(--blue)}}
+
+/* Table view */
+.table-view-header{{color:var(--blue);font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px}}
+.table-view-back{{color:var(--fg-dim);font-size:11px;cursor:pointer}}
+.table-view-back:hover{{color:var(--blue)}}
+.table-back-btn{{background:none;border:none;color:var(--fg-dim);font:inherit;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:4px}}
+.table-back-btn:hover{{background:var(--bg-hl);color:var(--blue)}}
+
+/* Process detail */
+.proc-detail-field{{display:flex;padding:5px 8px;border-bottom:1px solid var(--bg-sel);font-size:13px;cursor:pointer}}
+.proc-detail-field:hover{{background:var(--bg-hl)}}
+.proc-detail-field.selected{{background:var(--bg-sel)}}
+.proc-detail-name{{color:var(--purple);width:200px;flex-shrink:0;font-weight:bold}}
+.proc-detail-value{{flex:1;color:var(--cyan)}}
+.proc-detail-desc{{color:var(--fg-dim);font-size:11px;margin-left:12px;font-style:italic}}
+.proc-detail-subtable{{margin:4px 0 8px 200px;font-size:12px;border-collapse:collapse;width:calc(100% - 200px)}}
+.proc-detail-subtable th{{color:var(--yellow);padding:3px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:10px;text-transform:uppercase}}
+.proc-detail-subtable td{{padding:3px 8px;border-bottom:1px solid var(--bg-sel)}}
+
 /* Toast */
 #toast{{position:fixed;top:20px;right:20px;background:var(--blue);color:var(--bg-dark);padding:8px 16px;border-radius:6px;font-size:13px;display:none;z-index:200;font-weight:bold}}
 #toast.show{{display:block;animation:fadeout 2s forwards}}
@@ -613,7 +653,7 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
 </head>
 <body>
 <div id="sidebar">
-  <div id="sidebar-header"><span>Sources (<span id="source-count">0</span>)</span></div>
+  <div id="sidebar-header"><span>Sources (<span id="source-count">0</span>)</span><button class="tree-toggle" id="tree-toggle-btn" onclick="S.toggleSidebarTree()" title="Toggle tree/flat (t)">flat</button></div>
   <input type="text" id="search-box" placeholder="Search sources... (/)">
   <div id="source-list"></div>
 </div>
@@ -648,7 +688,7 @@ body{{font-family:'Consolas','Monaco','Fira Code',monospace;background:var(--bg)
     <div class="body" id="article-body"></div>
     <div class="foot" id="article-foot"></div>
   </div>
-  <div id="graph-overlay"><h3>Graph: <span id="graph-title-field"></span></h3><div class="graph-canvas-wrap"><canvas id="graph-canvas"></canvas></div></div>
+  <div id="graph-overlay"><h3>Graph: <span id="graph-title-field"></span> <span style="color:var(--fg-dim);font-size:11px" id="graph-win-label"></span></h3><div class="time-win-btns" id="graph-win-btns"></div><div class="graph-canvas-wrap"><canvas id="graph-canvas"></canvas></div></div>
   <div id="statusbar">
     <div class="left">
       <span id="sb-view">Dashboard</span>
@@ -786,6 +826,14 @@ const S = {{
   autoGraphChart: null,
   selectedCategory: 0,
   categoryScroll: 0,
+  sidebarTree: false,
+  tableViewSource: null,
+  tableViewFieldIdx: null,
+  tableViewScroll: 0,
+  graphTimeWindow: 60,
+  graphAllTimeMin: {{}},
+  graphAllTimeMax: {{}},
+  detailedPid: null,
   articleOverlay: {{
     open: false,
     loading: false,
@@ -799,11 +847,45 @@ const S = {{
     if (this.graphField) this.closeGraph();
     if (this.autoGraphChart) {{ this.autoGraphChart.destroy(); this.autoGraphChart = null; }}
     if (v === 'classic') v = 'detail';
+    if (v !== 'table') {{ this.tableViewSource = null; this.tableViewFieldIdx = null; }}
+    if (v !== 'processdetail') this.detailedPid = null;
     this.view = v;
     if (v === 'detail' || v === 'diff') this.focus = 'sidebar';
     else this.focus = 'content';
     this.selectedField = 0;
     render();
+  }},
+
+  toggleSidebarTree() {{
+    this.sidebarTree = !this.sidebarTree;
+    const btn = document.getElementById('tree-toggle-btn');
+    if (btn) btn.textContent = this.sidebarTree ? 'tree' : 'flat';
+    renderSidebar();
+  }},
+
+  cycleTimeWindow(delta) {{
+    const windows = [30, 60, 120, 300, 900, 3600];
+    const idx = windows.indexOf(this.graphTimeWindow);
+    const next = Math.max(0, Math.min(windows.length - 1, (idx < 0 ? 1 : idx) + delta));
+    this.graphTimeWindow = windows[next];
+    updateAutoGraph();
+    if (this.graphField) {{
+      const src = this.currentSourceName();
+      this.rebuildFieldGraphData(src, this.graphField);
+      renderFieldChart();
+    }}
+    renderGraphWinBtns();
+  }},
+
+  rebuildFieldGraphData(source, fieldName) {{
+    const windows = this.graphTimeWindow;
+    const allSnaps = [...this.history, this.snapshot].filter(Boolean);
+    const sliced = allSnaps.slice(-windows);
+    this.graphData = [];
+    sliced.forEach(snap => {{
+      const v = getFieldNumeric(snap, source, fieldName);
+      if (v !== null) this.graphData.push({{ t: new Date(snap.timestamp).toLocaleTimeString(), v }});
+    }});
   }},
 
   toggleLang() {{
@@ -965,26 +1047,55 @@ function updateAutoGraph() {{
   const numVal = extractNumeric(f.value);
   if (numVal === null) {{ panel.classList.remove('show'); return; }}
 
-  // Collect history for this field
+  // Collect ALL history for stable min/max (prevents pikon y-axis rescaling)
   const allSnaps = [...S.history, S.snapshot].filter(Boolean);
-  const points = [];
-  allSnaps.forEach(snap => {{
-    const v = getFieldNumeric(snap, src, f.name);
-    if (v !== null) points.push({{ t: new Date(snap.timestamp).toLocaleTimeString(), v }});
-  }});
-  if (points.length < 2) {{ panel.classList.remove('show'); return; }}
+  const allVals = allSnaps.map(s => getFieldNumeric(s, src, f.name)).filter(v => v !== null);
+  if (allVals.length < 2) {{ panel.classList.remove('show'); return; }}
+
+  // Track all-time min/max so axis never shrinks
+  const stateKey = src + '.' + f.name;
+  const prevMin = S.graphAllTimeMin[stateKey] ?? Infinity;
+  const prevMax = S.graphAllTimeMax[stateKey] ?? -Infinity;
+  S.graphAllTimeMin[stateKey] = Math.min(prevMin, Math.min(...allVals));
+  S.graphAllTimeMax[stateKey] = Math.max(prevMax, Math.max(...allVals));
+  const yMin = S.graphAllTimeMin[stateKey];
+  const yMax = S.graphAllTimeMax[stateKey];
+  const pad = (yMax - yMin) * 0.05 || 1;
+
+  // Visible window limited to graphTimeWindow snapshots
+  const windowedSnaps = allSnaps.slice(-S.graphTimeWindow);
+  const points = windowedSnaps
+    .map(snap => {{ const v = getFieldNumeric(snap, src, f.name); return v !== null ? {{ t: new Date(snap.timestamp).toLocaleTimeString(), v }} : null; }})
+    .filter(Boolean);
 
   const vals = points.map(p => p.v);
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
   const current = vals[vals.length - 1];
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
 
   panel.classList.add('show');
   const title = panel.querySelector('h4');
-  if (title) title.textContent = src + '.' + f.name;
+  if (title) title.textContent = src + '.' + f.name + ' [' + graphWinLabel(S.graphTimeWindow) + ']';
   const statsEl = panel.querySelector('.auto-graph-stats');
-  if (statsEl) statsEl.innerHTML = 'Min: <span>' + min.toFixed(2) + '</span> | Max: <span>' + max.toFixed(2) + '</span> | Avg: <span>' + avg.toFixed(2) + '</span> | Current: <span>' + current.toFixed(2) + '</span>';
+  if (statsEl) statsEl.innerHTML = 'Min: <span>' + yMin.toFixed(2) + '</span> | Max: <span>' + yMax.toFixed(2) + '</span> | Avg: <span>' + avg.toFixed(2) + '</span> | Current: <span>' + current.toFixed(2) + '</span>';
+
+  // Render time window buttons inside panel
+  let twHtml = document.getElementById('auto-graph-time-btns');
+  if (!twHtml) {{
+    const statsDiv = panel.querySelector('.auto-graph-stats');
+    if (statsDiv) {{
+      const btnWrap = document.createElement('div');
+      btnWrap.id = 'auto-graph-time-btns';
+      btnWrap.className = 'time-win-btns';
+      panel.insertBefore(btnWrap, statsDiv.nextSibling);
+    }}
+  }}
+  const btnWrap2 = document.getElementById('auto-graph-time-btns');
+  if (btnWrap2) {{
+    const wins = [30,60,120,300,900,3600];
+    btnWrap2.innerHTML = wins.map(w =>
+      '<button class="time-win-btn' + (w === S.graphTimeWindow ? ' active' : '') + '" onclick="S.cycleTimeWindow(' + (wins.indexOf(w) - wins.indexOf(S.graphTimeWindow)) + ');updateAutoGraph()">' + graphWinLabel(w) + '</button>'
+    ).join('');
+  }}
 
   const canvas = document.getElementById('auto-graph-canvas');
   if (!canvas) return;
@@ -997,11 +1108,31 @@ function updateAutoGraph() {{
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      scales: {{ x: {{ ticks: {{ color: '#565f89', maxTicksLimit: 10, font: {{ size: 10 }} }} }}, y: {{ ticks: {{ color: '#565f89', font: {{ size: 10 }} }} }} }},
+      scales: {{
+        x: {{ ticks: {{ color: '#565f89', maxTicksLimit: 10, font: {{ size: 10 }} }} }},
+        y: {{ min: yMin - pad, max: yMax + pad, ticks: {{ color: '#565f89', font: {{ size: 10 }} }} }}
+      }},
       plugins: {{ legend: {{ labels: {{ color: '#c0caf5', font: {{ size: 10 }} }} }} }},
-      animation: {{ duration: 200 }}
+      animation: {{ duration: 0 }}
     }}
   }});
+}}
+
+function graphWinLabel(secs) {{
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return (secs/60|0) + 'm';
+  return (secs/3600|0) + 'h';
+}}
+
+function renderGraphWinBtns() {{
+  const wrap = document.getElementById('graph-win-btns');
+  if (!wrap) return;
+  const wins = [30,60,120,300,900,3600];
+  wrap.innerHTML = wins.map(w =>
+    '<button class="time-win-btn' + (w === S.graphTimeWindow ? ' active' : '') + '" onclick="S.graphTimeWindow=' + w + ';renderFieldChart()">' + graphWinLabel(w) + '</button>'
+  ).join('');
+  const lbl = document.getElementById('graph-win-label');
+  if (lbl) lbl.textContent = '[' + graphWinLabel(S.graphTimeWindow) + ']';
 }}
 
 // ---- SSE ----
@@ -1071,26 +1202,79 @@ function render() {{
   updateGraphData();
 }}
 
+function buildTreeRows(keys) {{
+  // Group keys by first path segment (e.g. net/dev → prefix=net, child=dev)
+  const groups = {{}};
+  const singles = [];
+  keys.forEach((k, i) => {{
+    const slash = k.indexOf('/');
+    if (slash > 0) {{
+      const prefix = k.slice(0, slash);
+      if (!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push({{ key: k, idx: i }});
+    }} else {{
+      singles.push({{ key: k, idx: i }});
+    }}
+  }});
+  const rows = [];
+  // Merge singles and group headers alphabetically
+  const allItems = [
+    ...singles.map(s => ({{ type: 'leaf', key: s.key, idx: s.idx }})),
+    ...Object.keys(groups).sort().map(p => ({{ type: 'dir', prefix: p, children: groups[p] }}))
+  ].sort((a, b) => {{
+    const ka = a.type === 'leaf' ? a.key : a.prefix + '/';
+    const kb = b.type === 'leaf' ? b.key : b.prefix + '/';
+    return ka.localeCompare(kb);
+  }});
+  allItems.forEach(item => {{
+    if (item.type === 'leaf') {{
+      rows.push({{ type: 'leaf', key: item.key, idx: item.idx, label: item.key, depth: 0 }});
+    }} else {{
+      rows.push({{ type: 'dir', label: item.prefix + '/', depth: 0 }});
+      item.children.sort((a, b) => a.key.localeCompare(b.key)).forEach(c => {{
+        rows.push({{ type: 'leaf', key: c.key, idx: c.idx, label: c.key.slice(item.prefix.length + 1), depth: 1 }});
+      }});
+    }}
+  }});
+  return rows;
+}}
+
 function renderSidebar() {{
   document.getElementById('source-count').textContent = S.sourceKeys.length;
   const list = document.getElementById('source-list');
-  const show = S.view === 'detail' || S.view === 'diff';
+  const show = S.view === 'detail' || S.view === 'diff' || S.view === 'table' || S.view === 'processdetail';
   document.getElementById('sidebar').classList.toggle('hidden', !show);
+  const toggleBtn = document.getElementById('tree-toggle-btn');
+  if (toggleBtn) toggleBtn.textContent = S.sidebarTree ? 'tree' : 'flat';
   if (!show) return;
   let html = '';
-  S.filteredKeys.forEach((k, i) => {{
-    const cls = (i === S.selectedSource ? 'active ' : '') + (k.startsWith('net/') ? 'net ' : '');
-    html += '<div class="src-item ' + cls + '" data-idx="' + i + '">' + escapeHtml(k) + '</div>';
-  }});
+  if (S.sidebarTree) {{
+    const rows = buildTreeRows(S.filteredKeys);
+    rows.forEach(row => {{
+      if (row.type === 'dir') {{
+        html += '<div class="src-dir">' + escapeHtml(row.label) + '</div>';
+      }} else {{
+        const active = row.idx === S.selectedSource;
+        const depthCls = row.depth > 0 ? ' depth1' : '';
+        html += '<div class="src-item' + depthCls + (active ? ' active' : '') + '" data-idx="' + row.idx + '">' + escapeHtml(row.label) + '</div>';
+      }}
+    }});
+  }} else {{
+    S.filteredKeys.forEach((k, i) => {{
+      const cls = (i === S.selectedSource ? 'active ' : '') + (k.startsWith('net/') ? 'net ' : '');
+      html += '<div class="src-item ' + cls + '" data-idx="' + i + '">' + escapeHtml(k) + '</div>';
+    }});
+  }}
   list.innerHTML = html;
-  // scroll active into view
   const active = list.querySelector('.active');
   if (active) active.scrollIntoView({{ block: 'nearest' }});
-  // click handlers
   list.querySelectorAll('.src-item').forEach(el => {{
     el.onclick = () => {{
       S.selectedSource = parseInt(el.dataset.idx);
       S.selectedField = 0;
+      S.tableViewSource = null; S.tableViewFieldIdx = null;
+      S.detailedPid = null;
+      if (S.view === 'table' || S.view === 'processdetail') S.view = 'detail';
       if (S.graphField) S.closeGraph();
       render();
     }};
@@ -1137,6 +1321,8 @@ function renderContent() {{
     case 'diagnostics': el.innerHTML = renderDiagnostics(); break;
     case 'welcome': el.innerHTML = renderWelcome(); break;
     case 'category': renderCategoryGuide(el); break;
+    case 'table': renderTableView(el); break;
+    case 'processdetail': renderProcessDetail(el); break;
     default: el.innerHTML = renderDashboard(); initDashCharts(); break;
   }}
 }}
@@ -1347,20 +1533,124 @@ function renderDetail() {{
 }}
 
 function showTableExpand(source, idx) {{
-  const entry = S.snapshot.entries[source];
-  if (!entry) return;
+  // Pin source/field so RT refreshes don't wipe the table view
+  S.tableViewSource = source;
+  S.tableViewFieldIdx = idx;
+  S.tableViewScroll = 0;
+  S.view = 'table';
+  render();
+}}
+
+const TABLE_HEADERS = {{
+  'mounts':     ['Device','Mountpoint','FSType','Options'],
+  'partitions': ['Name','Size','Major','Minor'],
+  'net/dev':    ['Interface','RX Bytes','RX Pkts','TX Bytes','TX Pkts'],
+  'diskstats':  ['Device','Reads','Read Bytes','Writes','Written','InFlight'],
+  'processes':  ['PID','Name','State','RSS','Threads','UID','FDs'],
+  'swaps':      ['Filename','Type','Size','Used','Priority'],
+  'modules':    ['Name','Size','Used By','State'],
+  'net/tcp':    ['Local Addr','Remote Addr','State','UID'],
+  'net/udp':    ['Local Addr','Remote Addr','State','UID'],
+  'net/unix':   ['Type','State','Inode','Path'],
+  'net/arp':    ['IP Address','HW Address','Device'],
+  'net/route':  ['Iface','Destination','Gateway','Mask','Metric'],
+  'crypto':     ['Name','Driver','Module','Type','BlockSize'],
+  'locks':      ['Type','Mode','RW','PID','Range'],
+  'interrupts': ['IRQ','Count','Type','Device'],
+  'devices':    ['Major','Name'],
+  'cgroups':    ['Name','Hierarchy','NumCGroups','Enabled'],
+}};
+
+function renderTableView(el) {{
+  const source = S.tableViewSource;
+  const idx = S.tableViewFieldIdx;
+  if (!source || idx === null) {{ S.view = 'detail'; renderContent(); return; }}
+
+  const entry = S.snapshot && S.snapshot.entries[source];
+  if (!entry) {{ el.innerHTML = '<p style="color:var(--fg-dim)">No data</p>'; return; }}
   const field = entry.fields[idx];
-  if (!field || !field.value.Table) return;
+  if (!field || !field.value.Table) {{ el.innerHTML = '<p style="color:var(--fg-dim)">No table data</p>'; return; }}
   const rows = field.value.Table;
-  const el = document.getElementById('content');
-  let html = '<h3 style="color:var(--blue);margin-bottom:8px;font-size:14px">' + escapeHtml(source) + '.' + escapeHtml(field.name) + '</h3>';
-  html += '<table class="field-table"><tbody>';
-  rows.forEach(row => {{
-    html += '<tr>' + row.map(c => '<td>' + escapeHtml(c) + '</td>').join('') + '</tr>';
+  const headers = TABLE_HEADERS[source] || Array.from({{length: (rows[0]||[]).length}}, (_, i) => 'Col'+(i+1));
+  const isProcesses = source === 'processes';
+
+  let html = '<div class="table-view-header">' +
+    '<span>' + escapeHtml(source) + ' / ' + escapeHtml(field.name) + '</span>' +
+    '<span style="color:var(--fg-dim);font-size:11px">(' + rows.length + ' rows)</span>' +
+    (isProcesses ? '<span style="color:var(--cyan);font-size:11px">[Enter: detail]</span>' : '') +
+    '<button class="table-back-btn" onclick="S.setView(\'detail\')">&#8592; Back (BS)</button>' +
+    '</div>';
+  html += '<table class="field-table"><thead><tr>';
+  headers.forEach(h => {{ html += '<th>' + escapeHtml(h) + '</th>'; }});
+  html += '</tr></thead><tbody>';
+  rows.forEach((row, i) => {{
+    const sel = (isProcesses && i === S.tableViewScroll) ? ' selected' : '';
+    html += '<tr class="' + sel + '" data-row="' + i + '">' +
+      row.map(c => '<td>' + escapeHtml(c) + '</td>').join('') + '</tr>';
   }});
   html += '</tbody></table>';
-  html += '<p style="margin-top:12px"><a href="#" onclick="render();return false" style="color:var(--blue)">&#8592; Back (Backspace)</a></p>';
   el.innerHTML = html;
+
+  // scroll selected into view
+  const selRow = el.querySelector('tr.selected');
+  if (selRow) selRow.scrollIntoView({{ block: 'nearest' }});
+
+  // click handlers
+  el.querySelectorAll('tr[data-row]').forEach(tr => {{
+    tr.onclick = () => {{
+      const i = parseInt(tr.dataset.row);
+      S.tableViewScroll = i;
+      if (isProcesses) {{
+        const pid = rows[i] && rows[i][0];
+        if (pid) {{ S.detailedPid = pid; S.view = 'processdetail'; render(); return; }}
+      }}
+      render();
+    }};
+  }});
+}}
+
+async function renderProcessDetail(el) {{
+  const pid = S.detailedPid;
+  if (!pid) {{ S.view = 'table'; renderContent(); return; }}
+  el.innerHTML = '<p style="color:var(--fg-dim)">Loading /proc/' + escapeHtml(pid) + '...</p>';
+
+  try {{
+    const resp = await fetch('/api/view?view=processdetail&pid=' + encodeURIComponent(pid) + '&locale=' + S.locale);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (data.type !== 'ProcessDetail') throw new Error('unexpected: ' + data.type);
+    const d = data;
+    let html = '<div class="table-view-header">' +
+      '<span>PID ' + escapeHtml(d.pid) + ' — ' + escapeHtml(d.comm) + '</span>' +
+      '<button class="table-back-btn" onclick="S.view=\'table\';render()">&#8592; Back (BS)</button>' +
+      '</div>';
+    if (d.error) {{
+      html += '<p style="color:var(--red)">' + escapeHtml(d.error) + '</p>';
+      el.innerHTML = html;
+      return;
+    }}
+    d.fields.forEach(f => {{
+      html += '<div class="proc-detail-field">' +
+        '<span class="proc-detail-name">' + escapeHtml(f.name) + '</span>' +
+        '<span class="proc-detail-value">' + escapeHtml(f.value) + '</span>' +
+        '<span class="proc-detail-desc">' + escapeHtml(f.description) + '</span>' +
+        '</div>';
+      if (f.table_rows && f.table_rows.length > 0) {{
+        html += '<table class="proc-detail-subtable"><thead><tr>';
+        f.table_headers.forEach(h => {{ html += '<th>' + escapeHtml(h) + '</th>'; }});
+        html += '</tr></thead><tbody>';
+        f.table_rows.slice(0, 20).forEach(row => {{
+          html += '<tr>' + row.map(c => '<td>' + escapeHtml(c) + '</td>').join('') + '</tr>';
+        }});
+        if (f.table_rows.length > 20) html += '<tr><td colspan="' + f.table_headers.length + '" style="color:var(--fg-dim)">... ' + (f.table_rows.length - 20) + ' more</td></tr>';
+        html += '</tbody></table>';
+      }}
+    }});
+    el.innerHTML = html;
+  }} catch(e) {{
+    el.innerHTML = '<p style="color:var(--red)">Failed to load process detail: ' + escapeHtml(String(e)) + '</p>' +
+      '<button class="table-back-btn" onclick="S.view=\'table\';render()">&#8592; Back</button>';
+  }}
 }}
 
 // ---- Diff view ----
@@ -1807,6 +2097,25 @@ function updateGraphData() {{
 function renderFieldChart() {{
   const canvas = document.getElementById('graph-canvas');
   if (!canvas) return;
+  renderGraphWinBtns();
+
+  // Use windowed data
+  const src = S.currentSourceName();
+  if (S.graphField) S.rebuildFieldGraphData(src, S.graphField);
+
+  // Stable y-axis from all-time min/max
+  const stateKey = src + '.' + S.graphField;
+  const allVals = S.graphData.map(d => d.v);
+  if (allVals.length > 0) {{
+    const prevMin = S.graphAllTimeMin[stateKey] ?? Infinity;
+    const prevMax = S.graphAllTimeMax[stateKey] ?? -Infinity;
+    S.graphAllTimeMin[stateKey] = Math.min(prevMin, Math.min(...allVals));
+    S.graphAllTimeMax[stateKey] = Math.max(prevMax, Math.max(...allVals));
+  }}
+  const yMin = S.graphAllTimeMin[stateKey] ?? 0;
+  const yMax = S.graphAllTimeMax[stateKey] ?? 100;
+  const pad = (yMax - yMin) * 0.05 || 1;
+
   if (S.chart) S.chart.destroy();
   S.chart = new Chart(canvas.getContext('2d'), {{
     type: 'line',
@@ -1816,9 +2125,12 @@ function renderFieldChart() {{
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      scales: {{ x: {{ ticks: {{ color: '#565f89', maxTicksLimit: 10 }} }}, y: {{ ticks: {{ color: '#565f89' }} }} }},
+      scales: {{
+        x: {{ ticks: {{ color: '#565f89', maxTicksLimit: 10 }} }},
+        y: {{ min: yMin - pad, max: yMax + pad, ticks: {{ color: '#565f89' }} }}
+      }},
       plugins: {{ legend: {{ labels: {{ color: '#c0caf5' }} }} }},
-      animation: {{ duration: 200 }}
+      animation: {{ duration: 0 }}
     }}
   }});
 }}
@@ -1907,6 +2219,9 @@ document.addEventListener('keydown', (e) => {{
   if (key === '?') {{ e.preventDefault(); S.cycleHelp(); return; }}
   if (key === 'L') {{ e.preventDefault(); S.toggleLang(); return; }}
   if (key === 'd') {{ e.preventDefault(); S.setView('diff'); return; }}
+  if (key === 't') {{ e.preventDefault(); S.toggleSidebarTree(); return; }}
+  if (key === '[') {{ e.preventDefault(); S.cycleTimeWindow(-1); return; }}
+  if (key === ']') {{ e.preventDefault(); S.cycleTimeWindow(1); return; }}
   if (key === 'e') {{
     e.preventDefault();
     const json = JSON.stringify(S.snapshot, null, 2);
@@ -1940,6 +2255,8 @@ document.addEventListener('keydown', (e) => {{
   if (key === 'Backspace') {{
     e.preventDefault();
     if (S.graphField) {{ S.closeGraph(); return; }}
+    if (S.view === 'processdetail') {{ S.detailedPid = null; S.view = 'table'; render(); return; }}
+    if (S.view === 'table') {{ S.tableViewSource = null; S.tableViewFieldIdx = null; S.view = 'detail'; render(); return; }}
     if (S.view === 'detail' || S.view === 'diff') S.setView('dashboard');
     else S.setView('dashboard');
     return;
@@ -1955,12 +2272,18 @@ document.addEventListener('keydown', (e) => {{
   }}
 
   // Navigation
-  const inSidebar = S.focus === 'sidebar' && (S.view === 'detail' || S.view === 'diff');
+  const inSidebar = S.focus === 'sidebar' && (S.view === 'detail' || S.view === 'diff' || S.view === 'table' || S.view === 'processdetail');
   if (key === 'j' || key === 'ArrowDown') {{
     e.preventDefault();
     if (S.view === 'category') {{
       S.selectedCategory = Math.min(S.selectedCategory + 1, 99);
       S.categoryScroll = 0;
+      render();
+    }} else if (S.view === 'table' && !inSidebar) {{
+      const entry = S.snapshot && S.snapshot.entries[S.tableViewSource];
+      const field = entry && entry.fields[S.tableViewFieldIdx||0];
+      const rowCount = (field && field.value.Table) ? field.value.Table.length : 0;
+      S.tableViewScroll = Math.min(S.tableViewScroll + 1, rowCount - 1);
       render();
     }} else if (inSidebar) {{
       S.selectedSource = Math.min(S.selectedSource + 1, S.filteredKeys.length - 1);
@@ -1981,6 +2304,9 @@ document.addEventListener('keydown', (e) => {{
     if (S.view === 'category') {{
       S.selectedCategory = Math.max(S.selectedCategory - 1, 0);
       S.categoryScroll = 0;
+      render();
+    }} else if (S.view === 'table' && !inSidebar) {{
+      S.tableViewScroll = Math.max(S.tableViewScroll - 1, 0);
       render();
     }} else if (inSidebar) {{
       S.selectedSource = Math.max(S.selectedSource - 1, 0);
@@ -2057,6 +2383,18 @@ document.addEventListener('keydown', (e) => {{
       S.focus = 'content';
       S.selectedField = 0;
       render();
+    }} else if (S.view === 'table') {{
+      // Enter on processes row → drill into ProcessDetail
+      if (S.tableViewSource === 'processes') {{
+        const entry = S.snapshot && S.snapshot.entries['processes'];
+        if (entry) {{
+          const field = entry.fields[S.tableViewFieldIdx||0];
+          if (field && field.value.Table) {{
+            const row = field.value.Table[S.tableViewScroll];
+            if (row && row[0]) {{ S.detailedPid = row[0]; S.view = 'processdetail'; render(); }}
+          }}
+        }}
+      }}
     }} else if (S.view === 'detail') {{
       const src = S.currentSourceName();
       const entry = S.snapshot && S.snapshot.entries[src];

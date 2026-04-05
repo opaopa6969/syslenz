@@ -1,30 +1,41 @@
 # syslenz Docker Compose
 #
-# Start server:
+# Web UI (recommended):
 #   docker compose up -d
-#
-# Connect from host:
-#   syslenz --connect localhost:9100
-#
-# Web UI (if built with --features web):
-#   docker compose --profile web up -d
 #   open http://localhost:3000
 #
-# Grafana dashboard:
+# TCP server mode + connect from host TUI:
+#   docker compose --profile serve up -d
+#   syslenz --connect localhost:9100
+#
+# Grafana + Prometheus dashboard:
 #   docker compose --profile grafana up -d
 #   open http://localhost:3001
 
 services:
-  syslenz:
-    build: .
+  # Web UI — default profile
+  syslenz-web:
+    image: opaopa6969/syslenz:latest
+    ports:
+      - "3000:3000"
+    pid: "host"
+    read_only: true
+    command: ["--web", "3000"]
+
+  # TCP server mode for TUI --connect
+  syslenz-serve:
+    image: opaopa6969/syslenz:latest
     ports:
       - "9100:9100"
-    pid: "host"        # Access host /proc
+    pid: "host"
     read_only: true
     command: ["--serve", "0.0.0.0:9100"]
+    profiles:
+      - serve
 
+  # Prometheus metrics exporter
   syslenz-prometheus:
-    build: .
+    image: opaopa6969/syslenz:latest
     ports:
       - "9101:9101"
     pid: "host"
@@ -50,19 +61,6 @@ services:
       - syslenz-prometheus
     profiles:
       - grafana
-
-  syslenz-web:
-    build:
-      context: .
-      args:
-        FEATURES: web
-    ports:
-      - "3000:3000"
-    pid: "host"
-    read_only: true
-    command: ["--web", "3000"]
-    profiles:
-      - web
 
 volumes:
   grafana-storage:

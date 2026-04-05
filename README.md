@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/opaopa6969/syslenz/actions/workflows/ci.yml/badge.svg)](https://github.com/opaopa6969/syslenz/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/syslenz.svg)](https://crates.io/crates/syslenz)
+[![Docker Pulls](https://img.shields.io/docker/pulls/opaopa6969/syslenz.svg)](https://hub.docker.com/r/opaopa6969/syslenz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > **Wireshark for /proc**
@@ -78,21 +79,47 @@ cargo install --path .
 # With optional features
 cargo install --path . --features "otel,web"
 
-# Docker (server mode)
-docker run --rm -p 9100:9100 --pid=host syslenz --serve
-syslenz --connect localhost:9100
-
-# Docker (Web UI)
-docker compose --profile web up -d
+# Docker — Web UI (no build required, linux/amd64 + arm64)
+docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz
 # Open http://localhost:3000
 
-# Docker (Grafana + Prometheus + syslenz)
-docker compose --profile grafana up -d
-# Open http://localhost:3001 (Grafana), http://localhost:9090 (Prometheus)
+# Docker — TCP server mode
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
+syslenz --connect localhost:9100
 
-# Binary releases
-# See https://github.com/opaopa6969/syslenz/releases
+# Docker Compose — Web UI
+docker compose up -d
+# Open http://localhost:3000
+
+# Docker Compose — Grafana + Prometheus
+docker compose --profile grafana up -d
+# Open http://localhost:3001
+
+# Binary releases (Linux / macOS / Windows)
+# https://github.com/opaopa6969/syslenz/releases
 ```
+
+## Docker Hub
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/opaopa6969/syslenz.svg)](https://hub.docker.com/r/opaopa6969/syslenz)
+
+```bash
+# Instant Web UI — no build, no install
+docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz
+```
+
+Open **http://localhost:3000** — real-time `/proc` metrics in your browser.
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest stable release |
+| `v1.6.0` | Specific version |
+| `1.6` | Latest patch for 1.6.x |
+
+Platforms: `linux/amd64`, `linux/arm64`
+
+> `--pid=host` is required to give the container access to the host's `/proc`.
+
 
 ## Quick Start
 

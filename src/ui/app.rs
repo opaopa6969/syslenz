@@ -104,6 +104,8 @@ pub enum View {
     CategoryGuide,
     /// BL-074: Interactive tutorial mode
     Tutorial,
+    /// Per-process detail drilldown from the processes TableView
+    ProcessDetail,
 }
 
 pub struct ArticleOverlayState {
@@ -181,6 +183,16 @@ pub struct App {
     pub selected_diagnostic: usize,
     /// When viewing related_metrics picker, which metric is selected.
     pub selected_related_metric: Option<usize>,
+    /// Sidebar display mode: true = tree (grouped by /proc path), false = flat list.
+    pub sidebar_tree: bool,
+    /// Graph time window in seconds (= number of snapshots to display).
+    pub graph_time_window: usize,
+    /// Source key pinned when entering TableView.  Prevents index drift when
+    /// source_keys is rebuilt on auto-refresh (sources that fail to parse are
+    /// temporarily absent, shifting all subsequent indices).
+    pub table_view_source: Option<String>,
+    /// PID currently shown in ProcessDetail view.
+    pub detailed_pid: Option<String>,
     /// Optional long-form article overlay state.
     pub article_overlay: Option<ArticleOverlayState>,
     /// Total line count of article content (set by render)
@@ -247,6 +259,10 @@ impl App {
             view_history: Vec::new(),
             selected_diagnostic: 0,
             selected_related_metric: None,
+            sidebar_tree: true,
+            graph_time_window: 60,
+            table_view_source: None,
+            detailed_pid: None,
             article_overlay: None,
             article_content_lines: 0,
             article_visible_height: 0,
@@ -316,6 +332,10 @@ impl App {
             view_history: Vec::new(),
             selected_diagnostic: 0,
             selected_related_metric: None,
+            sidebar_tree: true,
+            graph_time_window: 60,
+            table_view_source: None,
+            detailed_pid: None,
             article_overlay: None,
             article_content_lines: 0,
             article_visible_height: 0,
@@ -388,6 +408,10 @@ impl App {
             view_history: Vec::new(),
             selected_diagnostic: 0,
             selected_related_metric: None,
+            sidebar_tree: true,
+            graph_time_window: 60,
+            table_view_source: None,
+            detailed_pid: None,
             article_overlay: None,
             article_content_lines: 0,
             article_visible_height: 0,
@@ -639,12 +663,97 @@ impl App {
             }
         }
 
+        // If viewing a process detail and the process has since exited, go back to the process list.
+        if matches!(self.view, View::ProcessDetail) {
+            if let Some(ref pid) = self.detailed_pid.clone() {
+                if !std::path::Path::new(&format!("/proc/{}", pid)).exists() {
+                    self.detailed_pid = None;
+                    self.view = View::TableView;
+                    self.status_message = Some(if self.locale == crate::i18n::Locale::Ja {
+                        format!("PID {} は終了しました", pid)
+                    } else {
+                        format!("PID {} exited", pid)
+                    });
+                }
+            }
+        }
+
         self.last_refresh = Instant::now();
         Ok(())
     }
 
     pub fn toggle_dashboard_axis(&mut self) {
         self.dash_zero_axis = !self.dash_zero_axis;
+    }
+
+    const GRAPH_TIME_WINDOWS: [usize; 6] = [30, 60, 120, 300, 900, 3600];
+
+    pub fn graph_time_window_label(&self) -> &'static str {
+        match self.graph_time_window {
+            30 => "30s",
+            60 => "1m",
+            120 => "2m",
+            300 => "5m",
+            900 => "15m",
+            3600 => "1h",
+            _ => "?",
+        }
+    }
+
+    pub fn graph_time_window_shrink(&mut self) {
+        let pos = Self::GRAPH_TIME_WINDOWS
+            .iter()
+            .position(|&w| w == self.graph_time_window)
+            .unwrap_or(1);
+        if pos > 0 {
+            self.graph_time_window = Self::GRAPH_TIME_WINDOWS[pos - 1];
+        }
+        // Update max_snapshots for all hosts
+        let max = self.graph_time_window.max(60);
+        for host in &mut self.hosts {
+            host.max_snapshots = max;
+        }
+    }
+
+    pub fn graph_time_window_grow(&mut self) {
+        let pos = Self::GRAPH_TIME_WINDOWS
+            .iter()
+            .position(|&w| w == self.graph_time_window)
+            .unwrap_or(1);
+        if pos + 1 < Self::GRAPH_TIME_WINDOWS.len() {
+            self.graph_time_window = Self::GRAPH_TIME_WINDOWS[pos + 1];
+        }
+        // Update max_snapshots for all hosts so history accumulates
+        let max = self.graph_time_window.max(60);
+        for host in &mut self.hosts {
+            host.max_snapshots = max;
+        }
+    }
+
+    pub fn toggle_sidebar_tree(&mut self) {
+        self.sidebar_tree = !self.sidebar_tree;
+        self.sidebar_scroll = 0;
+    }
+
+    /// Returns source_key indices sorted by their /proc filesystem path.
+    /// Used for tree-mode sidebar navigation (j/k skip dir headers, move leaf to leaf).
+    pub fn tree_visual_leaves(&self) -> Vec<usize> {
+        let mut items: Vec<(usize, Vec<String>)> = self
+            .source_keys
+            .iter()
+            .enumerate()
+            .filter_map(|(i, key)| {
+                let source = self.current.entries.get(key)?.source.clone();
+                let segs: Vec<String> = source
+                    .trim_start_matches('/')
+                    .split('/')
+                    .map(|s| s.to_string())
+                    .collect();
+                Some((i, segs))
+            })
+            .collect();
+        items.sort_by(|a, b| a.1.cmp(&b.1));
+        items.into_iter().map(|(i, _)| i).collect()
     }
 
     pub fn current_entry_fields(&self) -> Option<&Vec<crate::proc::Field>> {
@@ -659,14 +768,39 @@ impl App {
             .unwrap_or("")
     }
 
+    /// Returns the source name to use for TableView rendering.
+    /// Uses the pinned `table_view_source` key (set when entering TableView) to
+    /// avoid index drift when `source_keys` is rebuilt on auto-refresh.
+    pub fn table_view_source_name(&self) -> &str {
+        self.table_view_source
+            .as_deref()
+            .unwrap_or_else(|| self.current_source_name())
+    }
+
+    /// Returns the fields for the currently pinned TableView source.
+    pub fn table_view_entry_fields(&self) -> Option<&Vec<crate::proc::Field>> {
+        let key = self.table_view_source_name();
+        self.current.entries.get(key).map(|e| &e.fields)
+    }
+
     const DASHBOARD_SECTIONS: usize = 5; // load, mem, cpu, net, sys
     const DASHBOARD_SOURCES: [&str; 5] = ["loadavg", "meminfo", "stat", "net/dev", "df"];
 
     pub fn move_up(&mut self) {
         match self.focus {
             Focus::Sidebar => {
-                if self.selected_source > 0 {
-                    self.selected_source -= 1;
+                let prev = if self.sidebar_tree {
+                    let leaves = self.tree_visual_leaves();
+                    leaves
+                        .iter()
+                        .position(|&i| i == self.selected_source)
+                        .and_then(|pos| leaves.get(pos.saturating_sub(1)))
+                        .copied()
+                } else {
+                    self.selected_source.checked_sub(1)
+                };
+                if let Some(idx) = prev {
+                    self.selected_source = idx;
                     self.selected_field = 0;
                     self.field_scroll = 0;
                     self.table_scroll = 0;
@@ -680,6 +814,9 @@ impl App {
                 }
                 View::TableView => {
                     self.table_scroll = self.table_scroll.saturating_sub(1);
+                }
+                View::ProcessDetail => {
+                    self.field_scroll = self.field_scroll.saturating_sub(1);
                 }
                 View::CategoryGuide => {
                     self.category_scroll = self.category_scroll.saturating_sub(1);
@@ -703,8 +840,19 @@ impl App {
     pub fn move_down(&mut self) {
         match self.focus {
             Focus::Sidebar => {
-                if self.selected_source + 1 < self.source_keys.len() {
-                    self.selected_source += 1;
+                let next = if self.sidebar_tree {
+                    let leaves = self.tree_visual_leaves();
+                    leaves
+                        .iter()
+                        .position(|&i| i == self.selected_source)
+                        .and_then(|pos| leaves.get(pos + 1))
+                        .copied()
+                } else {
+                    let next = self.selected_source + 1;
+                    (next < self.source_keys.len()).then_some(next)
+                };
+                if let Some(idx) = next {
+                    self.selected_source = idx;
                     self.selected_field = 0;
                     self.field_scroll = 0;
                     self.table_scroll = 0;
@@ -718,6 +866,9 @@ impl App {
                 }
                 View::TableView => {
                     self.table_scroll += 1;
+                }
+                View::ProcessDetail => {
+                    self.field_scroll += 1;
                 }
                 View::CategoryGuide => {
                     let max_scroll = self
@@ -782,6 +933,7 @@ impl App {
                     View::Overview | View::Detail => {
                         if self.selected_field_is_table() {
                             self.table_scroll = 0;
+                            self.table_view_source = Some(self.current_source_name().to_string());
                             self.view = View::TableView;
                         }
                     }
@@ -805,7 +957,27 @@ impl App {
                             }
                         }
                     }
-                    View::TableView | View::Diff | View::Graph | View::CategoryGuide | View::Tutorial => {}
+                    View::TableView => {
+                        // Drill into process detail when viewing the processes table
+                        if self.table_view_source_name() == "processes" {
+                            if let Some(entry) = self.current.entries.get("processes") {
+                                if let Some(table_field) =
+                                    entry.fields.iter().find(|f| f.name == "processes")
+                                {
+                                    if let FieldValue::Table(ref rows) = table_field.value {
+                                        if let Some(row) = rows.get(self.table_scroll) {
+                                            if let Some(pid) = row.first() {
+                                                self.detailed_pid = Some(pid.clone());
+                                                self.field_scroll = 0;
+                                                self.view = View::ProcessDetail;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    View::Diff | View::Graph | View::CategoryGuide | View::Tutorial | View::ProcessDetail => {}
                 }
             }
         }
@@ -865,7 +1037,12 @@ impl App {
         match self.focus {
             Focus::Content => {
                 match self.view {
+                    View::ProcessDetail => {
+                        self.detailed_pid = None;
+                        self.view = View::TableView;
+                    }
                     View::TableView | View::Graph => {
+                        self.table_view_source = None;
                         self.view = View::Detail;
                     }
                     View::Detail if self.came_from_dashboard => {

@@ -142,6 +142,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             }
             ViewData::Diff(_) => draw_diff(f, app, main_chunks[1]),
             ViewData::TableView(_) => draw_table_view(f, app, main_chunks[1]),
+            ViewData::ProcessDetail(ref data) => draw_process_detail(f, data, main_chunks[1]),
             _ => {}
         }
     }
@@ -398,52 +399,188 @@ fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(p, area);
 }
 
-fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
-    let visible_height = area.height.saturating_sub(2) as usize; // border top+bottom
-    let selected = app.selected_source;
+// A visual row in the tree-mode sidebar.
+enum SidebarRow<'a> {
+    Dir { label: String, depth: usize },
+    Leaf { key_idx: usize, key: &'a str, depth: usize },
+}
 
-    // Scroll sidebar so selected item is always visible
-    let scroll = if selected >= app.sidebar_scroll + visible_height {
-        selected - visible_height + 1
-    } else if selected < app.sidebar_scroll {
-        selected
+fn build_tree_rows<'a>(app: &'a App) -> Vec<SidebarRow<'a>> {
+    // Collect (key_idx, path_segments) from each entry's source path
+    let mut items: Vec<(usize, Vec<String>)> = app
+        .source_keys
+        .iter()
+        .enumerate()
+        .filter_map(|(i, key)| {
+            let source = app.current.entries.get(key)?.source.clone();
+            let segs: Vec<String> = source
+                .trim_start_matches('/')
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+            Some((i, segs))
+        })
+        .collect();
+    items.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let mut rows: Vec<SidebarRow<'a>> = Vec::new();
+    let mut prev_segs: Vec<String> = Vec::new();
+
+    for (key_idx, segs) in items {
+        if segs.is_empty() {
+            continue;
+        }
+        // Find how many leading segments match the previous item
+        let common = prev_segs
+            .iter()
+            .zip(segs.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+
+        // Emit dir headers for newly introduced intermediate segments
+        for depth in common..segs.len().saturating_sub(1) {
+            rows.push(SidebarRow::Dir {
+                label: segs[depth].clone(),
+                depth,
+            });
+        }
+
+        // Emit leaf: depth = path length - 1 (number of ancestors)
+        let depth = segs.len().saturating_sub(1);
+        // SAFETY: key_idx was built from source_keys.iter().enumerate()
+        let key: &'a str = app.source_keys[key_idx].as_str();
+        rows.push(SidebarRow::Leaf { key_idx, key, depth });
+
+        prev_segs = segs;
+    }
+    rows
+}
+
+fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
+    let visible_height = area.height.saturating_sub(2) as usize;
+    let mode_hint = if app.sidebar_tree { " [t:flat]" } else { " [t:tree]" };
+    let title = format!(" /proc ({}){} ", app.source_keys.len(), mode_hint);
+
+    if !app.sidebar_tree {
+        // ── Flat mode (original behaviour) ──────────────────────────────────
+        let selected = app.selected_source;
+        let scroll = if selected >= app.sidebar_scroll + visible_height {
+            selected - visible_height + 1
+        } else if selected < app.sidebar_scroll {
+            selected
+        } else {
+            app.sidebar_scroll
+        };
+
+        let items: Vec<ListItem> = app
+            .source_keys
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .take(visible_height)
+            .map(|(i, key)| {
+                let marker = if i == selected { ">" } else { " " };
+                let alert_severity = alert::source_max_severity(&app.active_alerts, key);
+                let style = if i == selected {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else if alert_severity == Some("critical") {
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                } else if alert_severity == Some("warning") {
+                    Style::default().fg(Color::Yellow)
+                } else if alert_severity == Some("info") {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
+                    Span::styled(format!("{:<18}", key), style),
+                ]))
+            })
+            .collect();
+
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+        f.render_widget(list, area);
+        return;
+    }
+
+    // ── Tree mode ────────────────────────────────────────────────────────────
+    let rows = build_tree_rows(app);
+
+    // Find the visual row index of the selected leaf (for auto-scroll)
+    let selected_row = rows.iter().position(|r| matches!(r, SidebarRow::Leaf { key_idx, .. } if *key_idx == app.selected_source));
+
+    // Compute scroll: keep selected_row inside the visible window
+    let scroll = if let Some(sel_row) = selected_row {
+        if sel_row >= app.sidebar_scroll + visible_height {
+            sel_row - visible_height + 1
+        } else if sel_row < app.sidebar_scroll {
+            sel_row
+        } else {
+            app.sidebar_scroll
+        }
     } else {
         app.sidebar_scroll
     };
 
-    let items: Vec<ListItem> = app
-        .source_keys
+    let items: Vec<ListItem> = rows
         .iter()
-        .enumerate()
         .skip(scroll)
         .take(visible_height)
-        .map(|(i, key)| {
-            let marker = if i == selected { ">" } else { " " };
-            // Check if this source has active alerts
-            let alert_severity = alert::source_max_severity(&app.active_alerts, key);
-            let style = if i == selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else if alert_severity == Some("critical") {
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-            } else if alert_severity == Some("warning") {
-                Style::default().fg(Color::Yellow)
-            } else if alert_severity == Some("info") {
-                Style::default().fg(Color::Cyan)
-            } else if key.starts_with("net/") {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
-                Span::styled(format!("{:<18}", key), style),
-            ]))
+        .map(|row| match row {
+            SidebarRow::Dir { label, depth } => {
+                let indent = "  ".repeat(*depth);
+                ListItem::new(Line::from(vec![
+                    Span::raw(indent),
+                    Span::styled(
+                        format!("{}/ ", label),
+                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    ),
+                ]))
+            }
+            SidebarRow::Leaf { key_idx, key, depth } => {
+                let is_selected = *key_idx == app.selected_source;
+                let indent = "  ".repeat(*depth);
+                let marker = if is_selected { ">" } else { " " };
+                let alert_severity = alert::source_max_severity(&app.active_alerts, key);
+                let name_style = if is_selected {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else if alert_severity == Some("critical") {
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                } else if alert_severity == Some("warning") {
+                    Style::default().fg(Color::Yellow)
+                } else if alert_severity == Some("info") {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                // Display the basename of the source path as leaf label
+                let leaf_label = app
+                    .current
+                    .entries
+                    .get(*key)
+                    .map(|e| {
+                        e.source
+                            .trim_end_matches('/')
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&e.source)
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| (*key).to_string());
+                ListItem::new(Line::from(vec![
+                    Span::raw(indent),
+                    Span::styled(
+                        format!("{} ", marker),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(leaf_label, name_style),
+                ]))
+            }
         })
         .collect();
 
-    let title = format!(" /proc ({}) ", app.source_keys.len());
     let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(list, area);
 }
@@ -629,7 +766,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
-    let Some(fields) = app.current_entry_fields() else {
+    let Some(fields) = app.table_view_entry_fields() else {
         return;
     };
 
@@ -651,7 +788,7 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
     };
 
     if let FieldValue::Table(ref data) = field.value {
-        let header_titles: Vec<&str> = match app.current_source_name() {
+        let header_titles: Vec<&str> = match app.table_view_source_name() {
             "mounts" => vec!["Device", "Mountpoint", "FSType", "Options"],
             "partitions" => vec!["Name", "Size", "Major", "Minor"],
             "net/dev" => vec!["Interface", "RX Bytes", "RX Pkts", "TX Bytes", "TX Pkts"],
@@ -663,7 +800,7 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
                 "Written",
                 "InFlight",
             ],
-            "processes" => vec!["PID", "Name", "State", "RSS", "Threads", "UID"],
+            "processes" => vec!["PID", "Name", "State", "RSS", "Threads", "UID", "FDs"],
             "swaps" => vec!["Filename", "Type", "Size", "Used", "Priority"],
             "modules" => vec!["Name", "Size", "Used By", "State"],
             "net/tcp" => vec!["Local Addr", "Remote Addr", "State", "UID"],
@@ -698,13 +835,20 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
             .table_scroll
             .min(data.len().saturating_sub(visible_rows));
 
+        let is_processes = app.table_view_source_name() == "processes";
         let rows: Vec<Row> = data
             .iter()
+            .enumerate()
             .skip(start)
             .take(visible_rows)
-            .map(|row| {
+            .map(|(i, row)| {
                 let cells: Vec<Cell> = row.iter().map(|c| Cell::from(c.as_str())).collect();
-                Row::new(cells)
+                let r = Row::new(cells);
+                if is_processes && i == app.table_scroll {
+                    r.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+                } else {
+                    r
+                }
             })
             .collect();
 
@@ -715,13 +859,19 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
             .map(|_| Constraint::Percentage(pct))
             .collect();
 
+        let enter_hint = if app.table_view_source_name() == "processes" {
+            " [Enter: detail]"
+        } else {
+            ""
+        };
         let title = format!(
-            " {} / {} ({} rows, {}-{}) ",
-            app.current_source_name(),
+            " {} / {} ({} rows, {}-{}){} ",
+            app.table_view_source_name(),
             field.name,
             data.len(),
             start + 1,
             (start + visible_rows).min(data.len()),
+            enter_hint,
         );
         let table = Table::new(rows, widths)
             .block(Block::default().borders(Borders::ALL).title(title))
@@ -737,6 +887,137 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
 
         f.render_widget(table, area);
     }
+}
+
+fn draw_process_detail(
+    f: &mut Frame,
+    data: &super::view_data::ProcessDetailData,
+    area: Rect,
+) {
+    use ratatui::widgets::Paragraph;
+
+    if let Some(ref err) = data.error {
+        let p = Paragraph::new(err.as_str())
+            .block(Block::default().borders(Borders::ALL).title(" Process Detail "));
+        f.render_widget(p, area);
+        return;
+    }
+
+    let title = format!(" PID {} — {} ", data.pid, data.comm);
+    let inner_height = area.height.saturating_sub(2) as usize; // subtract border
+
+    // Build all lines
+    let mut lines: Vec<Line> = Vec::new();
+    for field in &data.fields {
+        // Section header: field name
+        let section_name = field.name.trim_start_matches("status.").trim_start_matches("io.");
+        if !field.table_rows.is_empty() {
+            // Table field
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("▸ {}", section_name),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            // Description
+            for desc_line in wrap_text(&field.description, area.width.saturating_sub(4) as usize) {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", desc_line),
+                    Style::default().fg(Color::DarkGray),
+                )]));
+            }
+            // Table header
+            if !field.table_headers.is_empty() {
+                let header_str = field.table_headers.join("  │  ");
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", header_str),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", "─".repeat(header_str.len())),
+                    Style::default().fg(Color::DarkGray),
+                )]));
+            }
+            // Table rows (cap at 50 rows to avoid overwhelming the view)
+            let display_rows = field.table_rows.iter().take(50);
+            for row in display_rows {
+                lines.push(Line::from(vec![Span::raw(format!(
+                    "  {}",
+                    row.join("  │  ")
+                ))]));
+            }
+            if field.table_rows.len() > 50 {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  … {} more rows", field.table_rows.len() - 50),
+                    Style::default().fg(Color::DarkGray),
+                )]));
+            }
+        } else {
+            // Scalar field: name = value
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<30}", section_name),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(" = ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    field.value.clone(),
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            // Description
+            for desc_line in wrap_text(&field.description, area.width.saturating_sub(4) as usize) {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", desc_line),
+                    Style::default().fg(Color::DarkGray),
+                )]));
+            }
+        }
+        lines.push(Line::from("")); // blank line between fields
+    }
+
+    let total_lines = lines.len();
+    let max_scroll = total_lines.saturating_sub(inner_height);
+    let scroll = data.scroll.min(max_scroll);
+
+    let visible: Vec<Line> = lines.into_iter().skip(scroll).take(inner_height).collect();
+
+    let scroll_hint = if total_lines > inner_height {
+        format!(" ({}/{}) ↑↓ to scroll ", scroll + 1, total_lines)
+    } else {
+        String::new()
+    };
+    let full_title = format!("{}{}", title, scroll_hint);
+
+    let p = Paragraph::new(visible)
+        .block(Block::default().borders(Borders::ALL).title(full_title));
+    f.render_widget(p, area);
+}
+
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if current.len() + 1 + word.len() <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(current.clone());
+            current = word.to_string();
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 /// BL-074: Render the interactive tutorial view.
@@ -1140,6 +1421,7 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
                     .border_style(Style::default().fg(Color::DarkGray)),
             )
             .data(&data.load_history)
+            .max(100)
             .style(Style::default().fg(Color::Yellow));
         f.render_widget(load_sparkline, graph_chunks[0]);
 
@@ -1157,6 +1439,7 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
                     .border_style(Style::default().fg(Color::DarkGray)),
             )
             .data(&data.mem_history)
+            .max(100)
             .style(Style::default().fg(Color::Green));
         f.render_widget(mem_sparkline, graph_chunks[1]);
     }
@@ -1170,24 +1453,55 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
         .map(|f| f.name.clone())
         .unwrap_or_default();
 
-    // Collect values from history
-    let mut values: Vec<f64> = Vec::new();
-    for snap in &app.snapshots {
-        if let Some(entry) = snap.entries.get(source_key) {
-            if let Some(field) = entry.fields.iter().find(|f| f.name == field_name) {
-                if let Some(v) = match &field.value {
-                    FieldValue::Bytes(b) => Some(*b as f64),
-                    FieldValue::Integer(i) => Some(*i as f64),
-                    FieldValue::Float(f) => Some(*f),
-                    FieldValue::Duration(d) => Some(*d),
-                    _ => None,
-                } {
-                    values.push(v);
-                }
-            }
+    // Helper closure to extract a numeric value from a snapshot entry.
+    let extract = |snap: &crate::proc::Snapshot| -> Option<f64> {
+        let entry = snap.entries.get(source_key)?;
+        let field = entry.fields.iter().find(|f| f.name == field_name)?;
+        match &field.value {
+            FieldValue::Bytes(b) => Some(*b as f64),
+            FieldValue::Integer(i) => Some(*i as f64),
+            FieldValue::Float(f) => Some(*f),
+            FieldValue::Duration(d) => Some(*d),
+            _ => None,
         }
+    };
+
+    // Compute min/max from ALL snapshots (not just the visible window) so the
+    // y-axis scale stays fixed across refreshes — prevents the "pikon" bounce.
+    let all_values: Vec<f64> = app
+        .snapshots
+        .iter()
+        .filter_map(|s| extract(s))
+        .chain(app.current.entries.get(source_key).and_then(|entry| {
+            entry.fields.iter().find(|f| f.name == field_name).and_then(|field| match &field.value {
+                FieldValue::Bytes(b) => Some(*b as f64),
+                FieldValue::Integer(i) => Some(*i as f64),
+                FieldValue::Float(f) => Some(*f),
+                FieldValue::Duration(d) => Some(*d),
+                _ => None,
+            })
+        }))
+        .collect();
+
+    if all_values.is_empty() {
+        let p = Paragraph::new(" Collecting data...").block(Block::default().borders(Borders::ALL));
+        f.render_widget(p, area);
+        return;
     }
-    // Current
+
+    let min_v = all_values.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_v = all_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let cur_v = *all_values.last().unwrap();
+    let range = max_v - min_v;
+
+    // Collect only the visible time window for display.
+    let window = app.graph_time_window;
+    let snap_slice = if app.snapshots.len() > window.saturating_sub(1) {
+        &app.snapshots[app.snapshots.len() - window.saturating_sub(1)..]
+    } else {
+        &app.snapshots[..]
+    };
+    let mut values: Vec<f64> = snap_slice.iter().filter_map(|s| extract(s)).collect();
     if let Some(entry) = app.current.entries.get(source_key) {
         if let Some(field) = entry.fields.iter().find(|f| f.name == field_name) {
             if let Some(v) = match &field.value {
@@ -1202,17 +1516,8 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    if values.is_empty() {
-        let p = Paragraph::new(" Collecting data...").block(Block::default().borders(Borders::ALL));
-        f.render_widget(p, area);
-        return;
-    }
-
-    let min_v = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_v = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let cur_v = *values.last().unwrap();
-    let range = max_v - min_v;
-
+    // Normalize the visible window to 0–100 using the all-time min/max scale.
+    // .max(100) on the Sparkline pins the y-axis ceiling so it never rescales.
     let sparkline_data: Vec<u64> = if range < f64::EPSILON {
         vec![50; values.len()]
     } else {
@@ -1223,12 +1528,13 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = format!(
-        " {} ▸ min:{} max:{} cur:{} ({}) ",
+        " {} ▸ min:{} max:{} cur:{} [{} / {}] ",
         field_name,
-        format_bytes_short(min_v as u64),
-        format_bytes_short(max_v as u64),
-        format_bytes_short(cur_v as u64),
+        format_value_short(min_v),
+        format_value_short(max_v),
+        format_value_short(cur_v),
         values.len(),
+        app.graph_time_window_label(),
     );
 
     let sparkline = ratatui::widgets::Sparkline::default()
@@ -1239,6 +1545,7 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
                 .border_style(Style::default().fg(Color::DarkGray)),
         )
         .data(&sparkline_data)
+        .max(100) // fix y-axis to the all-time max; prevents rescaling on each frame
         .style(Style::default().fg(Color::Cyan));
     f.render_widget(sparkline, area);
 }
@@ -1250,6 +1557,26 @@ fn bar_color(pct: u64) -> Style {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default().fg(Color::Green)
+    }
+}
+
+/// Format a raw f64 value for the graph title. Uses SI suffixes for large ints,
+/// two decimal places for small floats.
+fn format_value_short(v: f64) -> String {
+    if v == 0.0 {
+        return "0".into();
+    }
+    let abs = v.abs();
+    if abs >= 1_000_000_000.0 {
+        format!("{:.1}G", v / 1_000_000_000.0)
+    } else if abs >= 1_000_000.0 {
+        format!("{:.1}M", v / 1_000_000.0)
+    } else if abs >= 1_000.0 {
+        format!("{:.1}K", v / 1_000.0)
+    } else if abs < 1.0 {
+        format!("{:.3}", v)
+    } else {
+        format!("{:.1}", v)
     }
 }
 
@@ -2207,6 +2534,13 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                 "チュートリアル"
             } else {
                 "TUTORIAL"
+            }
+        }
+        View::ProcessDetail => {
+            if l == crate::i18n::Locale::Ja {
+                "プロセス詳細"
+            } else {
+                "PROCESS DETAIL"
             }
         }
     };
