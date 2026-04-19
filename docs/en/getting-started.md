@@ -1,29 +1,63 @@
 ---
-version: v1.3.0
+version: v1.4.0
 lang: en
 ---
 
 # Getting Started
 
-[🇯🇵 日本語版](../ja/getting-started.md)
+[日本語版](../ja/getting-started.md)
 
-[<- Prev: Index](index.md) | [Index](index.md) | [Next: Dashboard ->](dashboard.md)
+[← Index](index.md) | [Next: Dashboard →](dashboard.md)
 
+---
 
 ## Table of Contents
 
+- [Requirements](#requirements)
 - [Installation](#installation)
+  - [One-liner installer](#one-liner-installer)
+  - [cargo install (crates.io)](#cargo-install-cratesio)
+  - [From source](#from-source)
+  - [Optional features](#optional-features)
+  - [Docker](#docker)
+  - [Pre-built binary](#pre-built-binary)
 - [First Run](#first-run)
 - [Basic Navigation](#basic-navigation)
 - [Switching Views](#switching-views)
 - [Getting Help](#getting-help)
+- [Serving metrics (--serve)](#serving-metrics---serve)
+- [Web UI (--web)](#web-ui---web)
 - [CLI Flags Reference](#cli-flags-reference)
+
+---
+
+## Requirements
+
+- **Linux** (primary): any kernel 3.10+ with `/proc` and `/sys`
+- **macOS** / **Windows**: supported via platform adapters (24 sources each)
+- **Rust**: edition 2024, rustc 1.85+ (for building from source)
+
+---
 
 ## Installation
 
-### From Source (Cargo)
+### One-liner installer
 
-Requires Rust 2024 edition (1.85+).
+```bash
+curl -sSf https://raw.githubusercontent.com/opaopa6969/syslenz/main/scripts/install.sh | sh
+```
+
+Downloads the latest pre-built binary for your platform and places it in `/usr/local/bin/`.
+
+### cargo install (crates.io)
+
+```bash
+cargo install syslenz
+```
+
+Installs the default feature set (`web` enabled). Requires Rust 1.85+.
+
+### From source
 
 ```bash
 git clone https://github.com/opaopa6969/syslenz.git
@@ -32,104 +66,78 @@ cargo build --release
 sudo cp target/release/syslenz /usr/local/bin/
 ```
 
-Or install directly:
+Or install directly from the cloned directory:
 
 ```bash
 cargo install --path .
 ```
 
-### Optional Features
+### Optional features
 
 syslenz has three optional compile-time features:
 
 ```bash
-# Web UI (adds ~3 MB to binary, requires tokio + axum)
-
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Web UI (HTTP server, Settings GUI — included in default build)
 cargo build --release --features web
 
-# OpenTelemetry metrics export (requires tokio + OTLP crate)
-
-[🇯🇵 日本語版](../ja/getting-started.md)
+# OpenTelemetry metrics export
 cargo build --release --features otel
 
 # X11 floating widget
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 cargo build --release --features x11widget
 
-# Everything
-
-[🇯🇵 日本語版](../ja/getting-started.md)
+# All features
 cargo build --release --features "web,otel,x11widget"
 ```
 
 ### Docker
 
 ```bash
-# Run interactively
+# Run interactively (TUI inside container)
+docker run --rm -it --pid=host --privileged ghcr.io/opaopa6969/syslenz
 
-[🇯🇵 日本語版](../ja/getting-started.md)
-docker run --rm -it --pid=host --privileged syslenz/syslenz
+# Export a snapshot to stdout
+docker run --rm --pid=host --privileged ghcr.io/opaopa6969/syslenz --export /dev/stdout > snapshot.json
 
-# Export a snapshot
+# TCP server mode — listen on port 9100 (no auth; use on trusted networks only)
+docker run --rm -p 9100:9100 --pid=host ghcr.io/opaopa6969/syslenz --serve
 
-[🇯🇵 日本語版](../ja/getting-started.md)
-docker run --rm --pid=host --privileged syslenz/syslenz --export /dev/stdout > snapshot.json
-```
-
-The `--pid=host` and `--privileged` flags are needed so the container can read the host's `/proc` filesystem.
-
-The repository includes a `Dockerfile` for building a minimal container image and a `docker-compose.yml` for quick setup:
-
-```bash
-# Build and run with Docker Compose (TCP server mode)
-
-[🇯🇵 日本語版](../ja/getting-started.md)
-docker compose up -d
-syslenz --connect localhost:9100
-
-# Web UI profile
-
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Web UI
 docker compose --profile web up -d
 # Open http://localhost:3000
 
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Grafana + Prometheus + syslenz
+docker compose --profile grafana up -d
+# Open http://localhost:3001 (Grafana), http://localhost:9090 (Prometheus)
 ```
 
-A convenience script `run-web.sh` is also provided to build and launch the Web UI in one step:
+The `--pid=host` and `--privileged` flags let the container read the host's `/proc` filesystem.
+
+### Pre-built binary
+
+Pre-built binaries for Linux (x86_64, aarch64, musl), macOS (x86_64, aarch64), and Windows are available on the [GitHub Releases](https://github.com/opaopa6969/syslenz/releases) page.
 
 ```bash
-./run-web.sh          # port 3000, English
-./run-web.sh 8080     # port 8080, English
-./run-web.sh 3000 ja  # port 3000, Japanese
-```
-
-See the [Remote Monitoring](remote.md) page for detailed Docker Compose configuration and the [Web UI](web-ui.md) page for browser-based access.
-
-### Binary Download
-
-Pre-built binaries for `x86_64-unknown-linux-gnu` are available on the [GitHub Releases](https://github.com/opaopa6969/syslenz/releases) page.
-
-```bash
-curl -L https://github.com/opaopa6969/syslenz/releases/latest/download/syslenz-linux-amd64 -o syslenz
-chmod +x syslenz
+# Linux x86_64
+curl -L https://github.com/opaopa6969/syslenz/releases/latest/download/syslenz-linux-x86_64.tar.gz | tar xz
 sudo mv syslenz /usr/local/bin/
+
+# Verify checksum
+sha256sum -c syslenz-linux-x86_64.tar.gz.sha256
 ```
+
+---
 
 ## First Run
-
-Simply run:
 
 ```bash
 syslenz
 ```
 
-You will see the **Dashboard** view -- a full-screen overview of your system's health. The dashboard shows:
+You will see the **Dashboard** view — a full-width overview of your system with:
 
-- System load averages (1, 5, 15 min)
-- Memory usage (total, available, cached)
+- Load averages (1, 5, 15 min) with sparkline history
+- Memory usage (total, available, cached) with bar graph
 - CPU utilization breakdown
 - Network interface traffic
 - Disk usage
@@ -137,54 +145,57 @@ You will see the **Dashboard** view -- a full-screen overview of your system's h
 
 The dashboard auto-refreshes every second by default.
 
-### Import Mode (Read-Only)
-
-You can also view a previously captured snapshot:
+### Import mode (read-only replay)
 
 ```bash
 syslenz --import snapshot.json
 ```
 
-This opens in Classic (Overview) mode with auto-refresh disabled, allowing you to inspect a snapshot from another machine or a past point in time.
+Opens in Classic mode with auto-refresh disabled. Use this to inspect a snapshot captured on another machine or at a past point in time.
+
+---
 
 ## Basic Navigation
 
-syslenz is fully keyboard-driven. The core navigation keys work in all views:
+syslenz is fully keyboard-driven. These keys work in all views:
 
 | Key | Action |
 |-----|--------|
 | `j` / `k` or Arrow Down/Up | Move selection down / up |
 | `Enter` or Arrow Right | Drill into selected item |
-| `Backspace` or Arrow Left | Go back to previous view |
+| `Backspace` or Arrow Left | Go back |
 | `Tab` | Toggle focus between sidebar and content |
 | `PageUp` / `PageDown` | Scroll by page |
-| `q` or `Esc` | Quit syslenz |
+| `q` or `Esc` | Quit |
 
 ### In the Dashboard
 
-- Use `j`/`k` to select a dashboard section (Load, Memory, CPU, Network, etc.)
+- Use `j`/`k` to select a section (Load, Memory, CPU, Network, etc.)
 - Press `Enter` to drill into that section's detailed view in Classic mode
+- Press `Backspace` to return to the Dashboard
 
-### In Classic Mode
+### In Classic mode
 
-- The **sidebar** lists all data sources (e.g., `meminfo`, `loadavg`, `net/tcp`)
-- Use `j`/`k` to navigate sources, `Enter` to view details
-- Press `Tab` to switch focus between the sidebar and the detail panel
+- The **sidebar** lists all data sources (`meminfo`, `loadavg`, `net/tcp`, …)
+- Use `j`/`k` to navigate sources, `Enter` to view fields
+- Press `Tab` to switch focus between sidebar and detail panel
 - In the detail panel, use `j`/`k` to scroll through fields
+
+---
 
 ## Switching Views
 
-syslenz has several views accessible via single-key shortcuts:
-
 | Key | View | Description |
 |-----|------|-------------|
-| `D` | Dashboard | System health overview (default) |
-| `O` | Overview (Classic) | Sidebar + detail panel |
-| `W` | Welcome | Welcome screen with quick-start info |
-| `X` | Diagnostics | Auto-diagnostics findings |
+| `D` | Dashboard | System health overview (default at startup) |
+| `O` | Classic | Sidebar + detail panel |
+| `W` | Welcome | Keybinding reference and tips |
+| `X` | Diagnostics | Auto-detected issues with suggested actions |
 | `C` | Category Guide | Educational Linux internals guide |
 
-You can switch between views at any time. The view you came from is remembered so `Backspace` takes you back.
+Press `d` from any view to enter the **Diff** view (compare current snapshot with a previous one).
+
+---
 
 ## Getting Help
 
@@ -192,10 +203,54 @@ syslenz has a built-in multi-level help system:
 
 | Key | Action |
 |-----|--------|
-| `?` | Cycle help level: OFF -> NORMAL -> DETAILED -> EXTRA -> OFF |
-| `L` | Switch language (English <-> Japanese) |
+| `?` | Cycle help level: OFF → NORMAL → DETAILED → EXTRA → OFF |
+| `L` | Switch language (English ↔ Japanese) |
 
-When help is active, a panel appears at the bottom of the screen showing contextual information about the current view and selected item. Higher help levels provide more detail, including field descriptions and usage tips.
+When help is active, a panel appears at the bottom of the screen with contextual information about the current field. The EXTRA level shows SEE ALSO cross-references and learning breadcrumbs.
+
+---
+
+## Serving metrics (--serve)
+
+`--serve` starts a lightweight TCP server that responds to `SNAPSHOT` requests with JSON:
+
+```bash
+# Start server on all interfaces (default port 9100)
+syslenz --serve
+
+# Restrict to loopback — recommended for shared hosts
+syslenz --serve 127.0.0.1:9100
+
+# Connect from another terminal or remote machine
+syslenz --connect localhost:9100
+```
+
+> **Security**: `--serve` has no authentication. On shared or internet-facing hosts, bind to `127.0.0.1` or use a firewall rule to restrict access. SDKs (`syslenz4j`, `syslenz4py`, `syslenz4node`) connect to this endpoint.
+
+---
+
+## Web UI (--web)
+
+`--web` starts an HTTP server with a browser dashboard (requires `web` feature, which is on by default):
+
+```bash
+# Start on port 3000
+syslenz --web 3000
+
+# Open in browser
+# http://localhost:3000          — live dashboard
+# http://localhost:3000/settings — Settings GUI (alert rule editor)
+```
+
+> **Security**: The web server has no authentication in the current release. Use only on localhost or behind a reverse proxy with TLS and auth when network-accessible.
+>
+> **Planned but not yet implemented**: Fleet View (`/fleet`) and authentication (Basic Auth / Token).
+
+### Settings GUI
+
+Open `http://localhost:3000/settings` to edit alert rules in the browser. Changes are saved to `~/.config/syslenz/config.toml` and take effect immediately without restarting syslenz.
+
+---
 
 ## CLI Flags Reference
 
@@ -206,82 +261,65 @@ When help is active, a panel appears at the bottom of the screen showing context
 | `--export-series` | `<dir>` | Export time-series snapshots to directory |
 | `--interval` | `<seconds>` | Interval for `--export-series` and `--otel` |
 | `--count` | `<n>` | Number of snapshots for `--export-series` |
-| `--ssh` | `<user@host>` | Monitor a remote host via SSH |
+| `--ssh` | `<user@host>` | Monitor a remote host via SSH (repeatable) |
 | `--docker` | `<container>` | Monitor a Docker container via exec |
 | `--connect` | `<host:port>` | Connect to a syslenz TCP server |
 | `--serve` | `[bind_addr]` | Start TCP server (default: `0.0.0.0:9100`) |
-| `--web` | `[port]` | Start Web UI (default port: `3000`, requires `web` feature) |
-| `--otel` | `[endpoint]` | Export metrics via OTLP (default: `http://localhost:4317`, requires `otel` feature) |
-| `--prometheus` | `[port]` | Start Prometheus `/metrics` endpoint (default port: `9101`, requires `otel` feature) |
-| `--provider` | `<name>` | Enable a provider by name (repeatable, e.g. `--provider mysql --provider redis`) |
-| `--widget` | | Start X11 floating widget (requires `x11widget` feature) |
-| `--lang` | `<en\|ja>` | Set language (overrides config) |
-| `--classic` | | Start in Classic mode instead of Dashboard |
+| `--web` | `[port]` | Start Web UI (default: 3000, requires `web`) |
+| `--otel` | `[endpoint]` | OTLP export (default: `http://localhost:4317`, requires `otel`) |
+| `--prometheus` | `[port]` | Prometheus `/metrics` endpoint (default: 9101, requires `otel`) |
+| `--provider` | `<name>` | Enable a provider by name (repeatable) |
+| `--widget` | — | X11 floating widget (requires `x11widget`) |
+| `--lang` | `<en\|ja>` | Set UI language (overrides config) |
+| `--classic` | — | Start in Classic mode instead of Dashboard |
+| `--tutorial` | — | Launch the interactive 8-step tutorial |
 
 ### Examples
 
 ```bash
 # Basic interactive use
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz
 
-# Export a snapshot
+# Japanese interface
+syslenz --lang ja
 
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Export a snapshot
 syslenz --export snapshot.json
 
 # Capture 60 snapshots, 1 per second
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --export-series ./data --interval 1 --count 60
 
 # Monitor a remote server
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --ssh admin@192.168.1.100
 
-# Monitor a Docker container
+# Monitor two hosts simultaneously (F1/F2 to switch tabs)
+syslenz --ssh admin@host1 --ssh admin@host2
 
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Monitor a Docker container
 syslenz --docker my-app-container
 
-# Start a TCP server inside a container
-
-[🇯🇵 日本語版](../ja/getting-started.md)
-syslenz --serve 0.0.0.0:9100
+# Start a TCP server on loopback only (safe on shared hosts)
+syslenz --serve 127.0.0.1:9100
 
 # Connect to a remote TCP server
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --connect 192.168.1.100:9100
 
 # Start the web UI on port 8080
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --web 8080
 
 # Export metrics to an OTLP collector
-
-[🇯🇵 日本語版](../ja/getting-started.md)
 syslenz --otel http://otel-collector:4317 --interval 10
 
-# Prometheus metrics endpoint (v1.3.0)
-
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Prometheus metrics endpoint
 syslenz --prometheus
 
-# Prometheus on custom port with MySQL provider (v1.3.0)
-
-[🇯🇵 日本語版](../ja/getting-started.md)
+# Prometheus on custom port with MySQL provider
 syslenz --prometheus 9102 --provider mysql
 
-# Japanese interface
-
-[🇯🇵 日本語版](../ja/getting-started.md)
-syslenz --lang ja
+# Launch tutorial mode
+syslenz --tutorial
 ```
 
 ---
 
-[<- Prev: Index](index.md) | [Index](index.md) | [Next: Dashboard ->](dashboard.md)
+[← Index](index.md) | [Next: Dashboard →](dashboard.md)

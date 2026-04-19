@@ -1,29 +1,63 @@
 ---
-version: v1.3.0
+version: v1.4.0
 lang: ja
 ---
 
 # はじめに
 
-[🇬🇧 English](../en/getting-started.md)
+[English](../en/getting-started.md)
 
-[<- 前: Index](index.md) | [Index](index.md) | [次: ダッシュボード ->](dashboard.md)
+[← Index](index.md) | [次: ダッシュボード →](dashboard.md)
 
+---
 
 ## 目次
 
+- [動作要件](#動作要件)
 - [インストール](#インストール)
+  - [ワンライナーインストーラー](#ワンライナーインストーラー)
+  - [cargo install (crates.io)](#cargo-install-cratesio)
+  - [ソースから](#ソースから)
+  - [オプション機能](#オプション機能)
+  - [Docker](#docker)
+  - [ビルド済みバイナリ](#ビルド済みバイナリ)
 - [初回起動](#初回起動)
 - [基本操作](#基本操作)
 - [ビューの切り替え](#ビューの切り替え)
 - [ヘルプの使い方](#ヘルプの使い方)
-- [CLIフラグリファレンス](#cliフラグリファレンス)
+- [メトリクス配信 (--serve)](#メトリクス配信---serve)
+- [Web UI (--web)](#web-ui---web)
+- [CLI フラグリファレンス](#cli-フラグリファレンス)
+
+---
+
+## 動作要件
+
+- **Linux**（主要サポート）: `/proc` と `/sys` を持つカーネル 3.10 以上
+- **macOS** / **Windows**: プラットフォームアダプター経由でサポート（各 24 ソース）
+- **Rust**: edition 2024、rustc 1.85 以上（ソースビルドの場合）
+
+---
 
 ## インストール
 
-### ソースから (Cargo)
+### ワンライナーインストーラー
 
-Rust 2024 エディション (1.85+) が必要です。
+```bash
+curl -sSf https://raw.githubusercontent.com/opaopa6969/syslenz/main/scripts/install.sh | sh
+```
+
+プラットフォーム向けの最新ビルド済みバイナリをダウンロードし `/usr/local/bin/` に配置します。
+
+### cargo install (crates.io)
+
+```bash
+cargo install syslenz
+```
+
+デフォルトフィーチャーセット（`web` 有効）でインストール。Rust 1.85+ が必要。
+
+### ソースから
 
 ```bash
 git clone https://github.com/opaopa6969/syslenz.git
@@ -32,7 +66,7 @@ cargo build --release
 sudo cp target/release/syslenz /usr/local/bin/
 ```
 
-または直接インストール:
+またはクローンしたディレクトリから直接インストール:
 
 ```bash
 cargo install --path .
@@ -40,242 +74,252 @@ cargo install --path .
 
 ### オプション機能
 
-syslenz には3つのオプションのコンパイル時機能があります:
+syslenz には 3 つのオプションコンパイル時フィーチャーがあります:
 
 ```bash
-# Web UI (バイナリサイズ約3MB増、tokio + axum が必要)
-
-[🇬🇧 English](../en/getting-started.md)
+# Web UI（HTTP サーバー、設定 GUI — デフォルトビルドに含まれる）
 cargo build --release --features web
 
-# OpenTelemetry メトリクスエクスポート (tokio + OTLP クレートが必要)
-
-[🇬🇧 English](../en/getting-started.md)
+# OpenTelemetry メトリクスエクスポート
 cargo build --release --features otel
 
 # X11 フローティングウィジェット
-
-[🇬🇧 English](../en/getting-started.md)
 cargo build --release --features x11widget
 
-# 全機能
-
-[🇬🇧 English](../en/getting-started.md)
+# 全フィーチャー
 cargo build --release --features "web,otel,x11widget"
 ```
 
 ### Docker
 
 ```bash
-# 対話的に実行
+# インタラクティブ実行（コンテナ内 TUI）
+docker run --rm -it --pid=host --privileged ghcr.io/opaopa6969/syslenz
 
-[🇬🇧 English](../en/getting-started.md)
-docker run --rm -it --pid=host --privileged syslenz/syslenz
+# スナップショットを stdout にエクスポート
+docker run --rm --pid=host --privileged ghcr.io/opaopa6969/syslenz --export /dev/stdout > snapshot.json
 
-# スナップショットをエクスポート
+# TCP サーバーモード — ポート 9100 でリッスン（認証なし。信頼できるネットワークのみ）
+docker run --rm -p 9100:9100 --pid=host ghcr.io/opaopa6969/syslenz --serve
 
-[🇬🇧 English](../en/getting-started.md)
-docker run --rm --pid=host --privileged syslenz/syslenz --export /dev/stdout > snapshot.json
-```
-
-コンテナがホストの `/proc` を読み取れるよう、`--pid=host` と `--privileged` フラグが必要です。
-
-リポジトリには最小コンテナイメージをビルドする `Dockerfile` と、クイックセットアップ用の `docker-compose.yml` が含まれています:
-
-```bash
-# Docker Compose でビルド・実行 (TCPサーバーモード)
-
-[🇬🇧 English](../en/getting-started.md)
-docker compose up -d
-syslenz --connect localhost:9100
-
-# Web UI プロファイル
-
-[🇬🇧 English](../en/getting-started.md)
+# Web UI
 docker compose --profile web up -d
 # http://localhost:3000 を開く
 
-[🇬🇧 English](../en/getting-started.md)
+# Grafana + Prometheus + syslenz
+docker compose --profile grafana up -d
+# http://localhost:3001 (Grafana)、http://localhost:9090 (Prometheus)
 ```
 
-Web UI をワンステップでビルド・起動する便利スクリプト `run-web.sh` も用意されています:
+`--pid=host` と `--privileged` フラグにより、コンテナがホストの `/proc` ファイルシステムを読み取れるようになります。
+
+### ビルド済みバイナリ
+
+Linux (x86_64, aarch64, musl)、macOS (x86_64, aarch64)、Windows のビルド済みバイナリが [GitHub Releases](https://github.com/opaopa6969/syslenz/releases) ページにあります。
 
 ```bash
-./run-web.sh          # ポート3000、英語
-./run-web.sh 8080     # ポート8080、英語
-./run-web.sh 3000 ja  # ポート3000、日本語
-```
-
-Docker Compose の詳しい設定は[リモート監視](remote.md)ページ、ブラウザからのアクセスは[Web UI](web-ui.md)ページを参照してください。
-
-### バイナリダウンロード
-
-`x86_64-unknown-linux-gnu` 向けのビルド済みバイナリは [GitHub Releases](https://github.com/opaopa6969/syslenz/releases) ページから入手できます。
-
-```bash
-curl -L https://github.com/opaopa6969/syslenz/releases/latest/download/syslenz-linux-amd64 -o syslenz
-chmod +x syslenz
+# Linux x86_64
+curl -L https://github.com/opaopa6969/syslenz/releases/latest/download/syslenz-linux-x86_64.tar.gz | tar xz
 sudo mv syslenz /usr/local/bin/
+
+# チェックサム検証
+sha256sum -c syslenz-linux-x86_64.tar.gz.sha256
 ```
+
+---
 
 ## 初回起動
-
-次のコマンドを実行するだけです:
 
 ```bash
 syslenz
 ```
 
-**ダッシュボード**が開きます。システムの状態を一画面にまとめた全画面ビューです:
+**ダッシュボード**ビューが表示されます — 以下を含むシステムの全幅概要:
 
-- ロードアベレージ (1, 5, 15 分)
-- メモリ使用量 (合計、利用可能、キャッシュ)
+- ロードアベレージ（1、5、15 分）とスパークライン履歴
+- メモリ使用量（合計、利用可能、キャッシュ）とバーグラフ
 - CPU 使用率の内訳
-- ネットワークインターフェースのトラフィック
+- ネットワークインターフェーストラフィック
 - ディスク使用量
-- プロセスの概要
+- アクティブプロセスサマリー
 
-ダッシュボードはデフォルトで毎秒自動リフレッシュします。
+ダッシュボードはデフォルトで毎秒自動更新されます。
 
-### インポートモード (読み取り専用)
-
-以前キャプチャしたスナップショットを閲覧できます:
+### インポートモード（読み取り専用リプレイ）
 
 ```bash
 syslenz --import snapshot.json
 ```
 
-自動リフレッシュ無効のクラシック（Overview）モードで開き、別のマシンや過去の時点のスナップショットを確認できます。
+自動更新を無効にしてクラシックモードで開きます。別マシンまたは過去の時点でキャプチャしたスナップショットを検査するのに使用。
+
+---
 
 ## 基本操作
 
-syslenz は完全にキーボードで操作します。主要なナビゲーションキーは全ビュー共通です:
+syslenz は完全にキーボード駆動です。これらのキーは全ビューで機能します:
 
 | キー | アクション |
-|------|----------|
-| `j` / `k` または 矢印キー上下 | 選択を上下に移動 |
-| `Enter` または 矢印キー右 | 選択項目にドリルイン |
-| `Backspace` または 矢印キー左 | 前のビューに戻る |
-| `Tab` | サイドバーとコンテンツのフォーカス切り替え |
+|------|-----------|
+| `j` / `k` または 下/上矢印 | 選択を下/上に移動 |
+| `Enter` または 右矢印 | 選択項目にドリルイン |
+| `Backspace` または 左矢印 | 戻る |
+| `Tab` | サイドバーとコンテンツのフォーカス切替 |
 | `PageUp` / `PageDown` | ページ単位でスクロール |
-| `q` または `Esc` | syslenz を終了 |
+| `q` または `Esc` | 終了 |
 
-### ダッシュボードでの操作
+### ダッシュボードで
 
-- `j`/`k` でダッシュボードセクション（ロード、メモリ、CPU、ネットワーク等）を選択
-- `Enter` でそのセクションの詳細をクラシックモードで表示
+- `j`/`k` でセクション（ロード、メモリ、CPU、ネットワーク等）を選択
+- `Enter` でそのセクションの詳細ビューにドリルイン（クラシックモード）
+- `Backspace` でダッシュボードに戻る
 
-### クラシックモードでの操作
+### クラシックモードで
 
-- **サイドバー**に全データソースを一覧表示（例: `meminfo`、`loadavg`、`net/tcp`）
-- `j`/`k` でソースを選択、`Enter` で詳細表示
-- `Tab` でサイドバーと詳細パネルのフォーカスを切り替え
-- 詳細パネルでは `j`/`k` でフィールドをスクロール
+- **サイドバー**が全データソース（`meminfo`、`loadavg`、`net/tcp` 等）を一覧表示
+- `j`/`k` でソースを移動、`Enter` でフィールドを表示
+- `Tab` でサイドバーと詳細パネルのフォーカスを切替
+- 詳細パネルで `j`/`k` でフィールドをスクロール
+
+---
 
 ## ビューの切り替え
 
-syslenz には複数のビューがあり、キー1つで切り替えられます:
-
 | キー | ビュー | 説明 |
 |------|--------|------|
-| `D` | ダッシュボード | システムの概要（デフォルト） |
-| `O` | Overview（クラシック） | サイドバー＋詳細パネル |
-| `W` | ウェルカム | クイックスタート情報 |
-| `X` | 自動診断 | 自動診断の結果 |
-| `C` | カテゴリガイド | Linux内部の教育ガイド |
+| `D` | ダッシュボード | システムヘルス概要（起動時のデフォルト） |
+| `O` | クラシック | サイドバー + 詳細パネル |
+| `W` | ウェルカム | キーバインド一覧とヒント |
+| `X` | 診断 | 自動検出された問題と推奨アクション |
+| `C` | カテゴリガイド | Linux 内部構造の教育ガイド |
 
-いつでもビューを切り替えられます。元のビューは記憶されており、`Backspace` で戻れます。
+任意のビューから `d` を押すと **Diff** ビューに入ります（現在のスナップショットと過去のものを比較）。
+
+---
 
 ## ヘルプの使い方
 
-syslenz には複数レベルのヘルプシステムが組み込まれています:
+syslenz には組み込みの多段階ヘルプシステムがあります:
 
 | キー | アクション |
-|------|----------|
-| `?` | ヘルプレベルを切り替え: OFF -> NORMAL -> DETAILED -> EXTRA -> OFF |
-| `L` | 言語切り替え (英語 <-> 日本語) |
+|------|-----------|
+| `?` | ヘルプレベルをサイクル: OFF → NORMAL → DETAILED → EXTRA → OFF |
+| `L` | 言語切替（英語 ↔ 日本語） |
 
-ヘルプ有効時は画面下部にパネルが表示され、現在のビューと選択項目に応じた情報が表示されます。ヘルプレベルが高いほど、フィールドの説明や使い方のヒントなど、より詳しい情報を確認できます。
+ヘルプが有効な場合、画面下部に現在のフィールドに関するコンテキスト情報のパネルが表示されます。EXTRA レベルでは SEE ALSO クロスリファレンスと学習ブレッドクラムが表示されます。
 
-## CLIフラグリファレンス
+---
+
+## メトリクス配信 (--serve)
+
+`--serve` は `SNAPSHOT` リクエストに JSON で応答する軽量 TCP サーバーを起動します:
+
+```bash
+# 全インターフェースでサーバーを起動（デフォルトポート 9100）
+syslenz --serve
+
+# ループバックに限定 — 共有ホストで推奨
+syslenz --serve 127.0.0.1:9100
+
+# 別ターミナルやリモートマシンから接続
+syslenz --connect localhost:9100
+```
+
+> **セキュリティ**: `--serve` には認証がありません。共有やインターネット公開ホストでは `127.0.0.1` にバインドするかファイアウォールで制限してください。SDK（`syslenz4j`、`syslenz4py`、`syslenz4node`）はこのエンドポイントに接続します。
+
+---
+
+## Web UI (--web)
+
+`--web` はブラウザダッシュボードを持つ HTTP サーバーを起動します（`web` feature が必要、デフォルトで有効）:
+
+```bash
+# ポート 3000 で起動
+syslenz --web 3000
+
+# ブラウザで開く
+# http://localhost:3000          — ライブダッシュボード
+# http://localhost:3000/settings — 設定 GUI（アラートルールエディタ）
+```
+
+> **セキュリティ**: 現リリースの Web サーバーには認証機能がありません。ループバックのみで使用するか、ネットワーク公開時は TLS と認証を持つリバースプロキシを前段に置いてください。
+>
+> **計画中（未実装）**: Fleet View（`/fleet`）と認証（Basic Auth / Token）。
+
+### 設定 GUI
+
+`http://localhost:3000/settings` を開くとブラウザでアラートルールを編集できます。変更は `~/.config/syslenz/config.toml` に保存され、syslenz を再起動せずに即時反映されます。
+
+---
+
+## CLI フラグリファレンス
 
 | フラグ | 引数 | 説明 |
-|--------|------|------|
-| `--export` | `<file.json>` | スナップショットをJSONにエクスポートして終了 |
-| `--import` | `<file.json>` | スナップショットを読み込んでTUIを開く |
-| `--export-series` | `<dir>` | 時系列スナップショットをディレクトリにエクスポート |
-| `--interval` | `<seconds>` | `--export-series` と `--otel` のインターバル |
+|-------|------|------|
+| `--export` | `<file.json>` | スナップショットを JSON にエクスポートして終了 |
+| `--import` | `<file.json>` | インポートしたスナップショットで TUI を開く |
+| `--export-series` | `<dir>` | タイムシリーズスナップショットをディレクトリにエクスポート |
+| `--interval` | `<seconds>` | `--export-series` と `--otel` の間隔 |
 | `--count` | `<n>` | `--export-series` のスナップショット数 |
-| `--ssh` | `<user@host>` | SSH経由でリモートホストを監視 |
-| `--docker` | `<container>` | Docker exec経由でコンテナを監視 |
-| `--connect` | `<host:port>` | syslenz TCPサーバーに接続 |
-| `--serve` | `[bind_addr]` | TCPサーバーを起動（デフォルト: `0.0.0.0:9100`） |
-| `--web` | `[port]` | Web UIを起動（デフォルトポート: `3000`、`web`機能が必要） |
-| `--otel` | `[endpoint]` | OTLP経由でメトリクスをエクスポート（デフォルト: `http://localhost:4317`、`otel`機能が必要） |
-| `--prometheus` | `[bind_addr]` | Prometheus 形式で /metrics を公開（デフォルト: `0.0.0.0:9464`） |
-| `--widget` | | X11フローティングウィジェットを起動（`x11widget`機能が必要） |
-| `--lang` | `<en\|ja>` | 言語を設定（設定ファイルより優先） |
-| `--classic` | | ダッシュボードの代わりにクラシックモードで起動 |
+| `--ssh` | `<user@host>` | SSH 経由リモートホスト監視（複数指定可） |
+| `--docker` | `<container>` | Docker コンテナ監視 |
+| `--connect` | `<host:port>` | syslenz TCP サーバーに接続 |
+| `--serve` | `[bind_addr]` | TCP サーバー起動（デフォルト: `0.0.0.0:9100`） |
+| `--web` | `[port]` | Web UI 起動（デフォルト: 3000、`web` 必要） |
+| `--otel` | `[endpoint]` | OTLP エクスポート（デフォルト: `http://localhost:4317`、`otel` 必要） |
+| `--prometheus` | `[port]` | Prometheus `/metrics` エンドポイント（デフォルト: 9101、`otel` 必要） |
+| `--provider` | `<name>` | プロバイダーを名前で有効化（複数指定可） |
+| `--widget` | — | X11 フローティングウィジェット（`x11widget` 必要） |
+| `--lang` | `<en\|ja>` | UI 言語設定（設定ファイルを上書き） |
+| `--classic` | — | ダッシュボードではなくクラシックモードで起動 |
+| `--tutorial` | — | インタラクティブ 8 ステップチュートリアルを起動 |
 
 ### 使用例
 
 ```bash
-# 基本的な対話的使用
-
-[🇬🇧 English](../en/getting-started.md)
+# 基本的なインタラクティブ使用
 syslenz
 
-# スナップショットのエクスポート
+# 日本語インターフェース
+syslenz --lang ja
 
-[🇬🇧 English](../en/getting-started.md)
+# スナップショットをエクスポート
 syslenz --export snapshot.json
 
-# 60スナップショットを1秒間隔でキャプチャ
-
-[🇬🇧 English](../en/getting-started.md)
+# 60 スナップショットを 1 秒ごとにキャプチャ
 syslenz --export-series ./data --interval 1 --count 60
 
-# リモートサーバーの監視
-
-[🇬🇧 English](../en/getting-started.md)
+# リモートサーバーを監視
 syslenz --ssh admin@192.168.1.100
 
-# Dockerコンテナの監視
+# 2 ホストを同時監視（F1/F2 でタブ切替）
+syslenz --ssh admin@host1 --ssh admin@host2
 
-[🇬🇧 English](../en/getting-started.md)
+# Docker コンテナを監視
 syslenz --docker my-app-container
 
-# コンテナ内でTCPサーバーを起動
+# ループバックのみで TCP サーバーを起動（共有ホストで安全）
+syslenz --serve 127.0.0.1:9100
 
-[🇬🇧 English](../en/getting-started.md)
-syslenz --serve 0.0.0.0:9100
-
-# リモートTCPサーバーに接続
-
-[🇬🇧 English](../en/getting-started.md)
+# リモート TCP サーバーに接続
 syslenz --connect 192.168.1.100:9100
 
-# Web UIをポート8080で起動
-
-[🇬🇧 English](../en/getting-started.md)
+# ポート 8080 で Web UI を起動
 syslenz --web 8080
 
-# OTLPコレクターにメトリクスをエクスポート
-
-[🇬🇧 English](../en/getting-started.md)
+# OTLP コレクターにメトリクスをエクスポート
 syslenz --otel http://otel-collector:4317 --interval 10
 
-# Prometheus メトリクスエンドポイント (v1.3.0)
+# Prometheus メトリクスエンドポイント
+syslenz --prometheus
 
-[🇬🇧 English](../en/getting-started.md)
-syslenz --prometheus 0.0.0.0:9464
+# カスタムポートと MySQL プロバイダーで Prometheus
+syslenz --prometheus 9102 --provider mysql
 
-# 日本語インターフェース
-
-[🇬🇧 English](../en/getting-started.md)
-syslenz --lang ja
+# チュートリアルモードを起動
+syslenz --tutorial
 ```
 
 ---
 
-[<- 前: Index](index.md) | [Index](index.md) | [次: ダッシュボード ->](dashboard.md)
+[← Index](index.md) | [次: ダッシュボード →](dashboard.md)
