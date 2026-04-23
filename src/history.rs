@@ -74,10 +74,7 @@ impl HistoryWriter {
 
         let line = serde_json::to_string(snapshot)?;
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
         writeln!(file, "{}", line)?;
 
         Ok(())
@@ -92,9 +89,7 @@ impl HistoryWriter {
         };
 
         let cutoff = SystemTime::now()
-            .checked_sub(Duration::from_secs(
-                u64::from(self.retention_days) * 86400,
-            ))
+            .checked_sub(Duration::from_secs(u64::from(self.retention_days) * 86400))
             .unwrap_or(SystemTime::UNIX_EPOCH);
 
         for entry in entries {
@@ -158,10 +153,7 @@ pub fn append_alert_event(
         "status": status,
     });
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
     writeln!(file, "{}", entry)?;
 
     Ok(())
@@ -216,7 +208,11 @@ mod tests {
         }
     }
 
-    fn make_writer(dir: &std::path::Path, interval_secs: u64, retention_days: u32) -> HistoryWriter {
+    fn make_writer(
+        dir: &std::path::Path,
+        interval_secs: u64,
+        retention_days: u32,
+    ) -> HistoryWriter {
         HistoryWriter {
             dir: dir.to_path_buf(),
             interval: Duration::from_secs(interval_secs),
@@ -246,7 +242,11 @@ mod tests {
         assert_eq!(files.len(), 1);
         let content = fs::read_to_string(files[0].path()).unwrap();
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 1, "Should have only 1 line since interval hasn't elapsed");
+        assert_eq!(
+            lines.len(),
+            1,
+            "Should have only 1 line since interval hasn't elapsed"
+        );
     }
 
     #[test]
@@ -305,7 +305,11 @@ mod tests {
 
     #[test]
     fn cleanup_on_missing_dir_is_ok() {
-        let writer = make_writer(std::path::Path::new("/tmp/syslenz_nonexistent_test_dir"), 60, 7);
+        let writer = make_writer(
+            std::path::Path::new("/tmp/syslenz_nonexistent_test_dir"),
+            60,
+            7,
+        );
         // Should not error when directory doesn't exist
         writer.cleanup().unwrap();
     }

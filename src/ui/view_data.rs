@@ -441,46 +441,41 @@ impl App {
                     .fields
                     .into_iter()
                     .map(|f| {
-                        let (value, table_headers, table_rows) =
-                            match f.value {
-                                crate::proc::FieldValue::Table(rows) => {
-                                    let headers = match f.name.as_str() {
-                                        "limits" => vec![
-                                            "Limit".into(),
-                                            "Soft".into(),
-                                            "Hard".into(),
-                                            "Units".into(),
-                                        ],
-                                        "open_fds" => {
-                                            vec!["FD".into(), "Target".into()]
-                                        }
-                                        _ => rows
-                                            .first()
-                                            .map(|r| {
-                                                (0..r.len())
-                                                    .map(|i| format!("Col{}", i + 1))
-                                                    .collect()
-                                            })
-                                            .unwrap_or_default(),
-                                    };
-                                    (String::new(), headers, rows)
-                                }
-                                crate::proc::FieldValue::Integer(n) => {
-                                    (n.to_string(), Vec::new(), Vec::new())
-                                }
-                                crate::proc::FieldValue::Float(n) => {
-                                    (format!("{:.2}", n), Vec::new(), Vec::new())
-                                }
-                                crate::proc::FieldValue::Bytes(n) => {
-                                    (format_bytes_detail(n), Vec::new(), Vec::new())
-                                }
-                                crate::proc::FieldValue::Text(s) => {
-                                    (s, Vec::new(), Vec::new())
-                                }
-                                crate::proc::FieldValue::Duration(s) => {
-                                    (format!("{:.1}s", s), Vec::new(), Vec::new())
-                                }
-                            };
+                        let (value, table_headers, table_rows) = match f.value {
+                            crate::proc::FieldValue::Table(rows) => {
+                                let headers = match f.name.as_str() {
+                                    "limits" => vec![
+                                        "Limit".into(),
+                                        "Soft".into(),
+                                        "Hard".into(),
+                                        "Units".into(),
+                                    ],
+                                    "open_fds" => {
+                                        vec!["FD".into(), "Target".into()]
+                                    }
+                                    _ => rows
+                                        .first()
+                                        .map(|r| {
+                                            (0..r.len()).map(|i| format!("Col{}", i + 1)).collect()
+                                        })
+                                        .unwrap_or_default(),
+                                };
+                                (String::new(), headers, rows)
+                            }
+                            crate::proc::FieldValue::Integer(n) => {
+                                (n.to_string(), Vec::new(), Vec::new())
+                            }
+                            crate::proc::FieldValue::Float(n) => {
+                                (format!("{:.2}", n), Vec::new(), Vec::new())
+                            }
+                            crate::proc::FieldValue::Bytes(n) => {
+                                (format_bytes_detail(n), Vec::new(), Vec::new())
+                            }
+                            crate::proc::FieldValue::Text(s) => (s, Vec::new(), Vec::new()),
+                            crate::proc::FieldValue::Duration(s) => {
+                                (format!("{:.1}s", s), Vec::new(), Vec::new())
+                            }
+                        };
                         ProcessDetailField {
                             name: f.name,
                             value,
@@ -944,7 +939,8 @@ impl App {
         let mem_history = adjust_history_for_axis(mem_history, self.dash_zero_axis);
 
         // P-A1: Diagnostic badge — run analyze once, extract count & worst severity
-        let diag_findings = crate::diagnostics::analyze(&self.current, l, &self.diagnostic_runbooks);
+        let diag_findings =
+            crate::diagnostics::analyze(&self.current, l, &self.diagnostic_runbooks);
         let diag_count = diag_findings.len();
         let diag_severity = diag_findings.iter().fold(None, |worst, f| {
             let sev = match f.severity {
@@ -1398,7 +1394,8 @@ mod view_data_tests {
     fn dashboard_diag_count_matches_analyze() {
         let app = App::new().unwrap();
         let data = app.test_build_dashboard_data();
-        let findings = crate::diagnostics::analyze(&app.current, app.locale, &app.diagnostic_runbooks);
+        let findings =
+            crate::diagnostics::analyze(&app.current, app.locale, &app.diagnostic_runbooks);
         assert_eq!(data.diag_count, findings.len());
     }
 
@@ -1408,26 +1405,44 @@ mod view_data_tests {
         // When diag_count == 0, diag_severity should be None
         let data = DashboardData {
             load: LoadSection {
-                load1: String::new(), load5: String::new(),
-                load15: String::new(), uptime: String::new(),
+                load1: String::new(),
+                load5: String::new(),
+                load15: String::new(),
+                uptime: String::new(),
             },
             memory: MemorySection { items: vec![] },
             cpu: CpuSection { items: vec![] },
-            network: NetworkSection { headers: vec![], rows: vec![] },
+            network: NetworkSection {
+                headers: vec![],
+                rows: vec![],
+            },
             system: SystemSection {
-                disk_pct: String::new(), temp: String::new(), fd_pct: String::new(),
+                disk_pct: String::new(),
+                temp: String::new(),
+                fd_pct: String::new(),
             },
             selected_section: 0,
-            mem_used_pct: 0, mem_bar: String::new(),
-            mem_used_bytes: 0, mem_total_bytes: 0,
-            swap_used_pct: 0, swap_bar: String::new(),
-            swap_used_bytes: 0, swap_total_bytes: 0,
-            cached: String::new(), buffers: String::new(),
-            cpu_used_pct: 0, cpu_bar: String::new(),
-            cpu_user_pct: 0, cpu_sys_pct: 0, cpu_io_pct: 0,
-            ctx_switches: String::new(), procs_running: String::new(),
-            load_history: vec![], mem_history: vec![],
-            diag_count: 0, diag_severity: None,
+            mem_used_pct: 0,
+            mem_bar: String::new(),
+            mem_used_bytes: 0,
+            mem_total_bytes: 0,
+            swap_used_pct: 0,
+            swap_bar: String::new(),
+            swap_used_bytes: 0,
+            swap_total_bytes: 0,
+            cached: String::new(),
+            buffers: String::new(),
+            cpu_used_pct: 0,
+            cpu_bar: String::new(),
+            cpu_user_pct: 0,
+            cpu_sys_pct: 0,
+            cpu_io_pct: 0,
+            ctx_switches: String::new(),
+            procs_running: String::new(),
+            load_history: vec![],
+            mem_history: vec![],
+            diag_count: 0,
+            diag_severity: None,
         };
         assert_eq!(data.diag_count, 0);
         assert!(data.diag_severity.is_none());
@@ -1439,7 +1454,11 @@ mod view_data_tests {
     fn welcome_basic_keybindings_count() {
         let app = App::new().unwrap();
         let data = app.test_build_welcome_data();
-        assert_eq!(data.keybindings.len(), 6, "basic keybindings should have 6 entries");
+        assert_eq!(
+            data.keybindings.len(),
+            6,
+            "basic keybindings should have 6 entries"
+        );
     }
 
     // P-A2: advanced keybindings are non-empty
@@ -1448,7 +1467,10 @@ mod view_data_tests {
     fn welcome_advanced_keybindings_present() {
         let app = App::new().unwrap();
         let data = app.test_build_welcome_data();
-        assert!(!data.advanced_keybindings.is_empty(), "advanced keybindings should be non-empty");
+        assert!(
+            !data.advanced_keybindings.is_empty(),
+            "advanced keybindings should be non-empty"
+        );
     }
 
     // P-A2: help_level Off → only basic keybindings should be shown

@@ -17,15 +17,15 @@ use crate::i18n::{self, Locale};
 use crate::proc::{FieldValue, Snapshot};
 
 #[cfg(feature = "otel")]
-use opentelemetry::metrics::MeterProvider;
-#[cfg(feature = "otel")]
 use opentelemetry::KeyValue;
+#[cfg(feature = "otel")]
+use opentelemetry::metrics::MeterProvider;
 #[cfg(feature = "otel")]
 use opentelemetry_otlp::WithExportConfig;
 #[cfg(feature = "otel")]
-use opentelemetry_sdk::metrics::SdkMeterProvider;
-#[cfg(feature = "otel")]
 use opentelemetry_sdk::Resource;
+#[cfg(feature = "otel")]
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 #[cfg(feature = "otel")]
 use std::time::Duration;
 
@@ -50,8 +50,8 @@ impl OtelLevel {
 /// The core sources exported when `--otel-level core` is set.
 #[cfg(feature = "otel")]
 const CORE_SOURCES: &[&str] = &[
-    "meminfo", "loadavg", "stat", "net/dev", "uptime", "df",
-    "vmstat", "pressure", "file-nr", "version",
+    "meminfo", "loadavg", "stat", "net/dev", "uptime", "df", "vmstat", "pressure", "file-nr",
+    "version",
 ];
 
 /// Field name patterns that represent monotonically increasing counters.
@@ -184,7 +184,11 @@ pub fn run_otel_export_with_level(
 
         let meter = provider.meter("syslenz");
 
-        let level_label = if level == OtelLevel::Core { "core" } else { "full" };
+        let level_label = if level == OtelLevel::Core {
+            "core"
+        } else {
+            "full"
+        };
         let locale_label = locale.name();
         eprintln!(
             "syslenz: OTEL export to {} (interval: {}s, level: {}, locale: {})",
@@ -226,11 +230,7 @@ fn export_snapshot_metrics(
         }
 
         for field in &entry.fields {
-            let metric_name = format!(
-                "syslenz.{}.{}",
-                source_key.replace('/', "."),
-                field.name
-            );
+            let metric_name = format!("syslenz.{}.{}", source_key.replace('/', "."), field.name);
 
             let value = match &field.value {
                 FieldValue::Bytes(v) => Some(*v as f64),
@@ -241,17 +241,11 @@ fn export_snapshot_metrics(
             };
 
             if let Some(v) = value {
-                let description = metric_description(
-                    locale,
-                    source_key,
-                    &field.name,
-                    &field.description,
-                );
+                let description =
+                    metric_description(locale, source_key, &field.name, &field.description);
 
                 // Build gauge with description and optional unit
-                let mut builder = meter
-                    .f64_gauge(metric_name)
-                    .with_description(description);
+                let mut builder = meter.f64_gauge(metric_name).with_description(description);
 
                 if let Some(ref unit) = field.unit {
                     builder = builder.with_unit(unit.clone());

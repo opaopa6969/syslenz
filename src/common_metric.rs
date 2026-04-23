@@ -38,13 +38,21 @@ impl Platform {
     /// Detect the current compilation target platform.
     pub fn current() -> Self {
         #[cfg(target_os = "linux")]
-        { Platform::Linux }
+        {
+            Platform::Linux
+        }
         #[cfg(target_os = "macos")]
-        { Platform::MacOS }
+        {
+            Platform::MacOS
+        }
         #[cfg(target_os = "windows")]
-        { Platform::Windows }
+        {
+            Platform::Windows
+        }
         #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-        { Platform::Linux } // fallback
+        {
+            Platform::Linux
+        } // fallback
     }
 }
 
@@ -137,8 +145,7 @@ impl CommonMetric {
             CommonMetric::DiskUsePct => MetricKind::Storage,
             CommonMetric::TcpConnections => MetricKind::Network,
 
-            CommonMetric::ProcessCount
-            | CommonMetric::FdUsage => MetricKind::Process,
+            CommonMetric::ProcessCount | CommonMetric::FdUsage => MetricKind::Process,
 
             CommonMetric::Uptime => MetricKind::System,
             CommonMetric::Battery => MetricKind::Power,
@@ -158,14 +165,11 @@ impl CommonMetric {
             | CommonMetric::FdUsage
             | CommonMetric::Battery => MetricUnit::Percent,
 
-            CommonMetric::Load1
-            | CommonMetric::Load5
-            | CommonMetric::Load15 => MetricUnit::None, // dimensionless
+            CommonMetric::Load1 | CommonMetric::Load5 | CommonMetric::Load15 => MetricUnit::None, // dimensionless
 
             CommonMetric::Temperature => MetricUnit::Celsius,
 
-            CommonMetric::TcpConnections
-            | CommonMetric::ProcessCount => MetricUnit::Count,
+            CommonMetric::TcpConnections | CommonMetric::ProcessCount => MetricUnit::Count,
 
             CommonMetric::Uptime => MetricUnit::Seconds,
         }
@@ -187,9 +191,9 @@ impl CommonMetric {
             | CommonMetric::TcpConnections
             | CommonMetric::Battery => MappingConfidence::Comparable,
 
-            CommonMetric::MemAvailable
-            | CommonMetric::Temperature
-            | CommonMetric::FdUsage => MappingConfidence::Approximate,
+            CommonMetric::MemAvailable | CommonMetric::Temperature | CommonMetric::FdUsage => {
+                MappingConfidence::Approximate
+            }
         }
     }
 
@@ -213,20 +217,62 @@ impl CommonMetric {
 
     fn resolve_linux(&self) -> Option<ResolvedMetric> {
         let r = match self {
-            CommonMetric::MemTotal => ResolvedMetric { source: "meminfo", field: "MemTotal" },
-            CommonMetric::MemAvailable => ResolvedMetric { source: "meminfo", field: "MemAvailable" },
-            CommonMetric::MemUsed => ResolvedMetric { source: "meminfo", field: "MemUsed" },
-            CommonMetric::SwapUsed => ResolvedMetric { source: "meminfo", field: "SwapUsed" },
-            CommonMetric::CpuUsage => ResolvedMetric { source: "stat", field: "cpu_usage_pct" },
-            CommonMetric::Load1 => ResolvedMetric { source: "loadavg", field: "load_1min" },
-            CommonMetric::Load5 => ResolvedMetric { source: "loadavg", field: "load_5min" },
-            CommonMetric::Load15 => ResolvedMetric { source: "loadavg", field: "load_15min" },
-            CommonMetric::DiskUsePct => ResolvedMetric { source: "df", field: "root_use_pct" },
-            CommonMetric::Temperature => ResolvedMetric { source: "thermal", field: "max_temp" },
-            CommonMetric::TcpConnections => ResolvedMetric { source: "net/tcp", field: "connection_count" },
-            CommonMetric::ProcessCount => ResolvedMetric { source: "processes", field: "process_count" },
-            CommonMetric::FdUsage => ResolvedMetric { source: "file-nr", field: "fd_usage_pct" },
-            CommonMetric::Uptime => ResolvedMetric { source: "uptime", field: "uptime" },
+            CommonMetric::MemTotal => ResolvedMetric {
+                source: "meminfo",
+                field: "MemTotal",
+            },
+            CommonMetric::MemAvailable => ResolvedMetric {
+                source: "meminfo",
+                field: "MemAvailable",
+            },
+            CommonMetric::MemUsed => ResolvedMetric {
+                source: "meminfo",
+                field: "MemUsed",
+            },
+            CommonMetric::SwapUsed => ResolvedMetric {
+                source: "meminfo",
+                field: "SwapUsed",
+            },
+            CommonMetric::CpuUsage => ResolvedMetric {
+                source: "stat",
+                field: "cpu_usage_pct",
+            },
+            CommonMetric::Load1 => ResolvedMetric {
+                source: "loadavg",
+                field: "load_1min",
+            },
+            CommonMetric::Load5 => ResolvedMetric {
+                source: "loadavg",
+                field: "load_5min",
+            },
+            CommonMetric::Load15 => ResolvedMetric {
+                source: "loadavg",
+                field: "load_15min",
+            },
+            CommonMetric::DiskUsePct => ResolvedMetric {
+                source: "df",
+                field: "root_use_pct",
+            },
+            CommonMetric::Temperature => ResolvedMetric {
+                source: "thermal",
+                field: "max_temp",
+            },
+            CommonMetric::TcpConnections => ResolvedMetric {
+                source: "net/tcp",
+                field: "connection_count",
+            },
+            CommonMetric::ProcessCount => ResolvedMetric {
+                source: "processes",
+                field: "process_count",
+            },
+            CommonMetric::FdUsage => ResolvedMetric {
+                source: "file-nr",
+                field: "fd_usage_pct",
+            },
+            CommonMetric::Uptime => ResolvedMetric {
+                source: "uptime",
+                field: "uptime",
+            },
             CommonMetric::Battery => return None, // Linux laptop support planned
         };
         Some(r)
@@ -234,42 +280,123 @@ impl CommonMetric {
 
     fn resolve_macos(&self) -> Option<ResolvedMetric> {
         let r = match self {
-            CommonMetric::MemTotal => ResolvedMetric { source: "meminfo", field: "MemTotal" },
-            CommonMetric::MemAvailable => ResolvedMetric { source: "meminfo", field: "MemAvailable" },
-            CommonMetric::MemUsed => ResolvedMetric { source: "meminfo", field: "MemUsed" },
-            CommonMetric::SwapUsed => ResolvedMetric { source: "meminfo", field: "SwapUsed" },
-            CommonMetric::CpuUsage => ResolvedMetric { source: "top_summary", field: "cpu_usage_pct" },
-            CommonMetric::Load1 => ResolvedMetric { source: "loadavg", field: "load_1min" },
-            CommonMetric::Load5 => ResolvedMetric { source: "loadavg", field: "load_5min" },
-            CommonMetric::Load15 => ResolvedMetric { source: "loadavg", field: "load_15min" },
-            CommonMetric::DiskUsePct => ResolvedMetric { source: "df", field: "root_use_pct" },
-            CommonMetric::Temperature => ResolvedMetric { source: "thermal", field: "cpu_temp" },
-            CommonMetric::TcpConnections => ResolvedMetric { source: "net/connections", field: "tcp_count" },
-            CommonMetric::ProcessCount => ResolvedMetric { source: "processes", field: "process_count" },
-            CommonMetric::FdUsage => ResolvedMetric { source: "file-nr", field: "fd_usage_pct" },
-            CommonMetric::Uptime => ResolvedMetric { source: "uptime", field: "uptime" },
-            CommonMetric::Battery => ResolvedMetric { source: "battery", field: "battery_percent" },
+            CommonMetric::MemTotal => ResolvedMetric {
+                source: "meminfo",
+                field: "MemTotal",
+            },
+            CommonMetric::MemAvailable => ResolvedMetric {
+                source: "meminfo",
+                field: "MemAvailable",
+            },
+            CommonMetric::MemUsed => ResolvedMetric {
+                source: "meminfo",
+                field: "MemUsed",
+            },
+            CommonMetric::SwapUsed => ResolvedMetric {
+                source: "meminfo",
+                field: "SwapUsed",
+            },
+            CommonMetric::CpuUsage => ResolvedMetric {
+                source: "top_summary",
+                field: "cpu_usage_pct",
+            },
+            CommonMetric::Load1 => ResolvedMetric {
+                source: "loadavg",
+                field: "load_1min",
+            },
+            CommonMetric::Load5 => ResolvedMetric {
+                source: "loadavg",
+                field: "load_5min",
+            },
+            CommonMetric::Load15 => ResolvedMetric {
+                source: "loadavg",
+                field: "load_15min",
+            },
+            CommonMetric::DiskUsePct => ResolvedMetric {
+                source: "df",
+                field: "root_use_pct",
+            },
+            CommonMetric::Temperature => ResolvedMetric {
+                source: "thermal",
+                field: "cpu_temp",
+            },
+            CommonMetric::TcpConnections => ResolvedMetric {
+                source: "net/connections",
+                field: "tcp_count",
+            },
+            CommonMetric::ProcessCount => ResolvedMetric {
+                source: "processes",
+                field: "process_count",
+            },
+            CommonMetric::FdUsage => ResolvedMetric {
+                source: "file-nr",
+                field: "fd_usage_pct",
+            },
+            CommonMetric::Uptime => ResolvedMetric {
+                source: "uptime",
+                field: "uptime",
+            },
+            CommonMetric::Battery => ResolvedMetric {
+                source: "battery",
+                field: "battery_percent",
+            },
         };
         Some(r)
     }
 
     fn resolve_windows(&self) -> Option<ResolvedMetric> {
         let r = match self {
-            CommonMetric::MemTotal => ResolvedMetric { source: "meminfo", field: "MemTotal" },
-            CommonMetric::MemAvailable => ResolvedMetric { source: "meminfo", field: "MemFree" },
-            CommonMetric::MemUsed => ResolvedMetric { source: "meminfo", field: "MemUsed" },
-            CommonMetric::SwapUsed => ResolvedMetric { source: "meminfo", field: "SwapUsed" },
-            CommonMetric::CpuUsage => ResolvedMetric { source: "perf_cpu", field: "ProcessorTimePct" },
+            CommonMetric::MemTotal => ResolvedMetric {
+                source: "meminfo",
+                field: "MemTotal",
+            },
+            CommonMetric::MemAvailable => ResolvedMetric {
+                source: "meminfo",
+                field: "MemFree",
+            },
+            CommonMetric::MemUsed => ResolvedMetric {
+                source: "meminfo",
+                field: "MemUsed",
+            },
+            CommonMetric::SwapUsed => ResolvedMetric {
+                source: "meminfo",
+                field: "SwapUsed",
+            },
+            CommonMetric::CpuUsage => ResolvedMetric {
+                source: "perf_cpu",
+                field: "ProcessorTimePct",
+            },
             CommonMetric::Load1 => return None, // No true load average on Windows
             CommonMetric::Load5 => return None,
             CommonMetric::Load15 => return None,
-            CommonMetric::DiskUsePct => ResolvedMetric { source: "df", field: "root_use_pct" },
-            CommonMetric::Temperature => ResolvedMetric { source: "thermal", field: "temperature" },
-            CommonMetric::TcpConnections => ResolvedMetric { source: "tcp_connections", field: "tcp_count" },
-            CommonMetric::ProcessCount => ResolvedMetric { source: "processes", field: "process_count" },
-            CommonMetric::FdUsage => ResolvedMetric { source: "handles", field: "handle_count" },
-            CommonMetric::Uptime => ResolvedMetric { source: "uptime", field: "uptime" },
-            CommonMetric::Battery => ResolvedMetric { source: "battery", field: "battery_percent" },
+            CommonMetric::DiskUsePct => ResolvedMetric {
+                source: "df",
+                field: "root_use_pct",
+            },
+            CommonMetric::Temperature => ResolvedMetric {
+                source: "thermal",
+                field: "temperature",
+            },
+            CommonMetric::TcpConnections => ResolvedMetric {
+                source: "tcp_connections",
+                field: "tcp_count",
+            },
+            CommonMetric::ProcessCount => ResolvedMetric {
+                source: "processes",
+                field: "process_count",
+            },
+            CommonMetric::FdUsage => ResolvedMetric {
+                source: "handles",
+                field: "handle_count",
+            },
+            CommonMetric::Uptime => ResolvedMetric {
+                source: "uptime",
+                field: "uptime",
+            },
+            CommonMetric::Battery => ResolvedMetric {
+                source: "battery",
+                field: "battery_percent",
+            },
         };
         Some(r)
     }
@@ -350,8 +477,16 @@ mod tests {
     #[test]
     fn every_variant_has_descriptions() {
         for m in CommonMetric::all() {
-            assert!(!m.description(Locale::En).is_empty(), "{:?} missing EN desc", m);
-            assert!(!m.description(Locale::Ja).is_empty(), "{:?} missing JA desc", m);
+            assert!(
+                !m.description(Locale::En).is_empty(),
+                "{:?} missing EN desc",
+                m
+            );
+            assert!(
+                !m.description(Locale::Ja).is_empty(),
+                "{:?} missing JA desc",
+                m
+            );
         }
     }
 
@@ -402,19 +537,31 @@ mod tests {
 
     #[test]
     fn from_name_case_insensitive() {
-        assert_eq!(CommonMetric::from_name("memtotal"), Some(CommonMetric::MemTotal));
-        assert_eq!(CommonMetric::from_name("UPTIME"), Some(CommonMetric::Uptime));
+        assert_eq!(
+            CommonMetric::from_name("memtotal"),
+            Some(CommonMetric::MemTotal)
+        );
+        assert_eq!(
+            CommonMetric::from_name("UPTIME"),
+            Some(CommonMetric::Uptime)
+        );
         assert_eq!(CommonMetric::from_name("nonexistent"), None);
     }
 
     #[test]
     fn confidence_exact_for_uptime_and_process_count() {
         assert_eq!(CommonMetric::Uptime.confidence(), MappingConfidence::Exact);
-        assert_eq!(CommonMetric::ProcessCount.confidence(), MappingConfidence::Exact);
+        assert_eq!(
+            CommonMetric::ProcessCount.confidence(),
+            MappingConfidence::Exact
+        );
     }
 
     #[test]
     fn confidence_approximate_for_mem_available() {
-        assert_eq!(CommonMetric::MemAvailable.confidence(), MappingConfidence::Approximate);
+        assert_eq!(
+            CommonMetric::MemAvailable.confidence(),
+            MappingConfidence::Approximate
+        );
     }
 }

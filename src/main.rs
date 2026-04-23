@@ -9,10 +9,10 @@ mod common_metric;
 mod config;
 mod diagnostics;
 mod education;
-mod history;
-mod metric_kind;
 mod export;
+mod history;
 mod i18n;
+mod metric_kind;
 mod net;
 mod otel;
 mod plugin;
@@ -137,7 +137,8 @@ fn main() -> Result<()> {
 
     // --query [source[.field]] [--json] — CLI query mode (no TUI)
     if let Some(pos) = args.iter().position(|a| a == "--query") {
-        let query = args.get(pos + 1)
+        let query = args
+            .get(pos + 1)
             .filter(|s| !s.starts_with("--"))
             .map(|s| s.as_str());
         let json_mode = args.iter().any(|a| a == "--json");
@@ -201,7 +202,9 @@ fn main() -> Result<()> {
             .and_then(|pos| args.get(pos + 1))
             .map(|s| otel::OtelLevel::from_str(s))
             .unwrap_or(otel::OtelLevel::Full);
-        let locale = args.iter().position(|a| a == "--lang")
+        let locale = args
+            .iter()
+            .position(|a| a == "--lang")
             .and_then(|pos| args.get(pos + 1))
             .map(|s| i18n::Locale::from_str(s))
             .unwrap_or(i18n::Locale::En);
@@ -318,7 +321,9 @@ fn main() -> Result<()> {
     let no_web = args.iter().any(|a| a == "--no-web");
 
     // --web-port <PORT> (default 8080)
-    let web_port: u16 = args.iter().position(|a| a == "--web-port")
+    let web_port: u16 = args
+        .iter()
+        .position(|a| a == "--web-port")
         .and_then(|pos| args.get(pos + 1))
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(8080);
@@ -645,7 +650,9 @@ fn run(
                     KeyCode::Char('R') => {
                         if matches!(app.view, ui::app::View::Diagnostics) {
                             let findings = crate::diagnostics::analyze(
-                                &app.current, app.locale, &app.diagnostic_runbooks,
+                                &app.current,
+                                app.locale,
+                                &app.diagnostic_runbooks,
                             );
                             if let Some(finding) = findings.get(app.selected_diagnostic) {
                                 if let Some(ref url) = finding.runbook_url {
@@ -662,13 +669,11 @@ fn run(
                                                 .stderr(std::process::Stdio::null())
                                                 .spawn()
                                         });
-                                    app.status_message = Some(
-                                        if app.locale == i18n::Locale::Ja {
-                                            format!("Runbook: {}", url)
-                                        } else {
-                                            format!("Runbook: {}", url)
-                                        }
-                                    );
+                                    app.status_message = Some(if app.locale == i18n::Locale::Ja {
+                                        format!("Runbook: {}", url)
+                                    } else {
+                                        format!("Runbook: {}", url)
+                                    });
                                 }
                             }
                         }
@@ -729,7 +734,8 @@ const SERVICE_NAME: &str = "syslenz";
 const SERVICE_PATH: &str = "/etc/systemd/system/syslenz.service";
 
 fn detect_locale_from_args(args: &[String]) -> i18n::Locale {
-    args.iter().position(|a| a == "--lang")
+    args.iter()
+        .position(|a| a == "--lang")
         .and_then(|pos| args.get(pos + 1))
         .map(|s| i18n::Locale::from_str(s))
         .unwrap_or(i18n::Locale::En)
@@ -743,30 +749,46 @@ fn service_msg(locale: i18n::Locale, key: &str) -> &'static str {
             "install_enabled" => "Service enabled and started.",
             "install_status" => "Check status with: systemctl status syslenz",
             "install_not_root" => "Not running as root. Printing service file to stdout.",
-            "install_hint" => "To install manually, save the above to /etc/systemd/system/syslenz.service and run:",
-            "install_hint_cmds" => "  sudo systemctl daemon-reload\n  sudo systemctl enable --now syslenz",
+            "install_hint" => {
+                "To install manually, save the above to /etc/systemd/system/syslenz.service and run:"
+            }
+            "install_hint_cmds" => {
+                "  sudo systemctl daemon-reload\n  sudo systemctl enable --now syslenz"
+            }
             "uninstall_root" => "Removing systemd service...",
             "uninstall_stopped" => "Service stopped and disabled.",
             "uninstall_removed" => "Service file removed.",
             "uninstall_not_found" => "Service file not found. Nothing to remove.",
             "uninstall_not_root" => "Not running as root. To uninstall manually, run:",
-            "uninstall_hint_cmds" => "  sudo systemctl stop syslenz\n  sudo systemctl disable syslenz\n  sudo rm /etc/systemd/system/syslenz.service\n  sudo systemctl daemon-reload",
+            "uninstall_hint_cmds" => {
+                "  sudo systemctl stop syslenz\n  sudo systemctl disable syslenz\n  sudo rm /etc/systemd/system/syslenz.service\n  sudo systemctl daemon-reload"
+            }
             _ => "?",
         },
         i18n::Locale::Ja => match key {
             "install_root" => "systemd サービスをインストール中...",
-            "install_written" => "サービスファイルを /etc/systemd/system/syslenz.service に書き込みました",
+            "install_written" => {
+                "サービスファイルを /etc/systemd/system/syslenz.service に書き込みました"
+            }
             "install_enabled" => "サービスを有効化し、起動しました。",
             "install_status" => "状態確認: systemctl status syslenz",
             "install_not_root" => "root 権限がありません。サービスファイルを標準出力に表示します。",
-            "install_hint" => "手動でインストールするには、上記を /etc/systemd/system/syslenz.service に保存し、以下を実行してください:",
-            "install_hint_cmds" => "  sudo systemctl daemon-reload\n  sudo systemctl enable --now syslenz",
+            "install_hint" => {
+                "手動でインストールするには、上記を /etc/systemd/system/syslenz.service に保存し、以下を実行してください:"
+            }
+            "install_hint_cmds" => {
+                "  sudo systemctl daemon-reload\n  sudo systemctl enable --now syslenz"
+            }
             "uninstall_root" => "systemd サービスを削除中...",
             "uninstall_stopped" => "サービスを停止し、無効化しました。",
             "uninstall_removed" => "サービスファイルを削除しました。",
             "uninstall_not_found" => "サービスファイルが見つかりません。削除するものはありません。",
-            "uninstall_not_root" => "root 権限がありません。手動でアンインストールするには、以下を実行してください:",
-            "uninstall_hint_cmds" => "  sudo systemctl stop syslenz\n  sudo systemctl disable syslenz\n  sudo rm /etc/systemd/system/syslenz.service\n  sudo systemctl daemon-reload",
+            "uninstall_not_root" => {
+                "root 権限がありません。手動でアンインストールするには、以下を実行してください:"
+            }
+            "uninstall_hint_cmds" => {
+                "  sudo systemctl stop syslenz\n  sudo systemctl disable syslenz\n  sudo rm /etc/systemd/system/syslenz.service\n  sudo systemctl daemon-reload"
+            }
             _ => "?",
         },
     }

@@ -262,7 +262,12 @@ fn send_notification(endpoint: &str, event: &AlertEvent, host: &str) {
 
 /// G20-8: Send notifications for newly-firing alerts (fire-and-forget via spawned threads).
 /// Only notifies on state transition (not previously firing).
-pub fn send_notifications(rules: &[AlertRule], events: &[AlertEvent], prev_firing: &[usize], host: &str) {
+pub fn send_notifications(
+    rules: &[AlertRule],
+    events: &[AlertEvent],
+    prev_firing: &[usize],
+    host: &str,
+) {
     for event in events {
         if !event.firing {
             continue;
@@ -529,6 +534,9 @@ mod tests {
 
         let alert_file = tmp.path().join("alerts.jsonl");
         // File should not exist (no events written)
-        assert!(!alert_file.exists(), "No file should be created for non-transition events");
+        assert!(
+            !alert_file.exists(),
+            "No file should be created for non-transition events"
+        );
     }
 }

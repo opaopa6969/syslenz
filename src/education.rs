@@ -1262,7 +1262,11 @@ IPMI/BMC のファン速度センサーが早期警告を提供。\n\
 /// Returns a list of (source, field, reason) tuples ordered by learning progression.
 /// Only defined for key fields (SEE ALSO 31 fields base).
 /// Shown only at EXTRA help level.
-pub fn breadcrumbs(locale: Locale, source: &str, field: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+pub fn breadcrumbs(
+    locale: Locale,
+    source: &str,
+    field: &str,
+) -> Vec<(&'static str, &'static str, &'static str)> {
     match locale {
         Locale::En => breadcrumbs_en(source, field),
         Locale::Ja => breadcrumbs_ja(source, field),
@@ -1274,13 +1278,21 @@ fn breadcrumbs_en(source: &str, field: &str) -> Vec<(&'static str, &'static str,
         // Memory learning path: MemAvailable → MemFree → Cached → Slab → vmstat dirty pages
         ("meminfo", "MemAvailable") => vec![
             ("meminfo", "MemFree", "Learn why MemAvailable != MemFree"),
-            ("meminfo", "SReclaimable", "Understand reclaimable kernel cache"),
+            (
+                "meminfo",
+                "SReclaimable",
+                "Understand reclaimable kernel cache",
+            ),
             ("vmstat", "nr_dirty", "Explore dirty page write pressure"),
         ],
         ("meminfo", "MemFree") => vec![
             ("meminfo", "Cached", "See what makes MemAvailable > MemFree"),
             ("meminfo", "Buffers", "Buffer cache vs page cache"),
-            ("meminfo", "SReclaimable", "Kernel slab memory that can be freed"),
+            (
+                "meminfo",
+                "SReclaimable",
+                "Kernel slab memory that can be freed",
+            ),
         ],
         ("meminfo", "Cached") => vec![
             ("meminfo", "SReclaimable", "Kernel cache vs page cache"),
@@ -1288,68 +1300,152 @@ fn breadcrumbs_en(source: &str, field: &str) -> Vec<(&'static str, &'static str,
             ("meminfo", "Dirty", "Cached pages waiting to be written"),
         ],
         ("meminfo", "SwapFree") => vec![
-            ("vmstat", "pswpin", "Swap-in rate shows active swap pressure"),
+            (
+                "vmstat",
+                "pswpin",
+                "Swap-in rate shows active swap pressure",
+            ),
             ("vmstat", "pswpout", "Swap-out rate shows memory exhaustion"),
-            ("pressure", "memory_some_avg10", "PSI: are tasks stalled on memory?"),
+            (
+                "pressure",
+                "memory_some_avg10",
+                "PSI: are tasks stalled on memory?",
+            ),
         ],
         ("meminfo", "Dirty") => vec![
             ("vmstat", "nr_dirty", "Kernel-level dirty page tracking"),
-            ("vmstat", "nr_writeback", "Pages being written to disk right now"),
-            ("diskstats", "write_ios_total", "Resulting disk write operations"),
+            (
+                "vmstat",
+                "nr_writeback",
+                "Pages being written to disk right now",
+            ),
+            (
+                "diskstats",
+                "write_ios_total",
+                "Resulting disk write operations",
+            ),
         ],
         // CPU learning path: load → stat → pressure → scheduling
         ("loadavg", "load_1min") => vec![
-            ("stat", "procs_running", "Actual runnable processes right now"),
+            (
+                "stat",
+                "procs_running",
+                "Actual runnable processes right now",
+            ),
             ("cpuinfo", "cpu_count", "Compare load to core count"),
-            ("pressure", "cpu_some_avg10", "PSI: are tasks stalled on CPU?"),
+            (
+                "pressure",
+                "cpu_some_avg10",
+                "PSI: are tasks stalled on CPU?",
+            ),
         ],
         ("stat", "procs_running") => vec![
             ("loadavg", "load_1min", "Smoothed average over 1 minute"),
             ("stat", "procs_blocked", "Processes blocked on I/O"),
-            ("schedstat", "total_run_time", "Scheduler-level run time stats"),
+            (
+                "schedstat",
+                "total_run_time",
+                "Scheduler-level run time stats",
+            ),
         ],
         ("stat", "procs_blocked") => vec![
-            ("pressure", "io_some_avg10", "PSI: are tasks stalled on I/O?"),
+            (
+                "pressure",
+                "io_some_avg10",
+                "PSI: are tasks stalled on I/O?",
+            ),
             ("diskstats", "io_in_progress", "Pending disk I/O operations"),
             ("stat", "procs_running", "Compare blocked vs running ratio"),
         ],
         // Network learning path: bytes → errors → connections
         ("net_dev", "rx_bytes") => vec![
-            ("net_dev", "rx_packets", "Packet count gives you packet size"),
-            ("net_dev", "rx_errors", "Errors indicate hardware/driver issues"),
-            ("net_snmp", "InSegs", "TCP segment count for protocol-level view"),
+            (
+                "net_dev",
+                "rx_packets",
+                "Packet count gives you packet size",
+            ),
+            (
+                "net_dev",
+                "rx_errors",
+                "Errors indicate hardware/driver issues",
+            ),
+            (
+                "net_snmp",
+                "InSegs",
+                "TCP segment count for protocol-level view",
+            ),
         ],
         ("net_dev", "tx_bytes") => vec![
-            ("net_dev", "tx_packets", "Packet count for average packet size"),
+            (
+                "net_dev",
+                "tx_packets",
+                "Packet count for average packet size",
+            ),
             ("net_dev", "tx_errors", "Transmission errors"),
-            ("net_tcp", "established", "Active TCP connections generating traffic"),
+            (
+                "net_tcp",
+                "established",
+                "Active TCP connections generating traffic",
+            ),
         ],
         ("net_tcp", "established") => vec![
-            ("net_tcp", "time_wait", "Connections closing: high count = short-lived conns"),
-            ("net_tcp", "listen", "Listening ports: your exposed services"),
+            (
+                "net_tcp",
+                "time_wait",
+                "Connections closing: high count = short-lived conns",
+            ),
+            (
+                "net_tcp",
+                "listen",
+                "Listening ports: your exposed services",
+            ),
             ("net_sockstat", "TCP_inuse", "Total TCP socket usage"),
         ],
         // Storage learning path: diskstats → pressure → cache
         ("diskstats", "read_ios_total") => vec![
-            ("diskstats", "read_time_ms", "Time spent reading: latency indicator"),
+            (
+                "diskstats",
+                "read_time_ms",
+                "Time spent reading: latency indicator",
+            ),
             ("meminfo", "Cached", "File cache reduces physical reads"),
             ("pressure", "io_some_avg10", "PSI: overall I/O pressure"),
         ],
         // Pressure learning path
         ("pressure", "memory_some_avg10") => vec![
-            ("meminfo", "MemAvailable", "Check actual memory availability"),
-            ("pressure", "memory_full_avg10", "Full stall: ALL tasks waiting"),
+            (
+                "meminfo",
+                "MemAvailable",
+                "Check actual memory availability",
+            ),
+            (
+                "pressure",
+                "memory_full_avg10",
+                "Full stall: ALL tasks waiting",
+            ),
             ("vmstat", "pgfault", "Page faults indicate cache misses"),
         ],
         ("pressure", "cpu_some_avg10") => vec![
             ("loadavg", "load_1min", "Load average for longer-term trend"),
             ("stat", "procs_running", "Actual runnable processes"),
-            ("pressure", "io_some_avg10", "I/O pressure often accompanies CPU"),
+            (
+                "pressure",
+                "io_some_avg10",
+                "I/O pressure often accompanies CPU",
+            ),
         ],
         ("pressure", "io_some_avg10") => vec![
-            ("stat", "procs_blocked", "Blocked processes confirm I/O stalls"),
+            (
+                "stat",
+                "procs_blocked",
+                "Blocked processes confirm I/O stalls",
+            ),
             ("diskstats", "io_in_progress", "Active disk I/O operations"),
-            ("pressure", "io_full_avg10", "Full stall: ALL tasks waiting on I/O"),
+            (
+                "pressure",
+                "io_full_avg10",
+                "Full stall: ALL tasks waiting on I/O",
+            ),
         ],
         _ => vec![],
     }
@@ -1358,29 +1454,69 @@ fn breadcrumbs_en(source: &str, field: &str) -> Vec<(&'static str, &'static str,
 fn breadcrumbs_ja(source: &str, field: &str) -> Vec<(&'static str, &'static str, &'static str)> {
     match (source, field) {
         ("meminfo", "MemAvailable") => vec![
-            ("meminfo", "MemFree", "MemAvailable と MemFree の違いを理解する"),
-            ("meminfo", "SReclaimable", "回収可能なカーネルキャッシュを学ぶ"),
-            ("vmstat", "nr_dirty", "dirty page による書き込み圧力を調べる"),
+            (
+                "meminfo",
+                "MemFree",
+                "MemAvailable と MemFree の違いを理解する",
+            ),
+            (
+                "meminfo",
+                "SReclaimable",
+                "回収可能なカーネルキャッシュを学ぶ",
+            ),
+            (
+                "vmstat",
+                "nr_dirty",
+                "dirty page による書き込み圧力を調べる",
+            ),
         ],
         ("meminfo", "MemFree") => vec![
-            ("meminfo", "Cached", "MemAvailable > MemFree になる理由を知る"),
-            ("meminfo", "Buffers", "バッファキャッシュとページキャッシュの違い"),
+            (
+                "meminfo",
+                "Cached",
+                "MemAvailable > MemFree になる理由を知る",
+            ),
+            (
+                "meminfo",
+                "Buffers",
+                "バッファキャッシュとページキャッシュの違い",
+            ),
             ("meminfo", "SReclaimable", "解放可能なカーネル slab メモリ"),
         ],
         ("meminfo", "Cached") => vec![
-            ("meminfo", "SReclaimable", "カーネルキャッシュとページキャッシュの関係"),
-            ("vmstat", "pgfault", "キャッシュミスがページフォルトを引き起こす仕組み"),
+            (
+                "meminfo",
+                "SReclaimable",
+                "カーネルキャッシュとページキャッシュの関係",
+            ),
+            (
+                "vmstat",
+                "pgfault",
+                "キャッシュミスがページフォルトを引き起こす仕組み",
+            ),
             ("meminfo", "Dirty", "書き込み待ちのキャッシュページ"),
         ],
         ("meminfo", "SwapFree") => vec![
             ("vmstat", "pswpin", "スワップイン率で実際の圧力を確認"),
             ("vmstat", "pswpout", "スワップアウト率はメモリ枯渇のサイン"),
-            ("pressure", "memory_some_avg10", "PSI: タスクがメモリ待ちか？"),
+            (
+                "pressure",
+                "memory_some_avg10",
+                "PSI: タスクがメモリ待ちか？",
+            ),
         ],
         ("meminfo", "Dirty") => vec![
             ("vmstat", "nr_dirty", "カーネルレベルの dirty ページ追跡"),
-            ("vmstat", "nr_writeback", "今まさにディスクに書き込み中のページ"),
-            ("diskstats", "write_ios_total", "結果としてのディスク書き込み操作"),
+            (
+                "vmstat",
+                "nr_writeback",
+                "今まさにディスクに書き込み中のページ",
+            ),
+            (
+                "diskstats",
+                "write_ios_total",
+                "結果としてのディスク書き込み操作",
+            ),
         ],
         ("loadavg", "load_1min") => vec![
             ("stat", "procs_running", "現在実行可能なプロセス数"),
@@ -1390,7 +1526,11 @@ fn breadcrumbs_ja(source: &str, field: &str) -> Vec<(&'static str, &'static str,
         ("stat", "procs_running") => vec![
             ("loadavg", "load_1min", "1分間の平滑化平均"),
             ("stat", "procs_blocked", "I/O 待ちでブロック中のプロセス"),
-            ("schedstat", "total_run_time", "スケジューラレベルの実行時間統計"),
+            (
+                "schedstat",
+                "total_run_time",
+                "スケジューラレベルの実行時間統計",
+            ),
         ],
         ("stat", "procs_blocked") => vec![
             ("pressure", "io_some_avg10", "PSI: タスクが I/O 待ちか？"),
@@ -1398,14 +1538,34 @@ fn breadcrumbs_ja(source: &str, field: &str) -> Vec<(&'static str, &'static str,
             ("stat", "procs_running", "ブロック vs 実行の比率を比較"),
         ],
         ("net_dev", "rx_bytes") => vec![
-            ("net_dev", "rx_packets", "パケット数からパケットサイズがわかる"),
-            ("net_dev", "rx_errors", "エラーはハードウェア/ドライバの問題を示す"),
-            ("net_snmp", "InSegs", "TCP セグメント数でプロトコルレベルの状況を見る"),
+            (
+                "net_dev",
+                "rx_packets",
+                "パケット数からパケットサイズがわかる",
+            ),
+            (
+                "net_dev",
+                "rx_errors",
+                "エラーはハードウェア/ドライバの問題を示す",
+            ),
+            (
+                "net_snmp",
+                "InSegs",
+                "TCP セグメント数でプロトコルレベルの状況を見る",
+            ),
         ],
         ("net_dev", "tx_bytes") => vec![
-            ("net_dev", "tx_packets", "パケット数から平均パケットサイズを算出"),
+            (
+                "net_dev",
+                "tx_packets",
+                "パケット数から平均パケットサイズを算出",
+            ),
             ("net_dev", "tx_errors", "送信エラー"),
-            ("net_tcp", "established", "トラフィックを生成しているTCP接続"),
+            (
+                "net_tcp",
+                "established",
+                "トラフィックを生成しているTCP接続",
+            ),
         ],
         ("net_tcp", "established") => vec![
             ("net_tcp", "time_wait", "クローズ中の接続: 多い=短命な接続"),
@@ -1414,21 +1574,37 @@ fn breadcrumbs_ja(source: &str, field: &str) -> Vec<(&'static str, &'static str,
         ],
         ("diskstats", "read_ios_total") => vec![
             ("diskstats", "read_time_ms", "読み取り時間: レイテンシ指標"),
-            ("meminfo", "Cached", "ファイルキャッシュが物理読み取りを削減"),
+            (
+                "meminfo",
+                "Cached",
+                "ファイルキャッシュが物理読み取りを削減",
+            ),
             ("pressure", "io_some_avg10", "PSI: 全体的な I/O 圧力"),
         ],
         ("pressure", "memory_some_avg10") => vec![
             ("meminfo", "MemAvailable", "実際のメモリ空き状況を確認"),
-            ("pressure", "memory_full_avg10", "完全停止: 全タスクがメモリ待ち"),
+            (
+                "pressure",
+                "memory_full_avg10",
+                "完全停止: 全タスクがメモリ待ち",
+            ),
             ("vmstat", "pgfault", "ページフォルトはキャッシュミスを示す"),
         ],
         ("pressure", "cpu_some_avg10") => vec![
             ("loadavg", "load_1min", "長期トレンドの load average"),
             ("stat", "procs_running", "実行可能プロセス数"),
-            ("pressure", "io_some_avg10", "CPU 圧力には I/O 圧力が伴うことが多い"),
+            (
+                "pressure",
+                "io_some_avg10",
+                "CPU 圧力には I/O 圧力が伴うことが多い",
+            ),
         ],
         ("pressure", "io_some_avg10") => vec![
-            ("stat", "procs_blocked", "ブロックされたプロセスが I/O 停止を確認"),
+            (
+                "stat",
+                "procs_blocked",
+                "ブロックされたプロセスが I/O 停止を確認",
+            ),
             ("diskstats", "io_in_progress", "進行中のディスク I/O 操作"),
             ("pressure", "io_full_avg10", "完全停止: 全タスクが I/O 待ち"),
         ],
@@ -1444,20 +1620,26 @@ pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String 
     // Helper to get a numeric field value from snapshot
     let get_val = |source: &str, field: &str| -> Option<f64> {
         snapshot.entries.get(source).and_then(|e| {
-            e.fields.iter().find(|f| f.name == field).and_then(|f| match &f.value {
-                FieldValue::Integer(n) => Some(*n as f64),
-                FieldValue::Float(n) => Some(*n),
-                _ => None,
-            })
+            e.fields
+                .iter()
+                .find(|f| f.name == field)
+                .and_then(|f| match &f.value {
+                    FieldValue::Integer(n) => Some(*n as f64),
+                    FieldValue::Float(n) => Some(*n),
+                    _ => None,
+                })
         })
     };
 
     let get_str = |source: &str, field: &str| -> Option<String> {
         snapshot.entries.get(source).and_then(|e| {
-            e.fields.iter().find(|f| f.name == field).and_then(|f| match &f.value {
-                FieldValue::Text(s) => Some(s.clone()),
-                _ => None,
-            })
+            e.fields
+                .iter()
+                .find(|f| f.name == field)
+                .and_then(|f| match &f.value {
+                    FieldValue::Text(s) => Some(s.clone()),
+                    _ => None,
+                })
         })
     };
 
@@ -1465,7 +1647,10 @@ pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String 
     let mut tips: Vec<String> = Vec::new();
 
     // Memory tips
-    if let (Some(total), Some(avail)) = (get_val("meminfo", "MemTotal"), get_val("meminfo", "MemAvailable")) {
+    if let (Some(total), Some(avail)) = (
+        get_val("meminfo", "MemTotal"),
+        get_val("meminfo", "MemAvailable"),
+    ) {
         let pct = (avail / total * 100.0) as u64;
         let total_gb = total / 1024.0 / 1024.0;
         if locale == Locale::Ja {
@@ -1483,7 +1668,8 @@ pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String 
             tips.push(format!(
                 "MemAvailable ({:.1}GB, {}%) is the actual usable free memory. Unlike MemFree, \
                 it includes reclaimable kernel caches. Below 20% may impact performance.",
-                avail / 1024.0 / 1024.0, pct
+                avail / 1024.0 / 1024.0,
+                pct
             ));
             tips.push(format!(
                 "This machine has {:.1}GB total memory. MemTotal is slightly less than physical RAM \
@@ -1493,7 +1679,10 @@ pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String 
         }
     }
 
-    if let (Some(swap_total), Some(swap_free)) = (get_val("meminfo", "SwapTotal"), get_val("meminfo", "SwapFree")) {
+    if let (Some(swap_total), Some(swap_free)) = (
+        get_val("meminfo", "SwapTotal"),
+        get_val("meminfo", "SwapFree"),
+    ) {
         if swap_total > 0.0 {
             let swap_used_pct = ((swap_total - swap_free) / swap_total * 100.0) as u64;
             if locale == Locale::Ja {
@@ -1513,13 +1702,18 @@ pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String 
     }
 
     // CPU / Load tips
-    if let (Some(load1), Some(num_cpus)) = (get_val("loadavg", "load_1min"), get_val("cpuinfo", "cpu_count")) {
+    if let (Some(load1), Some(num_cpus)) = (
+        get_val("loadavg", "load_1min"),
+        get_val("cpuinfo", "cpu_count"),
+    ) {
         let threshold = num_cpus;
         if locale == Locale::Ja {
             tips.push(format!(
                 "load average ({:.2}) が CPU コア数 ({}) を超えると、プロセスが CPU 待ちに\
                 なっていることを意味します。現在の比率: {:.0}%。",
-                load1, num_cpus as u64, load1 / threshold * 100.0
+                load1,
+                num_cpus as u64,
+                load1 / threshold * 100.0
             ));
         } else {
             tips.push(format!(
@@ -1644,36 +1838,68 @@ pub fn generate_tip(snapshot: &crate::proc::Snapshot, locale: Locale) -> String 
             tips.push(format!(
                 "カーネル: {}。カーネルバージョンによって利用可能なメトリクスが\
                 変わります。例えば PSI (Pressure Stall Information) は Linux 4.20+ で導入。",
-                version.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
+                version
+                    .split_whitespace()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ));
         } else {
             tips.push(format!(
                 "Kernel: {}. Available metrics depend on kernel version. For example, \
                 PSI (Pressure Stall Information) was introduced in Linux 4.20+.",
-                version.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
+                version
+                    .split_whitespace()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ));
         }
     }
 
     // General syslenz tips (static but useful)
     if locale == Locale::Ja {
-        tips.push("? キーでヘルプレベルを切り替え: OFF → NORMAL → DETAILED → EXTRA。\
-            EXTRA では SEE ALSO リンクやコンテキストヒントが表示されます。".into());
-        tips.push("d キーで差分ビューに切り替え。カウンタ値の1秒あたりの変化量が\
-            一目でわかります。ネットワーク速度やディスク I/O の確認に便利。".into());
-        tips.push("X キーで診断ビュー。システムの問題を自動検出して対処法を提案します。\
-            Enter キーで関連メトリクスに直接ジャンプ可能。".into());
-        tips.push("C キーでカテゴリガイド。メモリ、CPU、ネットワーク等のカテゴリ別に\
-            関連ソースと学習コンテンツをまとめて表示します。".into());
+        tips.push(
+            "? キーでヘルプレベルを切り替え: OFF → NORMAL → DETAILED → EXTRA。\
+            EXTRA では SEE ALSO リンクやコンテキストヒントが表示されます。"
+                .into(),
+        );
+        tips.push(
+            "d キーで差分ビューに切り替え。カウンタ値の1秒あたりの変化量が\
+            一目でわかります。ネットワーク速度やディスク I/O の確認に便利。"
+                .into(),
+        );
+        tips.push(
+            "X キーで診断ビュー。システムの問題を自動検出して対処法を提案します。\
+            Enter キーで関連メトリクスに直接ジャンプ可能。"
+                .into(),
+        );
+        tips.push(
+            "C キーでカテゴリガイド。メモリ、CPU、ネットワーク等のカテゴリ別に\
+            関連ソースと学習コンテンツをまとめて表示します。"
+                .into(),
+        );
     } else {
-        tips.push("Press ? to cycle help levels: OFF → NORMAL → DETAILED → EXTRA. \
-            EXTRA shows SEE ALSO links and contextual hints.".into());
-        tips.push("Press d for diff view. See per-second changes for counter values at a glance. \
-            Great for checking network speed and disk I/O rates.".into());
-        tips.push("Press X for diagnostics view. Auto-detects system issues and suggests fixes. \
-            Press Enter to jump directly to related metrics.".into());
-        tips.push("Press C for category guide. View related sources and learning content \
-            organized by category: Memory, CPU, Network, and more.".into());
+        tips.push(
+            "Press ? to cycle help levels: OFF → NORMAL → DETAILED → EXTRA. \
+            EXTRA shows SEE ALSO links and contextual hints."
+                .into(),
+        );
+        tips.push(
+            "Press d for diff view. See per-second changes for counter values at a glance. \
+            Great for checking network speed and disk I/O rates."
+                .into(),
+        );
+        tips.push(
+            "Press X for diagnostics view. Auto-detects system issues and suggests fixes. \
+            Press Enter to jump directly to related metrics."
+                .into(),
+        );
+        tips.push(
+            "Press C for category guide. View related sources and learning content \
+            organized by category: Memory, CPU, Network, and more."
+                .into(),
+        );
     }
 
     // Select one tip based on a simple hash of timestamp

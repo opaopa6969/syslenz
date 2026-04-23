@@ -14,11 +14,11 @@ use crate::proc::Snapshot;
 use axum::{
     Router,
     extract::{Query, State},
+    http::StatusCode,
     response::{
         Html, IntoResponse, Json,
         sse::{Event, Sse},
     },
-    http::StatusCode,
     routing::{get, post},
 };
 #[cfg(feature = "web")]
@@ -201,20 +201,35 @@ async fn view_handler(
     };
 
     // G20-10: Resolve source index from query param
-    let selected_source = params.source.as_deref()
+    let selected_source = params
+        .source
+        .as_deref()
         .and_then(|s| source_keys.iter().position(|k| k == s))
         .unwrap_or(0);
 
     // G20-10: Resolve field index from query param
-    let selected_field = if let (Some(src_name), Some(field_name)) = (params.source.as_deref(), params.field.as_deref()) {
-        snapshot.entries.get(src_name)
+    let selected_field = if let (Some(src_name), Some(field_name)) =
+        (params.source.as_deref(), params.field.as_deref())
+    {
+        snapshot
+            .entries
+            .get(src_name)
             .and_then(|entry| entry.fields.iter().position(|f| f.name == field_name))
             .unwrap_or(0)
     } else {
         0
     };
 
-    let app = build_minimal_app(snapshot, history, source_keys, view, locale, selected_source, selected_field, params.pid);
+    let app = build_minimal_app(
+        snapshot,
+        history,
+        source_keys,
+        view,
+        locale,
+        selected_source,
+        selected_field,
+        params.pid,
+    );
 
     let view_data = app.build_view_data();
     Json(view_data)
@@ -232,7 +247,7 @@ fn build_minimal_app(
     selected_field: usize,
     detailed_pid: Option<String>,
 ) -> crate::ui::app::App {
-    use crate::ui::app::{App, Focus, HostState, ConnectionStatus};
+    use crate::ui::app::{App, ConnectionStatus, Focus, HostState};
 
     let host0 = HostState {
         label: "localhost".to_string(),
@@ -342,10 +357,12 @@ async fn field_help_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<FieldHelpQuery>,
 ) -> impl IntoResponse {
-    use crate::i18n;
     use crate::education;
+    use crate::i18n;
 
-    let locale = params.lang.as_deref()
+    let locale = params
+        .lang
+        .as_deref()
         .map(Locale::from_str)
         .unwrap_or(state.locale);
 
@@ -392,13 +409,20 @@ async fn field_help_handler(
         let history = state.history.lock().unwrap().clone();
         let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
         let selected_source = source_keys.iter().position(|k| k == source).unwrap_or(0);
-        let selected_field_idx = snapshot.entries.get(source.as_str())
+        let selected_field_idx = snapshot
+            .entries
+            .get(source.as_str())
             .and_then(|entry| entry.fields.iter().position(|f| f.name == *field))
             .unwrap_or(0);
         let app = build_minimal_app(
-            snapshot, history, source_keys,
-            crate::ui::app::View::Detail, locale,
-            selected_source, selected_field_idx, None,
+            snapshot,
+            history,
+            source_keys,
+            crate::ui::app::View::Detail,
+            locale,
+            selected_source,
+            selected_field_idx,
+            None,
         );
         crate::ui::render::get_contextual_hint_for_api(&app, source, field)
     };
@@ -2501,7 +2525,8 @@ async fn settings_alerts_handler(
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Failed to write config: {}", e)})),
-            ).into_response();
+            )
+                .into_response();
         }
     }
 
@@ -2511,10 +2536,7 @@ async fn settings_alerts_handler(
 /// Replace the [[alert]] sections in TOML with the new rules.
 /// Preserves all other config sections.
 #[cfg(feature = "web")]
-fn replace_alert_section_in_toml(
-    existing: &str,
-    rules: &[crate::alert::AlertRule],
-) -> String {
+fn replace_alert_section_in_toml(existing: &str, rules: &[crate::alert::AlertRule]) -> String {
     // Remove existing [[alert]] blocks
     let mut result = String::new();
     let mut skip = false;
@@ -2556,7 +2578,8 @@ fn replace_alert_section_in_toml(
                 result.push_str(&format!("action = {:?}\n", action));
             }
             if !rule.notify.is_empty() {
-                let notify_strs: Vec<String> = rule.notify.iter().map(|n| format!("{:?}", n)).collect();
+                let notify_strs: Vec<String> =
+                    rule.notify.iter().map(|n| format!("{:?}", n)).collect();
                 result.push_str(&format!("notify = [{}]\n", notify_strs.join(", ")));
             }
         }
@@ -2569,13 +2592,26 @@ fn replace_alert_section_in_toml(
 #[cfg(feature = "web")]
 fn build_settings_html(lang: &str) -> String {
     let title = if lang == "ja" { "設定" } else { "Settings" };
-    let rules_label = if lang == "ja" { "アラートルール" } else { "Alert Rules" };
-    let add_label = if lang == "ja" { "新規ルール追加" } else { "Add New Rule" };
+    let rules_label = if lang == "ja" {
+        "アラートルール"
+    } else {
+        "Alert Rules"
+    };
+    let add_label = if lang == "ja" {
+        "新規ルール追加"
+    } else {
+        "Add New Rule"
+    };
     let save_label = if lang == "ja" { "保存" } else { "Save" };
     let delete_label = if lang == "ja" { "削除" } else { "Delete" };
-    let back_label = if lang == "ja" { "ダッシュボードに戻る" } else { "Back to Dashboard" };
+    let back_label = if lang == "ja" {
+        "ダッシュボードに戻る"
+    } else {
+        "Back to Dashboard"
+    };
 
-    format!(r##"<!DOCTYPE html>
+    format!(
+        r##"<!DOCTYPE html>
 <html lang="{lang}">
 <head>
 <meta charset="utf-8">

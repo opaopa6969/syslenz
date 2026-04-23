@@ -95,7 +95,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if is_fullwidth {
         match view_data {
             ViewData::Dashboard(ref data) => draw_dashboard(f, data, main_area),
-            ViewData::Welcome(ref data) => draw_welcome(f, data, app.locale, main_area, &app.help_level),
+            ViewData::Welcome(ref data) => {
+                draw_welcome(f, data, app.locale, main_area, &app.help_level)
+            }
             ViewData::Diagnostics(ref data) => draw_diagnostics(f, data, app, main_area),
             ViewData::CategoryGuide(_) => draw_category_guide(f, app, main_area),
             ViewData::Tutorial(ref data) => draw_tutorial(f, data, main_area),
@@ -401,8 +403,15 @@ fn draw_host_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
 // A visual row in the tree-mode sidebar.
 enum SidebarRow<'a> {
-    Dir { label: String, depth: usize },
-    Leaf { key_idx: usize, key: &'a str, depth: usize },
+    Dir {
+        label: String,
+        depth: usize,
+    },
+    Leaf {
+        key_idx: usize,
+        key: &'a str,
+        depth: usize,
+    },
 }
 
 fn build_tree_rows<'a>(app: &'a App) -> Vec<SidebarRow<'a>> {
@@ -450,7 +459,11 @@ fn build_tree_rows<'a>(app: &'a App) -> Vec<SidebarRow<'a>> {
         let depth = segs.len().saturating_sub(1);
         // SAFETY: key_idx was built from source_keys.iter().enumerate()
         let key: &'a str = app.source_keys[key_idx].as_str();
-        rows.push(SidebarRow::Leaf { key_idx, key, depth });
+        rows.push(SidebarRow::Leaf {
+            key_idx,
+            key,
+            depth,
+        });
 
         prev_segs = segs;
     }
@@ -459,7 +472,11 @@ fn build_tree_rows<'a>(app: &'a App) -> Vec<SidebarRow<'a>> {
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let visible_height = area.height.saturating_sub(2) as usize;
-    let mode_hint = if app.sidebar_tree { " [t:flat]" } else { " [t:tree]" };
+    let mode_hint = if app.sidebar_tree {
+        " [t:flat]"
+    } else {
+        " [t:tree]"
+    };
     let title = format!(" /proc ({}){} ", app.source_keys.len(), mode_hint);
 
     if !app.sidebar_tree {
@@ -483,7 +500,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 let marker = if i == selected { ">" } else { " " };
                 let alert_severity = alert::source_max_severity(&app.active_alerts, key);
                 let style = if i == selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else if alert_severity == Some("critical") {
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
                 } else if alert_severity == Some("warning") {
@@ -509,7 +528,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let rows = build_tree_rows(app);
 
     // Find the visual row index of the selected leaf (for auto-scroll)
-    let selected_row = rows.iter().position(|r| matches!(r, SidebarRow::Leaf { key_idx, .. } if *key_idx == app.selected_source));
+    let selected_row = rows.iter().position(
+        |r| matches!(r, SidebarRow::Leaf { key_idx, .. } if *key_idx == app.selected_source),
+    );
 
     // Compute scroll: keep selected_row inside the visible window
     let scroll = if let Some(sel_row) = selected_row {
@@ -535,17 +556,25 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     Span::raw(indent),
                     Span::styled(
                         format!("{}/ ", label),
-                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
                     ),
                 ]))
             }
-            SidebarRow::Leaf { key_idx, key, depth } => {
+            SidebarRow::Leaf {
+                key_idx,
+                key,
+                depth,
+            } => {
                 let is_selected = *key_idx == app.selected_source;
                 let indent = "  ".repeat(*depth);
                 let marker = if is_selected { ">" } else { " " };
                 let alert_severity = alert::source_max_severity(&app.active_alerts, key);
                 let name_style = if is_selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else if alert_severity == Some("critical") {
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
                 } else if alert_severity == Some("warning") {
@@ -571,10 +600,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or_else(|| (*key).to_string());
                 ListItem::new(Line::from(vec![
                     Span::raw(indent),
-                    Span::styled(
-                        format!("{} ", marker),
-                        Style::default().fg(Color::Yellow),
-                    ),
+                    Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
                     Span::styled(leaf_label, name_style),
                 ]))
             }
@@ -889,16 +915,15 @@ fn draw_table_view(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn draw_process_detail(
-    f: &mut Frame,
-    data: &super::view_data::ProcessDetailData,
-    area: Rect,
-) {
+fn draw_process_detail(f: &mut Frame, data: &super::view_data::ProcessDetailData, area: Rect) {
     use ratatui::widgets::Paragraph;
 
     if let Some(ref err) = data.error {
-        let p = Paragraph::new(err.as_str())
-            .block(Block::default().borders(Borders::ALL).title(" Process Detail "));
+        let p = Paragraph::new(err.as_str()).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Process Detail "),
+        );
         f.render_widget(p, area);
         return;
     }
@@ -910,15 +935,18 @@ fn draw_process_detail(
     let mut lines: Vec<Line> = Vec::new();
     for field in &data.fields {
         // Section header: field name
-        let section_name = field.name.trim_start_matches("status.").trim_start_matches("io.");
+        let section_name = field
+            .name
+            .trim_start_matches("status.")
+            .trim_start_matches("io.");
         if !field.table_rows.is_empty() {
             // Table field
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("▸ {}", section_name),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("▸ {}", section_name),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]));
             // Description
             for desc_line in wrap_text(&field.description, area.width.saturating_sub(4) as usize) {
                 lines.push(Line::from(vec![Span::styled(
@@ -931,7 +959,9 @@ fn draw_process_detail(
                 let header_str = field.table_headers.join("  │  ");
                 lines.push(Line::from(vec![Span::styled(
                     format!("  {}", header_str),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 )]));
                 lines.push(Line::from(vec![Span::styled(
                     format!("  {}", "─".repeat(header_str.len())),
@@ -962,7 +992,9 @@ fn draw_process_detail(
                 Span::styled(" = ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     field.value.clone(),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
             // Description
@@ -989,8 +1021,7 @@ fn draw_process_detail(
     };
     let full_title = format!("{}{}", title, scroll_hint);
 
-    let p = Paragraph::new(visible)
-        .block(Block::default().borders(Borders::ALL).title(full_title));
+    let p = Paragraph::new(visible).block(Block::default().borders(Borders::ALL).title(full_title));
     f.render_widget(p, area);
 }
 
@@ -1061,7 +1092,13 @@ fn draw_tutorial(f: &mut Frame, data: &super::view_data::TutorialData, area: Rec
     f.render_widget(p, area);
 }
 
-fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale, area: Rect, help_level: &super::app::HelpLevel) {
+fn draw_welcome(
+    f: &mut Frame,
+    data: &WelcomeData,
+    _locale: crate::i18n::Locale,
+    area: Rect,
+    help_level: &super::app::HelpLevel,
+) {
     let title = format!(" {} ", data.title);
 
     let mut keys_text = vec![Line::from("")];
@@ -1073,36 +1110,44 @@ fn draw_welcome(f: &mut Frame, data: &WelcomeData, _locale: crate::i18n::Locale,
     }
 
     // P-A2: Show advanced keybindings when help_level is Detailed or ExtraDetailed
-    let show_advanced = matches!(help_level, super::app::HelpLevel::Detailed | super::app::HelpLevel::ExtraDetailed);
+    let show_advanced = matches!(
+        help_level,
+        super::app::HelpLevel::Detailed | super::app::HelpLevel::ExtraDetailed
+    );
     if show_advanced && !data.advanced_keybindings.is_empty() {
         keys_text.push(Line::from(""));
         for (key, desc) in &data.advanced_keybindings {
             keys_text.push(Line::from(vec![
-                Span::styled(format!("  {:<10}", key), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("  {:<10}", key),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::raw(desc.as_str()),
             ]));
         }
     }
 
     keys_text.push(Line::from(""));
-    keys_text.push(Line::from(vec![
-        Span::styled(
-            format!("  {}", data.footer),
-            Style::default().fg(Color::Cyan),
-        ),
-    ]));
+    keys_text.push(Line::from(vec![Span::styled(
+        format!("  {}", data.footer),
+        Style::default().fg(Color::Cyan),
+    )]));
 
     // Did you know? tip
     if !data.tip.is_empty() {
         keys_text.push(Line::from(""));
-        keys_text.push(Line::from(vec![
-            Span::styled("  \u{1f4a1} Did you know?  ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]));
+        keys_text.push(Line::from(vec![Span::styled(
+            "  \u{1f4a1} Did you know?  ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]));
         // Wrap long tips into multiple lines
         for line in textwrap_simple(&data.tip, area.width.saturating_sub(6) as usize) {
-            keys_text.push(Line::from(vec![
-                Span::styled(format!("     {}", line), Style::default().fg(Color::White)),
-            ]));
+            keys_text.push(Line::from(vec![Span::styled(
+                format!("     {}", line),
+                Style::default().fg(Color::White),
+            )]));
         }
     }
     keys_text.push(Line::from(""));
@@ -1185,7 +1230,9 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
     ];
     // P-A1: Diagnostic badge
     if data.diag_count > 0 {
-        let badge_color = data.diag_severity.as_ref()
+        let badge_color = data
+            .diag_severity
+            .as_ref()
             .map(|c| view_color_to_color(c))
             .unwrap_or(Color::Yellow);
         let badge_text = if is_ja {
@@ -1193,16 +1240,31 @@ fn draw_dashboard(f: &mut Frame, data: &DashboardData, area: Rect) {
         } else {
             format!("\u{26a0} {} issues (X:diagnostics)", data.diag_count)
         };
-        load_spans.push(Span::styled(badge_text, Style::default().fg(badge_color).add_modifier(Modifier::BOLD)));
+        load_spans.push(Span::styled(
+            badge_text,
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(Modifier::BOLD),
+        ));
     } else {
-        let badge_text = if is_ja { "\u{2713} 正常" } else { "\u{2713} healthy" };
+        let badge_text = if is_ja {
+            "\u{2713} 正常"
+        } else {
+            "\u{2713} healthy"
+        };
         load_spans.push(Span::styled(badge_text, Style::default().fg(Color::Green)));
     }
     let load_line = Line::from(load_spans);
-    let p = Paragraph::new(load_line)
-        .block(Block::default().borders(Borders::ALL)
-            .title(if is_ja { " 負荷 / 稼働時間 " } else { " Load / Uptime " })
-            .border_style(sec0_style));
+    let p = Paragraph::new(load_line).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(if is_ja {
+                " 負荷 / 稼働時間 "
+            } else {
+                " Load / Uptime "
+            })
+            .border_style(sec0_style),
+    );
     f.render_widget(p, sections[0]);
 
     // Section 1: Memory with usage bar
@@ -1473,13 +1535,17 @@ fn draw_auto_graph(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .filter_map(|s| extract(s))
         .chain(app.current.entries.get(source_key).and_then(|entry| {
-            entry.fields.iter().find(|f| f.name == field_name).and_then(|field| match &field.value {
-                FieldValue::Bytes(b) => Some(*b as f64),
-                FieldValue::Integer(i) => Some(*i as f64),
-                FieldValue::Float(f) => Some(*f),
-                FieldValue::Duration(d) => Some(*d),
-                _ => None,
-            })
+            entry
+                .fields
+                .iter()
+                .find(|f| f.name == field_name)
+                .and_then(|field| match &field.value {
+                    FieldValue::Bytes(b) => Some(*b as f64),
+                    FieldValue::Integer(i) => Some(*i as f64),
+                    FieldValue::Float(f) => Some(*f),
+                    FieldValue::Duration(d) => Some(*d),
+                    _ => None,
+                })
         }))
         .collect();
 
@@ -1602,15 +1668,25 @@ fn section_style(selected: bool) -> Style {
 
 fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect) {
     let is_ja = app.locale == crate::i18n::Locale::Ja;
-    let selected_has_runbook = data.findings.get(app.selected_diagnostic)
+    let selected_has_runbook = data
+        .findings
+        .get(app.selected_diagnostic)
         .and_then(|f| f.runbook_url.as_ref())
         .is_some();
     let hint = if is_ja {
         let base = "Enter:ジャンプ  Backspace:戻る  c:コピー";
-        if selected_has_runbook { format!("{}  R:Runbook", base) } else { base.to_string() }
+        if selected_has_runbook {
+            format!("{}  R:Runbook", base)
+        } else {
+            base.to_string()
+        }
     } else {
         let base = "Enter:jump  Backspace:back  c:copy";
-        if selected_has_runbook { format!("{}  R:runbook", base) } else { base.to_string() }
+        if selected_has_runbook {
+            format!("{}  R:runbook", base)
+        } else {
+            base.to_string()
+        }
     };
     let title = format!(" {} ({}) ", data.title, hint);
 
@@ -1638,31 +1714,42 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect
         (area, None)
     };
 
-    let rows: Vec<Row> = data.findings.iter().enumerate().map(|(i, finding)| {
-        let is_selected = i == app.selected_diagnostic;
-        let sev_color = view_color_to_color(&finding.severity_color);
-        let sev_style = Style::default().fg(sev_color);
-        let sev_style = if matches!(finding.severity_color, ViewColor::Red) {
-            sev_style.add_modifier(Modifier::BOLD)
-        } else {
-            sev_style
-        };
-        let has_metrics = !finding.related_metrics.is_empty();
-        let indicator = if has_metrics { " >" } else { "" };
-        let runbook_icon = if finding.runbook_url.is_some() { "\u{1F4D6} " } else { "" };
-        let row = Row::new(vec![
-            Cell::from(finding.severity.clone()).style(sev_style),
-            Cell::from(finding.source.clone()).style(Style::default().fg(Color::DarkGray)),
-            Cell::from(format!("{}{}{}", runbook_icon, finding.title, indicator)).style(sev_style),
-            Cell::from(finding.detail.clone()),
-            Cell::from(finding.suggestion.clone()).style(Style::default().fg(Color::Green)),
-        ]).height(2);
-        if is_selected {
-            row.style(Style::default().bg(Color::DarkGray))
-        } else {
-            row
-        }
-    }).collect();
+    let rows: Vec<Row> = data
+        .findings
+        .iter()
+        .enumerate()
+        .map(|(i, finding)| {
+            let is_selected = i == app.selected_diagnostic;
+            let sev_color = view_color_to_color(&finding.severity_color);
+            let sev_style = Style::default().fg(sev_color);
+            let sev_style = if matches!(finding.severity_color, ViewColor::Red) {
+                sev_style.add_modifier(Modifier::BOLD)
+            } else {
+                sev_style
+            };
+            let has_metrics = !finding.related_metrics.is_empty();
+            let indicator = if has_metrics { " >" } else { "" };
+            let runbook_icon = if finding.runbook_url.is_some() {
+                "\u{1F4D6} "
+            } else {
+                ""
+            };
+            let row = Row::new(vec![
+                Cell::from(finding.severity.clone()).style(sev_style),
+                Cell::from(finding.source.clone()).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(format!("{}{}{}", runbook_icon, finding.title, indicator))
+                    .style(sev_style),
+                Cell::from(finding.detail.clone()),
+                Cell::from(finding.suggestion.clone()).style(Style::default().fg(Color::Green)),
+            ])
+            .height(2);
+            if is_selected {
+                row.style(Style::default().bg(Color::DarkGray))
+            } else {
+                row
+            }
+        })
+        .collect();
 
     let header_texts = if is_ja {
         vec!["重要度", "ソース", "問題", "詳細", "対処法"]
@@ -1670,13 +1757,16 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect
         vec!["Sev", "Source", "Issue", "Detail", "Suggestion"]
     };
 
-    let table = Table::new(rows, [
-        Constraint::Length(6),
-        Constraint::Length(12),
-        Constraint::Length(30),
-        Constraint::Length(40),
-        Constraint::Min(30),
-    ])
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(6),
+            Constraint::Length(12),
+            Constraint::Length(30),
+            Constraint::Length(40),
+            Constraint::Min(30),
+        ],
+    )
     .block(Block::default().borders(Borders::ALL).title(title.clone()))
     .header(
         Row::new(header_texts)
@@ -1694,16 +1784,30 @@ fn draw_diagnostics(f: &mut Frame, data: &DiagnosticsData, app: &App, area: Rect
     if let Some(picker_rect) = picker_area {
         if let Some(finding) = data.findings.get(app.selected_diagnostic) {
             let selected_idx = app.selected_related_metric.unwrap_or(0);
-            let picker_title = if is_ja { " 関連メトリクス (Enter:ジャンプ  Backspace:閉じる) " } else { " Related Metrics (Enter:jump  Backspace:close) " };
-            let items: Vec<Row> = finding.related_metrics.iter().enumerate().map(|(i, (src, field))| {
-                let text = format!("{}.{}", src, field);
-                let row = Row::new(vec![Cell::from(text)]);
-                if i == selected_idx {
-                    row.style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray))
-                } else {
-                    row.style(Style::default().fg(Color::White))
-                }
-            }).collect();
+            let picker_title = if is_ja {
+                " 関連メトリクス (Enter:ジャンプ  Backspace:閉じる) "
+            } else {
+                " Related Metrics (Enter:jump  Backspace:close) "
+            };
+            let items: Vec<Row> = finding
+                .related_metrics
+                .iter()
+                .enumerate()
+                .map(|(i, (src, field))| {
+                    let text = format!("{}.{}", src, field);
+                    let row = Row::new(vec![Cell::from(text)]);
+                    if i == selected_idx {
+                        row.style(
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                                .bg(Color::DarkGray),
+                        )
+                    } else {
+                        row.style(Style::default().fg(Color::White))
+                    }
+                })
+                .collect();
             let picker = Table::new(items, [Constraint::Min(40)])
                 .block(Block::default().borders(Borders::ALL).title(picker_title));
             f.render_widget(picker, picker_rect);
@@ -2400,7 +2504,9 @@ fn draw_help_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(Span::raw("")));
                 lines.push(Line::from(Span::styled(
                     header,
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for (i, (src, fld, reason)) in crumbs.iter().enumerate() {
                     lines.push(Line::from(Span::styled(

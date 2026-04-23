@@ -613,7 +613,12 @@ impl App {
 
         // G20-8: Send webhook/Slack notifications for newly-firing alerts
         let host_label = self.hosts[self.active_host].label.as_str();
-        alert::send_notifications(&self.alert_rules, &self.active_alerts, &prev_firing, host_label);
+        alert::send_notifications(
+            &self.alert_rules,
+            &self.active_alerts,
+            &prev_firing,
+            host_label,
+        );
 
         // G20-9: Record alert state transitions to history
         let history_dir = crate::history::default_alert_history_dir();
@@ -880,14 +885,23 @@ impl App {
                 }
                 View::Diagnostics => {
                     if let Some(ref mut sel) = self.selected_related_metric {
-                        let findings = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks);
+                        let findings = crate::diagnostics::analyze(
+                            &self.current,
+                            self.locale,
+                            &self.diagnostic_runbooks,
+                        );
                         if let Some(f) = findings.get(self.selected_diagnostic) {
                             if *sel + 1 < f.related_metrics.len() {
                                 *sel += 1;
                             }
                         }
                     } else {
-                        let count = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks).len();
+                        let count = crate::diagnostics::analyze(
+                            &self.current,
+                            self.locale,
+                            &self.diagnostic_runbooks,
+                        )
+                        .len();
                         if self.selected_diagnostic + 1 < count {
                             self.selected_diagnostic += 1;
                         }
@@ -938,7 +952,11 @@ impl App {
                         }
                     }
                     View::Diagnostics => {
-                        let findings = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks);
+                        let findings = crate::diagnostics::analyze(
+                            &self.current,
+                            self.locale,
+                            &self.diagnostic_runbooks,
+                        );
                         if let Some(finding) = findings.get(self.selected_diagnostic) {
                             if finding.related_metrics.is_empty() {
                                 // No related metrics to jump to
@@ -977,7 +995,11 @@ impl App {
                             }
                         }
                     }
-                    View::Diff | View::Graph | View::CategoryGuide | View::Tutorial | View::ProcessDetail => {}
+                    View::Diff
+                    | View::Graph
+                    | View::CategoryGuide
+                    | View::Tutorial
+                    | View::ProcessDetail => {}
                 }
             }
         }
@@ -986,7 +1008,10 @@ impl App {
     /// Jump from Diagnostics view to Detail view for a specific source/field.
     fn jump_to_metric(&mut self, source: &str, field: &str) {
         if let Some(source_idx) = self.source_keys.iter().position(|k| k == source) {
-            let field_idx = self.current.entries.get(source)
+            let field_idx = self
+                .current
+                .entries
+                .get(source)
                 .and_then(|entry| entry.fields.iter().position(|f| f.name == field))
                 .unwrap_or(0);
             // Push current state to history for back-navigation
@@ -1472,11 +1497,14 @@ impl App {
         // Helper to get a value from the snapshot
         let get_val = |source: &str, field: &str| -> Option<f64> {
             self.current.entries.get(source).and_then(|e| {
-                e.fields.iter().find(|f| f.name == field).and_then(|f| match &f.value {
-                    FieldValue::Integer(n) => Some(*n as f64),
-                    FieldValue::Float(n) => Some(*n),
-                    _ => None,
-                })
+                e.fields
+                    .iter()
+                    .find(|f| f.name == field)
+                    .and_then(|f| match &f.value {
+                        FieldValue::Integer(n) => Some(*n as f64),
+                        FieldValue::Float(n) => Some(*n),
+                        _ => None,
+                    })
             })
         };
 
@@ -1486,7 +1514,9 @@ impl App {
             .zip(get_val("meminfo", "MemTotal"))
             .map(|(a, t)| (a / 1024.0 / 1024.0, (a / t * 100.0) as u64));
         let load = get_val("loadavg", "load_1min");
-        let diag_count = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks).len();
+        let diag_count =
+            crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks)
+                .len();
 
         match step {
             0 => (
@@ -1498,9 +1528,13 @@ impl App {
                      Press Enter or Right arrow to proceed to the next step.\n\
                      Press Backspace or Left arrow to go back.\n\
                      Press q to exit the tutorial at any time.",
-                    source_count, field_count,
-                    mem_info.map(|(gb, pct)| format!("\n     Memory: {:.1}GB available ({}%)", gb, pct)).unwrap_or_default(),
-                    load.map(|l| format!("\n     Load: {:.2}", l)).unwrap_or_default(),
+                    source_count,
+                    field_count,
+                    mem_info
+                        .map(|(gb, pct)| format!("\n     Memory: {:.1}GB available ({}%)", gb, pct))
+                        .unwrap_or_default(),
+                    load.map(|l| format!("\n     Load: {:.2}", l))
+                        .unwrap_or_default(),
                 ),
                 format!(
                     "syslenz へようこそ! このチュートリアルで主な機能を体験します。\n\n\
@@ -1510,9 +1544,13 @@ impl App {
                      Enter または右矢印で次のステップへ進みます。\n\
                      Backspace または左矢印で戻ります。\n\
                      q でチュートリアルを終了します。",
-                    source_count, field_count,
-                    mem_info.map(|(gb, pct)| format!("\n     メモリ: {:.1}GB 利用可能 ({}%)", gb, pct)).unwrap_or_default(),
-                    load.map(|l| format!("\n     負荷: {:.2}", l)).unwrap_or_default(),
+                    source_count,
+                    field_count,
+                    mem_info
+                        .map(|(gb, pct)| format!("\n     メモリ: {:.1}GB 利用可能 ({}%)", gb, pct))
+                        .unwrap_or_default(),
+                    load.map(|l| format!("\n     負荷: {:.2}", l))
+                        .unwrap_or_default(),
                 ),
             ),
             1 => (
@@ -1538,12 +1576,14 @@ impl App {
                  Press Enter on a source to see its fields.\n\
                  Each field has a name, value, unit, and description.\n\
                  Use j/k to browse fields. Press Tab to switch focus.\n\n\
-                 Press Enter to continue.".into(),
+                 Press Enter to continue."
+                    .into(),
                 "ステップ 2: 詳細ビュー\n\n\
                  ソースで Enter を押すとフィールドが表示されます。\n\
                  各フィールドには名前、値、単位、説明があります。\n\
                  j/k でフィールドを閲覧。Tab でフォーカスを切り替えます。\n\n\
-                 Enter で次へ進みます。".into(),
+                 Enter で次へ進みます。"
+                    .into(),
             ),
             3 => (
                 "Step 3: Diff View (d key)\n\n\
@@ -1551,25 +1591,29 @@ impl App {
                  This shows what changed between the current and previous snapshot.\n\
                  Green = increased, Red = decreased.\n\
                  Use [ and ] to time-travel through snapshot history.\n\n\
-                 Press Enter to continue.".into(),
+                 Press Enter to continue."
+                    .into(),
                 "ステップ 3: Diff ビュー (d キー)\n\n\
                  d を押すと diff モードに入ります。\n\
                  現在と前回のスナップショットの差分が表示されます。\n\
                  緑 = 増加、赤 = 減少。\n\
                  [ と ] でスナップショット履歴をタイムトラベルできます。\n\n\
-                 Enter で次へ進みます。".into(),
+                 Enter で次へ進みます。"
+                    .into(),
             ),
             4 => (
                 "Step 4: Graph View (g key)\n\n\
                  Select a numeric field and press g to see a time-series graph.\n\
                  The graph shows how the value has changed over recent snapshots.\n\
                  Press Backspace to return from the graph.\n\n\
-                 Press Enter to continue.".into(),
+                 Press Enter to continue."
+                    .into(),
                 "ステップ 4: グラフビュー (g キー)\n\n\
                  数値フィールドを選択して g を押すと時系列グラフが表示されます。\n\
                  最近のスナップショットでの値の変化が確認できます。\n\
                  Backspace でグラフから戻ります。\n\n\
-                 Enter で次へ進みます。".into(),
+                 Enter で次へ進みます。"
+                    .into(),
             ),
             5 => (
                 "Step 5: Help Levels (? key)\n\n\
@@ -1580,7 +1624,8 @@ impl App {
                    EXTRA:    Full explanation + contextual hints + Learning Breadcrumbs\n\n\
                  The help panel on the right shows SEE ALSO links and\n\
                  'Learn next' suggestions to deepen your understanding.\n\n\
-                 Press Enter to continue.".into(),
+                 Press Enter to continue."
+                    .into(),
                 "ステップ 5: ヘルプレベル (? キー)\n\n\
                  ? でヘルプレベルを切り替え: OFF → NORMAL → DETAILED → EXTRA。\n\
                  今は EXTRA — 最も詳しいレベルを表示中:\n\n\
@@ -1589,7 +1634,8 @@ impl App {
                    EXTRA:    完全解説 + コンテキストヒント + 学習パス\n\n\
                  右のヘルプパネルに SEE ALSO リンクと\n\
                  「次に学ぶ」提案が表示されます。\n\n\
-                 Enter で次へ進みます。".into(),
+                 Enter で次へ進みます。"
+                    .into(),
             ),
             6 => (
                 format!(
@@ -1623,7 +1669,8 @@ impl App {
                  Other useful keys:\n\
                    /  Search       e  Export       L  Toggle language\n\
                    C  Category guide (learning by topic)\n\
-                   c  Copy to clipboard".into(),
+                   c  Copy to clipboard"
+                    .into(),
                 "ステップ 7: ダッシュボード (D キー)\n\n\
                  ダッシュボードは主要メトリクスの概要を表示:\n\
                  負荷平均、メモリ、CPU、ネットワーク、ディスク。\n\
@@ -1633,7 +1680,8 @@ impl App {
                  便利なキー:\n\
                    /  検索         e  エクスポート   L  言語切り替え\n\
                    C  カテゴリガイド (トピック別学習)\n\
-                   c  クリップボードにコピー".into(),
+                   c  クリップボードにコピー"
+                    .into(),
             ),
             _ => (String::new(), String::new()),
         }
@@ -1668,7 +1716,11 @@ impl App {
             }
             View::Diagnostics => {
                 // Copy all diagnostics as text
-                let findings = crate::diagnostics::analyze(&self.current, self.locale, &self.diagnostic_runbooks);
+                let findings = crate::diagnostics::analyze(
+                    &self.current,
+                    self.locale,
+                    &self.diagnostic_runbooks,
+                );
                 if findings.is_empty() {
                     Some("No diagnostic findings.".to_string())
                 } else {

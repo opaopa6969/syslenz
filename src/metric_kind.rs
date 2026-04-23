@@ -118,26 +118,51 @@ impl MetricKind {
     pub fn related_sources(&self) -> &'static [&'static str] {
         match self {
             MetricKind::Memory => &[
-                "meminfo", "vmstat", "swaps", "buddyinfo",
-                "zoneinfo", "slabinfo", "pagetypeinfo",
+                "meminfo",
+                "vmstat",
+                "swaps",
+                "buddyinfo",
+                "zoneinfo",
+                "slabinfo",
+                "pagetypeinfo",
             ],
             MetricKind::Cpu => &[
-                "stat", "loadavg", "cpuinfo", "schedstat",
-                "softirqs", "interrupts", "thermal",
+                "stat",
+                "loadavg",
+                "cpuinfo",
+                "schedstat",
+                "softirqs",
+                "interrupts",
+                "thermal",
             ],
             MetricKind::Network => &[
-                "net/dev", "net/tcp", "net/udp", "net/unix", "net/arp",
-                "net/route", "net/sockstat", "net/snmp", "net/netstat",
+                "net/dev",
+                "net/tcp",
+                "net/udp",
+                "net/unix",
+                "net/arp",
+                "net/route",
+                "net/sockstat",
+                "net/snmp",
+                "net/netstat",
                 "net/wireless",
             ],
-            MetricKind::Storage => &[
-                "diskstats", "df", "mounts", "partitions", "locks",
-            ],
+            MetricKind::Storage => &["diskstats", "df", "mounts", "partitions", "locks"],
             MetricKind::Process => &["processes", "file-nr"],
             MetricKind::System => &[
-                "uptime", "version", "cmdline", "cgroups", "consoles",
-                "devices", "filesystems", "iomem", "ioports", "misc",
-                "dma", "timer_list", "modules",
+                "uptime",
+                "version",
+                "cmdline",
+                "cgroups",
+                "consoles",
+                "devices",
+                "filesystems",
+                "iomem",
+                "ioports",
+                "misc",
+                "dma",
+                "timer_list",
+                "modules",
             ],
             MetricKind::Power => &[
                 // Linux: future upower/sysfs support
@@ -180,7 +205,11 @@ mod tests {
         let mem = MetricKind::Memory.related_sources();
         let cpu = MetricKind::Cpu.related_sources();
         for s in mem {
-            assert!(!cpu.contains(s), "source '{}' appears in both Memory and Cpu", s);
+            assert!(
+                !cpu.contains(s),
+                "source '{}' appears in both Memory and Cpu",
+                s
+            );
         }
     }
 }
