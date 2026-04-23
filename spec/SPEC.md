@@ -2080,5 +2080,290 @@ DGE toolkit v2.3.1 から v2.3.2 への主な変更:
 
 ---
 
+## 付録 K: Mermaid アーキテクチャ図
+
+### K.1 モジュール構成 (graph TB)
+
+```mermaid
+graph TB
+    subgraph Entry["エントリポイント"]
+        main["main.rs<br/>CLI 解析・モード分岐"]
+        config["config.rs<br/>config.toml / CLI / env"]
+    end
+
+    subgraph Core["コアデータ層"]
+        proc_mod["proc/mod.rs<br/>Snapshot::capture()"]
+        export["export.rs<br/>JSON エクスポート/インポート"]
+        history["history.rs<br/>JSONL ヒストリー"]
+        schema["schema/<br/>ProcEntry / FieldValue"]
+        common["common_metric.rs<br/>共通メトリクス型"]
+        metric_kind["metric_kind.rs<br/>MetricKind enum"]
+    end
+
+    subgraph Parsers["/proc パーサー群 (43)"]
+        meminfo["proc/meminfo.rs"]
+        stat["proc/stat.rs"]
+        vmstat["proc/vmstat.rs"]
+        loadavg["proc/loadavg.rs"]
+        cpuinfo["proc/cpuinfo.rs"]
+        processes["proc/processes.rs"]
+        diskstats["proc/diskstats.rs"]
+        pressure["proc/pressure.rs"]
+        net_dev["proc/net_dev.rs"]
+        proc_other["proc/...その他 34"]
+    end
+
+    subgraph NetDeep["ネットワーク深掘り (5)"]
+        conntrack["net/conntrack.rs"]
+        dns["net/dns.rs"]
+        ip_route["net/ip_route.rs"]
+        ip_neigh["net/ip_neighbor.rs"]
+        ss_sum["net/ss_summary.rs"]
+    end
+
+    subgraph SysLayer["/sys レイヤ (3)"]
+        sys_df["sys/df<br/>statvfs()"]
+        sys_thermal["sys/thermal<br/>/sys/class/thermal"]
+        sys_filenr["sys/file-nr<br/>/proc/sys/fs/file-nr"]
+    end
+
+    subgraph Logic["ビジネスロジック"]
+        alert["alert.rs<br/>AlertEngine"]
+        diagnostics["diagnostics.rs<br/>自動診断"]
+        remote["remote.rs<br/>SSH/Docker/TCP collector"]
+        plugin["plugin/mod.rs<br/>プラグインローダー"]
+        otel["otel.rs<br/>OTLP エクスポーター"]
+        prometheus["prometheus.rs<br/>/metrics エンドポイント"]
+        serve["serve.rs<br/>TCP サーバー"]
+    end
+
+    subgraph Education["教育機能"]
+        education["education.rs<br/>HelpLevel / breadcrumbs"]
+        article["article.rs<br/>Article Overlay"]
+        article_m["article_metrics*.rs<br/>691 メトリクス記事"]
+        article_g["article_groups.rs<br/>~26 グループ記事"]
+        article_c["article_concepts.rs<br/>~29 概念記事"]
+        i18n["i18n.rs<br/>EN/JA テキスト"]
+    end
+
+    subgraph UI["フロントエンド"]
+        ui_app["ui/app.rs<br/>App 構造体・イベントループ"]
+        ui_render["ui/render.rs<br/>ビューディスパッチャ"]
+        ui_dashboard["ui/mod.rs + graph.rs<br/>Dashboard / Graph"]
+        web["web.rs<br/>axum HTTP / SSE"]
+        x11["x11_widget.rs<br/>X11 ウィジェット"]
+    end
+
+    main --> config
+    main --> proc_mod
+    main --> ui_app
+    main --> web
+    main --> serve
+    main --> otel
+    main --> prometheus
+
+    proc_mod --> meminfo
+    proc_mod --> stat
+    proc_mod --> vmstat
+    proc_mod --> loadavg
+    proc_mod --> cpuinfo
+    proc_mod --> processes
+    proc_mod --> diskstats
+    proc_mod --> pressure
+    proc_mod --> net_dev
+    proc_mod --> proc_other
+    proc_mod --> conntrack
+    proc_mod --> dns
+    proc_mod --> ip_route
+    proc_mod --> ip_neigh
+    proc_mod --> ss_sum
+    proc_mod --> sys_df
+    proc_mod --> sys_thermal
+    proc_mod --> sys_filenr
+    proc_mod --> plugin
+    proc_mod --> schema
+
+    ui_app --> proc_mod
+    ui_app --> alert
+    ui_app --> diagnostics
+    ui_app --> remote
+    ui_app --> export
+    ui_app --> history
+    ui_app --> education
+    ui_app --> article
+    ui_app --> i18n
+    ui_app --> ui_render
+
+    ui_render --> ui_dashboard
+    article --> article_m
+    article --> article_g
+    article --> article_c
+
+    web --> proc_mod
+    web --> alert
+    web --> config
+
+    schema --> common
+    schema --> metric_kind
+```
+
+### K.2 TUI 画面遷移 (stateDiagram-v2)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Welcome : 起動 (default_view=dashboard 時は Dashboard へ)
+    [*] --> Dashboard : --classic 以外のデフォルト
+
+    Welcome --> Dashboard : D キー
+    Welcome --> Overview : O キー
+    Welcome --> Diagnostics : X キー
+    Welcome --> CategoryGuide : C キー
+
+    Dashboard --> Overview : O キー
+    Dashboard --> Graph : g キー
+    Dashboard --> Diagnostics : X キー
+    Dashboard --> CategoryGuide : C キー
+    Dashboard --> Search : / キー
+
+    Overview --> Dashboard : D キー
+    Overview --> Detail : Enter (ソース選択)
+    Overview --> Search : / キー
+
+    Detail --> Diff : d キー
+    Detail --> TableView : (processes ソース選択時)
+    Detail --> Overview : Backspace
+
+    Diagnostics --> Detail : Enter (finding ジャンプ)
+    Diagnostics --> Dashboard : Backspace
+
+    Graph --> Dashboard : Backspace
+    Graph --> Detail : Backspace
+
+    TableView --> ProcessDetail : Enter (プロセス行選択)
+    TableView --> Detail : Backspace
+
+    ProcessDetail --> TableView : Backspace
+
+    Diff --> Detail : Backspace
+    Diff --> Overview : Backspace
+
+    CategoryGuide --> Dashboard : Backspace
+
+    Search --> Overview : Esc / Enter
+
+    state "Article Overlay (任意ビュー上)" as ArticleOverlay
+    Dashboard --> ArticleOverlay : A キー
+    Overview --> ArticleOverlay : A キー
+    Detail --> ArticleOverlay : A キー
+    Diagnostics --> ArticleOverlay : A キー
+    ArticleOverlay --> [*] : Esc / A キー (閉じる)
+
+    note right of Dashboard
+        View stack: view_history
+        Backspace でポップ・復元
+        F1–F9 でマルチホスト切替
+    end note
+```
+
+### K.3 SSH ControlMaster + Collector フロー (sequenceDiagram)
+
+```mermaid
+sequenceDiagram
+    participant App as syslenz App<br/>(メインスレッド)
+    participant RT as RemoteThread<br/>(remote.rs)
+    participant CM as SSH ControlMaster<br/>(ssh -M)
+    participant RH as Remote Host<br/>(user@server)
+    participant Chan as mpsc::channel
+
+    App->>RT: spawn(remote_collector_thread, host_label)
+    activate RT
+
+    RT->>CM: ssh -M -S $XDG_RUNTIME_DIR/syslenz-ssh/<hash>.sock<br/>-o ControlMaster=auto<br/>-o ControlPersist=60<br/>user@host sleep infinity
+    activate CM
+    CM->>RH: TCP 接続確立 (port 22)
+    RH-->>CM: SSH ハンドシェイク完了
+    CM-->>RT: ControlMaster ソケット作成 (chmod 0700)
+
+    loop 毎 interval_ms ごとにポーリング
+        RT->>CM: ssh -S <socket> user@host syslenz --export -
+        CM->>RH: SSH セッション多重化 (既存接続を再利用)
+        activate RH
+        RH->>RH: Snapshot::capture()<br/>(43 /proc パーサー実行)
+        RH-->>CM: JSON スナップショット (stdout)
+        deactivate RH
+        CM-->>RT: JSON レスポンス
+
+        RT->>RT: serde_json::from_str::<Snapshot>(json)
+        RT->>Chan: sender.send(snapshot)
+        Chan-->>App: receiver.recv() → HostState.current 更新
+
+        App->>App: alert_engine.evaluate(snapshot)<br/>AlertEvent 生成
+        App->>App: TUI 再描画
+    end
+
+    alt SSH 接続失敗
+        CM-->>RT: エラー (exit code != 0)
+        RT->>RT: ConnectionStatus::Disconnected { last_seen, since }
+        RT->>Chan: (エラーイベント送信)
+        Chan-->>App: ステータスバー表示「Disconnected」
+        RT->>RT: retry_delay 後に再接続試行
+    end
+
+    deactivate CM
+    deactivate RT
+```
+
+### K.4 アラートエンジンルール評価フロー (flowchart)
+
+```mermaid
+flowchart TD
+    A([スナップショット取得完了<br/>Snapshot::capture 完了]) --> B[alert_engine.evaluate(snapshot)]
+
+    B --> C{AlertRule 一覧を反復}
+
+    C --> D[rule.source でエントリ取得<br/>snapshot.entries.get(source)]
+    D --> E{エントリ存在?}
+    E -- No --> C
+
+    E -- Yes --> F[rule.field でフィールド取得<br/>entry.fields.find(field)]
+    F --> G{フィールド存在?}
+    G -- No --> C
+
+    G -- Yes --> H[FieldValue → f64 変換]
+    H --> I{FieldValue 型}
+    I -- Bytes(b) --> J["value = b as f64"]
+    I -- Integer(i) --> K["value = i as f64"]
+    I -- Float(f) --> L["value = f"]
+    I -- Duration(d) --> M["value = d"]
+    I -- Text / Table --> N[スキップ → 次の rule へ]
+    N --> C
+
+    J & K & L & M --> O[条件式パース<br/>parse_condition(rule.condition)]
+    O --> P{"OP VALUE 形式?<br/>< > <= >= == !="}
+    P -- 不正 --> Q[None → スキップ]
+    Q --> C
+
+    P -- 有効 --> R[評価: value OP threshold]
+    R --> S{条件成立?}
+    S -- No --> C
+
+    S -- Yes --> T[AlertEvent 生成<br/>severity / message / timestamp]
+    T --> U[HostState.alert_events.push(event)]
+    U --> V{action 設定あり?}
+    V -- Yes --> W["shell exec: action<br/>{message} {source} {field}<br/>{value} {severity} 展開"]
+    V -- No --> X{notify 設定あり?}
+    W --> X
+
+    X -- "slack:URL" --> Y[ureq POST → Slack Webhook]
+    X -- "webhook:URL" --> Z[ureq POST → 汎用 Webhook]
+    X -- なし --> AA[TUI ステータスバー更新]
+    Y & Z --> AA
+
+    AA --> C
+    C -- 全 rule 完了 --> AB([評価終了<br/>TUI 再描画トリガー])
+```
+
+---
+
 *本仕様書は syslenz v1.7.0 の実装を元に、DGE toolkit v2.3.2 を使用して生成された。*  
 *最終更新: 2026-04-19*
