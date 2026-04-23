@@ -63,7 +63,10 @@ fn query_source_fields_tsv() {
     let output = run_binary(&["--query", "meminfo"]);
     assert!(output.status.success(), "exit code should be 0");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("MemTotal\t"), "should contain MemTotal field in TSV");
+    assert!(
+        stdout.contains("MemTotal\t"),
+        "should contain MemTotal field in TSV"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -84,9 +87,18 @@ fn query_specific_field_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
     // Verify it looks like valid JSON with expected keys
-    assert!(trimmed.starts_with('{') && trimmed.ends_with('}'), "should be JSON object");
-    assert!(trimmed.contains("\"source\":\"meminfo\""), "should contain source field");
-    assert!(trimmed.contains("\"field\":\"MemTotal\""), "should contain field name");
+    assert!(
+        trimmed.starts_with('{') && trimmed.ends_with('}'),
+        "should be JSON object"
+    );
+    assert!(
+        trimmed.contains("\"source\":\"meminfo\""),
+        "should contain source field"
+    );
+    assert!(
+        trimmed.contains("\"field\":\"MemTotal\""),
+        "should contain field name"
+    );
     assert!(trimmed.contains("\"value\""), "should contain value field");
 }
 
@@ -96,7 +108,10 @@ fn query_nonexistent_source() {
     let output = run_binary(&["--query", "nonexist"]);
     assert!(!output.status.success(), "exit code should be 1");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Source 'nonexist' not found"), "should print error to stderr");
+    assert!(
+        stderr.contains("Source 'nonexist' not found"),
+        "should print error to stderr"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -105,5 +120,8 @@ fn query_nonexistent_field() {
     let output = run_binary(&["--query", "meminfo.NoSuchField"]);
     assert!(!output.status.success(), "exit code should be 1");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Field 'NoSuchField' not found in 'meminfo'"), "should print field error to stderr");
+    assert!(
+        stderr.contains("Field 'NoSuchField' not found in 'meminfo'"),
+        "should print field error to stderr"
+    );
 }
