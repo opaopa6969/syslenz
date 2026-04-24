@@ -108,6 +108,223 @@ pub struct SshConfig {
     pub hosts: Vec<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Default values ---
+
+    #[test]
+    fn general_config_defaults() {
+        let cfg = GeneralConfig::default();
+        assert_eq!(cfg.lang, "en");
+        assert_eq!(cfg.interval_ms, 1000);
+        assert_eq!(cfg.default_view, "dashboard");
+        assert_eq!(cfg.history_size, 60);
+    }
+
+    #[test]
+    fn otel_config_defaults() {
+        let cfg = OtelConfig::default();
+        assert_eq!(cfg.endpoint, "http://localhost:4317");
+        assert_eq!(cfg.interval_secs, 5);
+    }
+
+    #[test]
+    fn web_config_default_port() {
+        let cfg = WebConfig::default();
+        assert_eq!(cfg.port, 3000);
+    }
+
+    #[test]
+    fn history_toml_config_defaults() {
+        let cfg = HistoryTomlConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.interval_secs, 60);
+        assert_eq!(cfg.retention_days, 7);
+        assert!(cfg.path.is_none());
+    }
+
+    #[test]
+    fn config_default_has_empty_alert_and_runbook() {
+        let cfg = Config::default();
+        assert!(cfg.alert.is_empty());
+        assert!(cfg.diagnostic_runbook.is_empty());
+        assert!(cfg.ssh.hosts.is_empty());
+    }
+
+    // --- TOML parsing ---
+
+    #[test]
+    fn parse_general_section_overrides_defaults() {
+        let toml = r#"
+[general]
+lang = "ja"
+interval_ms = 500
+default_view = "dashboard"
+history_size = 120
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.general.lang, "ja");
+        assert_eq!(cfg.general.interval_ms, 500);
+        assert_eq!(cfg.general.history_size, 120);
+    }
+
+    #[test]
+    fn parse_otel_section() {
+        let toml = r#"
+[otel]
+endpoint = "http://otel-collector:4317"
+interval_secs = 10
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.otel.endpoint, "http://otel-collector:4317");
+        assert_eq!(cfg.otel.interval_secs, 10);
+    }
+
+    #[test]
+    fn parse_web_section() {
+        let toml = r#"
+[web]
+port = 8080
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.web.port, 8080);
+    }
+
+    #[test]
+    fn parse_history_section_with_path() {
+        let toml = r#"
+[history]
+enabled = false
+interval_secs = 30
+retention_days = 14
+path = "/var/log/syslenz"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert!(!cfg.history.enabled);
+        assert_eq!(cfg.history.interval_secs, 30);
+        assert_eq!(cfg.history.retention_days, 14);
+        assert_eq!(cfg.history.path.as_deref(), Some("/var/log/syslenz"));
+    }
+
+    #[test]
+    fn parse_ssh_hosts() {
+        let toml = r#"
+[ssh]
+hosts = ["192.168.1.10", "192.168.1.11"]
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.ssh.hosts.len(), 2);
+        assert_eq!(cfg.ssh.hosts[0], "192.168.1.10");
+    }
+
+    #[test]
+    fn parse_alert_rules() {
+        let toml = r#"
+[[alert]]
+source = "loadavg"
+field = "load_1min"
+condition = "> 8.0"
+severity = "warning"
+message = "High load"
+
+[[alert]]
+source = "meminfo"
+field = "MemAvailable"
+condition = "< 500000000"
+severity = "critical"
+message = "Low memory"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.alert.len(), 2);
+        assert_eq!(cfg.alert[0].source, "loadavg");
+        assert_eq!(cfg.alert[1].severity, "critical");
+    }
+
+    #[test]
+    fn parse_diagnostic_runbook() {
+        let toml = r#"
+[[diagnostic_runbook]]
+pattern = "MemAvailable"
+url = "https://wiki.example.com/memory"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.diagnostic_runbook.len(), 1);
+        assert_eq!(cfg.diagnostic_runbook[0].pattern, "MemAvailable");
+        assert!(cfg.diagnostic_runbook[0].url.contains("memory"));
+    }
+
+    #[test]
+    fn empty_toml_uses_all_defaults() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert_eq!(cfg.general.lang, "en");
+        assert_eq!(cfg.otel.interval_secs, 5);
+        assert_eq!(cfg.web.port, 3000);
+    }
+
+    // --- HistoryTomlConfig -> HistoryConfig conversion ---
+
+    #[test]
+    fn history_toml_to_history_config_no_path() {
+        let toml_cfg = HistoryTomlConfig::default();
+        let hist: HistoryConfig = (&toml_cfg).into();
+        assert!(hist.enabled);
+        assert_eq!(hist.interval_secs, 60);
+        assert_eq!(hist.retention_days, 7);
+        assert!(hist.path.is_none());
+    }
+
+    #[test]
+    fn history_toml_to_history_config_with_path() {
+        let toml_cfg = HistoryTomlConfig {
+            enabled: false,
+            interval_secs: 120,
+            retention_days: 30,
+            path: Some("/tmp/syslenz-history".to_string()),
+        };
+        let hist: HistoryConfig = (&toml_cfg).into();
+        assert!(!hist.enabled);
+        assert_eq!(hist.interval_secs, 120);
+        assert_eq!(hist.path, Some(PathBuf::from("/tmp/syslenz-history")));
+    }
+
+    // --- config_path resolution ---
+
+    #[test]
+    fn config_path_uses_xdg_config_home() {
+        // Set XDG_CONFIG_HOME to a known value and verify the path is composed correctly.
+        // We use a temp dir to avoid any side effects.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let xdg_path = tmp.path().to_str().unwrap().to_string();
+
+        // Temporarily override env var using a separate scope to avoid test interference.
+        // SAFETY: single-threaded test; no other threads read this env var concurrently.
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", &xdg_path);
+        }
+        let path = Config::config_path().unwrap();
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+
+        assert!(path.starts_with(tmp.path()));
+        assert!(path.ends_with("syslenz/config.toml"));
+    }
+
+    #[test]
+    fn runbook_config_roundtrip_serialization() {
+        let rc = RunbookConfig {
+            pattern: "cpu_usage".to_string(),
+            url: "https://runbook.example.com/cpu".to_string(),
+        };
+        let json = serde_json::to_string(&rc).unwrap();
+        let rc2: RunbookConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(rc2.pattern, "cpu_usage");
+        assert_eq!(rc2.url, "https://runbook.example.com/cpu");
+    }
+}
+
 impl Config {
     pub fn load() -> Self {
         let path = match Self::config_path() {

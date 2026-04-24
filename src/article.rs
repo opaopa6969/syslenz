@@ -581,6 +581,155 @@ pub fn resolve_article_id(source: &str, field: &str) -> String {
 }
 
 #[cfg(feature = "web")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ArticleLink::label ---
+
+    #[test]
+    fn article_link_metric_label_en() {
+        let link = ArticleLink::Metric {
+            label_en: "MemAvailable",
+            label_ja: "利用可能メモリ",
+            source: "meminfo",
+            field: "MemAvailable",
+        };
+        assert_eq!(link.label(Locale::En), "MemAvailable");
+        assert_eq!(link.label(Locale::Ja), "利用可能メモリ");
+    }
+
+    #[test]
+    fn article_link_article_label_both_locales() {
+        let link = ArticleLink::Article {
+            label_en: "Reading metrics basics",
+            label_ja: "メトリクスの読み方の基本",
+            id: "concept.reading-metrics",
+        };
+        assert_eq!(link.label(Locale::En), "Reading metrics basics");
+        assert_eq!(link.label(Locale::Ja), "メトリクスの読み方の基本");
+    }
+
+    // --- EducationArticle::title / body ---
+
+    #[test]
+    fn education_article_title_and_body_locale() {
+        let article = EducationArticle {
+            id: "test.article",
+            kind: ArticleKind::Concept,
+            title_en: "Test Title",
+            title_ja: "テストタイトル",
+            body_en: "Body in English",
+            body_ja: "日本語の本文",
+            links: &[],
+        };
+        assert_eq!(article.title(Locale::En), "Test Title");
+        assert_eq!(article.title(Locale::Ja), "テストタイトル");
+        assert_eq!(article.body(Locale::En), "Body in English");
+        assert_eq!(article.body(Locale::Ja), "日本語の本文");
+    }
+
+    // --- parse_kind (tested indirectly via the public API) ---
+
+    #[test]
+    fn parse_kind_variants() {
+        assert!(matches!(parse_kind("metric"), ArticleKind::Metric));
+        assert!(matches!(parse_kind("METRIC"), ArticleKind::Metric));
+        assert!(matches!(parse_kind("group"), ArticleKind::Group));
+        assert!(matches!(parse_kind("Group"), ArticleKind::Group));
+        assert!(matches!(parse_kind("concept"), ArticleKind::Concept));
+        assert!(matches!(parse_kind("unknown"), ArticleKind::Concept)); // fallback
+    }
+
+    // --- resolve_group_id (tested via resolve_article_id) ---
+
+    #[test]
+    fn resolve_group_id_snake_suffix_min() {
+        // If a field ends in _min and the group article exists we get a distribution id.
+        // We test resolve_group_id in isolation via its behaviour: the function is private,
+        // so call it directly using the module-private path through super.
+        let result = resolve_group_id("stat", "cpu_min");
+        assert_eq!(result, Some("stat.cpu_distribution".to_string()));
+    }
+
+    #[test]
+    fn resolve_group_id_snake_suffix_max() {
+        let result = resolve_group_id("diskstats", "read_max");
+        assert_eq!(result, Some("diskstats.read_distribution".to_string()));
+    }
+
+    #[test]
+    fn resolve_group_id_snake_suffix_count() {
+        let result = resolve_group_id("net/tcp", "conn_count");
+        assert_eq!(result, Some("net/tcp.conn_distribution".to_string()));
+    }
+
+    #[test]
+    fn resolve_group_id_camel_suffix_min() {
+        let result = resolve_group_id("perf", "CpuMin");
+        assert_eq!(result, Some("perf.Cpu_distribution".to_string()));
+    }
+
+    #[test]
+    fn resolve_group_id_camel_suffix_max() {
+        let result = resolve_group_id("perf", "CpuMax");
+        assert_eq!(result, Some("perf.Cpu_distribution".to_string()));
+    }
+
+    #[test]
+    fn resolve_group_id_camel_suffix_count() {
+        let result = resolve_group_id("perf", "CpuCount");
+        assert_eq!(result, Some("perf.Cpu_distribution".to_string()));
+    }
+
+    #[test]
+    fn resolve_group_id_no_suffix_returns_none() {
+        let result = resolve_group_id("meminfo", "MemAvailable");
+        assert!(result.is_none());
+    }
+
+    // --- resolve_article_id fallback behaviour ---
+
+    #[test]
+    fn resolve_article_id_falls_back_to_fallback_id() {
+        // "unknown.field" won't match any article, so we get the fallback article id.
+        let id = resolve_article_id("unknown_source", "unknown_field");
+        assert_eq!(id, fallback_article().id);
+    }
+
+    #[test]
+    fn resolve_article_id_known_meminfo_memavailable() {
+        // "meminfo.MemAvailable" is a known metric article in ARTICLES_METRICS.
+        let id = resolve_article_id("meminfo", "MemAvailable");
+        assert_eq!(id, "meminfo.MemAvailable");
+    }
+
+    // --- find_article_by_id ---
+
+    #[test]
+    fn find_article_by_id_known() {
+        let a = find_article_by_id("meminfo.MemAvailable");
+        assert!(a.is_some());
+        assert_eq!(a.unwrap().id, "meminfo.MemAvailable");
+    }
+
+    #[test]
+    fn find_article_by_id_unknown_returns_none() {
+        assert!(find_article_by_id("does.not.exist.xyz").is_none());
+    }
+
+    // --- fallback_article ---
+
+    #[test]
+    fn fallback_article_has_nonempty_titles_and_body() {
+        let a = fallback_article();
+        assert!(!a.title_en.is_empty());
+        assert!(!a.title_ja.is_empty());
+        assert!(!a.body_en.is_empty());
+        assert!(!a.body_ja.is_empty());
+    }
+}
+
 pub fn resolve_article(source: &str, field: &str) -> &'static EducationArticle {
     let id = resolve_article_id(source, field);
     find_article_by_id(&id).unwrap_or_else(fallback_article)
