@@ -58,30 +58,23 @@ syslenz は **「Wireshark for /proc」** をコンセプトとする、ゼロ�
 
 ### 1.4 アーキテクチャ概要図
 
-```
-CLI args / config.toml
-        │
-        ▼
-    ┌────────┐       ┌──────────┐       ┌───────────┐
-    │ main() │──────▶│ Snapshot  │──────▶│ TUI / Web │
-    └────────┘       │ .capture()│◀──────│ render()  │
-        │            └──────────┘       └───────────┘
-        │                 │
-        ▼                 ▼
-   ┌─────────┐     ┌────────────┐
-   │ Remote  │     │ Parsers    │
-   │ (SSH /  │     │ /proc (43) │
-   │  Docker │     │ /sys  (3)  │
-   │  TCP)   │     │ net   (5)  │
-   └─────────┘     │ plugins    │
-                   └────────────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │ Export        │
-                 │ JSON / OTEL   │
-                 │ Prometheus    │
-                 └───────────────┘
+```mermaid
+flowchart TB
+    CLI["CLI args / config.toml"]
+    MAIN["main()"]
+    SNAP["Snapshot<br/>.capture()"]
+    TUI["TUI / Web<br/>render()"]
+    REMOTE["Remote<br/>SSH / Docker / TCP"]
+    PARSERS["Parsers<br/>/proc (43)<br/>/sys (3)<br/>net (5)<br/>plugins"]
+    EXPORT["Export<br/>JSON / OTEL<br/>Prometheus"]
+
+    CLI --> MAIN
+    MAIN --> SNAP
+    SNAP --> TUI
+    TUI --> SNAP
+    MAIN --> REMOTE
+    SNAP --> PARSERS
+    PARSERS --> EXPORT
 ```
 
 ---
@@ -330,35 +323,35 @@ pub enum FieldValue {
 
 ### 4.1 TUI 画面遷移
 
-```
-                ┌─────────────────────────────────┐
-                │            Welcome               │
-                │      (キーバインド一覧)           │
-                └───────────┬─────────────────────┘
-                            │ D / O / X / C / /
-                            ▼
-┌──────────┐   D    ┌─────────────┐   g    ┌──────────┐
-│ Overview │ ◀────▶ │  Dashboard  │ ──────▶ │  Graph   │
-│(Classic) │        └──────┬──────┘         └──────────┘
-└────┬─────┘               │ X
-     │ Enter               ▼
-     ▼              ┌─────────────┐   jump  ┌──────────┐
-┌──────────┐        │ Diagnostics │ ───────▶ │  Detail  │
-│  Detail  │        └─────────────┘         └────┬─────┘
-└────┬─────┘                                      │ d
-     │ d              C                           ▼
-     ▼        ┌───────────────┐          ┌──────────────┐
-┌──────────┐  │ CategoryGuide │          │    Diff       │
-│   Diff   │  └───────────────┘          └──────────────┘
-└──────────┘
-     │
-     │ (TableView ソース)
-     ▼
-┌────────────┐  Enter  ┌───────────────┐
-│ TableView  │ ───────▶ │ ProcessDetail │
-└────────────┘          └───────────────┘
+```mermaid
+flowchart TB
+    WELCOME["Welcome<br/>(キーバインド一覧)"]
+    DASHBOARD["Dashboard"]
+    OVERVIEW["Overview<br/>(Classic)"]
+    GRAPH["Graph"]
+    DIAGNOSTICS["Diagnostics"]
+    DETAIL_D["Detail<br/>(Overview経由)"]
+    DETAIL_DIAG["Detail<br/>(Diagnostics経由)"]
+    DIFF_OV["Diff<br/>(Overview経由)"]
+    DIFF_DIAG["Diff<br/>(Diagnostics経由)"]
+    CATGUIDE["CategoryGuide"]
+    TABLEVIEW["TableView"]
+    PROCDETAIL["ProcessDetail"]
+    ARTICLE["Article Overlay<br/>(任意ビューからオーバーレイ)"]
 
-     A (Article Overlay は任意のビューからオーバーレイ)
+    WELCOME -->|"D / O / X / C / /"| DASHBOARD
+    DASHBOARD -->|"D"| OVERVIEW
+    OVERVIEW -->|"D"| DASHBOARD
+    DASHBOARD -->|"g"| GRAPH
+    DASHBOARD -->|"X"| DIAGNOSTICS
+    OVERVIEW -->|"Enter"| DETAIL_D
+    DETAIL_D -->|"d"| DIFF_OV
+    DIFF_OV -->|"TableViewソース"| TABLEVIEW
+    TABLEVIEW -->|"Enter"| PROCDETAIL
+    DIAGNOSTICS -->|"jump"| DETAIL_DIAG
+    DETAIL_DIAG -->|"d"| DIFF_DIAG
+    DASHBOARD -->|"C"| CATGUIDE
+    DASHBOARD -.->|"A"| ARTICLE
 ```
 
 ### 4.2 View スタック
