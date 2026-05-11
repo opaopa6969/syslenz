@@ -52,10 +52,10 @@ flowchart TD
 flowchart TD
     S8["サマリー + 選択肢 ⏸"] --> C1{"ユーザー選択"}
 
-    C1 -->|"1. DGE を回す"| S9B["前回コンテキスト\n+ TreeView"]
-    C1 -->|"2. 自動反復"| S9A["自動反復モード\n（最大 5 回）"]
+    C1 -->|"1. DGE を回す"| S9B["前回コンテキスト<br/>+ TreeView"]
+    C1 -->|"2. 自動反復"| S9A["自動反復モード<br/>（最大 5 回）"]
     C1 -->|"3. 実装する"| S10["累積 Spec 化"]
-    C1 -->|"4. 素の LLM マージ"| S9C["subagent\n素レビュー → マージ"]
+    C1 -->|"4. 素の LLM マージ"| S9C["subagent<br/>素レビュー → マージ"]
     C1 -->|"5. 後で"| End([終了])
 
     S9B -->|テーマ選択| S2([Step 2 へ])
@@ -77,7 +77,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    S1["Step 1:\ndge-tool version"] -->|成功| TM["🔧 Tool mode"]
+    S1["Step 1:<br/>dge-tool version"] -->|成功| TM["🔧 Tool mode"]
     S1 -->|失敗| SM["📝 Skill mode"]
 
     TM --> S7T["Step 7: dge-tool save"]
@@ -106,9 +106,9 @@ flowchart LR
 
     subgraph Engine["DGE エンジン"]
         S0["Step 0: flow 判定"]
-        S5["Step 5: 会話劇生成\n(flow.extract.marker)"]
-        S10["Step 10: Spec 生成\n(flow.generate.types)"]
-        S9C["Step 9C: subagent\n素 LLM マージ"]
+        S5["Step 5: 会話劇生成<br/>(flow.extract.marker)"]
+        S10["Step 10: Spec 生成<br/>(flow.generate.types)"]
+        S9C["Step 9C: subagent<br/>素 LLM マージ"]
     end
 
     subgraph Output["出力"]
