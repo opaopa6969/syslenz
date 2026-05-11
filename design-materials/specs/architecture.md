@@ -78,44 +78,53 @@ syslenz/
 
 ### データ型階層
 
-```
-Snapshot
-├── timestamp: SystemTime          (ISO 8601でシリアライズ)
-└── entries: BTreeMap<String, ProcEntry>
-    └── ProcEntry
-        ├── source: String         (例: "meminfo", "net/dev")
-        └── fields: Vec<Field>
-            └── Field
-                ├── name: String
-                ├── value: FieldValue
-                │   ├── Bytes(u64)
-                │   ├── Integer(i64)
-                │   ├── Float(f64)
-                │   ├── Text(String)
-                │   ├── Duration(f64)
-                │   └── Table(Vec<Vec<String>>)
-                ├── unit: Option<String>
-                └── description: String
+```mermaid
+classDiagram
+    class Snapshot {
+        +SystemTime timestamp
+        +BTreeMap~String, ProcEntry~ entries
+    }
+    class ProcEntry {
+        +String source
+        +Vec~Field~ fields
+    }
+    class Field {
+        +String name
+        +FieldValue value
+        +Option~String~ unit
+        +String description
+    }
+    class FieldValue {
+        <<enumeration>>
+        Bytes(u64)
+        Integer(i64)
+        Float(f64)
+        Text(String)
+        Duration(f64)
+        Table(Vec~Vec~String~~)
+    }
+    Snapshot "1" --> "*" ProcEntry
+    ProcEntry "1" --> "*" Field
+    Field --> FieldValue
 ```
 
 ### App 状態構造
 
-```
-App
-├── snapshots: Vec<Snapshot>       履歴
-├── current: Snapshot              現在のスナップショット
-├── diffs: Vec<DiffItem>           前回との差分
-├── view: View                     現在のビュー
-├── focus: Focus                   フォーカス位置
-├── selected_source / selected_field   選択状態
-├── sidebar_scroll / field_scroll / table_scroll   スクロール位置
-├── search_query / searching / filtered_keys       検索状態
-├── graph_field                    グラフ表示対象
-├── remote_host / remote_rx        リモート接続状態
-├── locale: Locale                 言語設定
-├── auto_refresh / refresh_interval_ms   自動更新設定
-└── status_message                 ステータスバーメッセージ
-```
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `snapshots` | `Vec<Snapshot>` | 履歴 |
+| `current` | `Snapshot` | 現在のスナップショット |
+| `diffs` | `Vec<DiffItem>` | 前回との差分 |
+| `view` | `View` | 現在のビュー |
+| `focus` | `Focus` | フォーカス位置 |
+| `selected_source` / `selected_field` | | 選択状態 |
+| `sidebar_scroll` / `field_scroll` / `table_scroll` | | スクロール位置 |
+| `search_query` / `searching` / `filtered_keys` | | 検索状態 |
+| `graph_field` | | グラフ表示対象 |
+| `remote_host` / `remote_rx` | | リモート接続状態 |
+| `locale` | `Locale` | 言語設定 |
+| `auto_refresh` / `refresh_interval_ms` | | 自動更新設定 |
+| `status_message` | | ステータスバーメッセージ |
 
 ---
 
@@ -145,52 +154,60 @@ syslenz/
 
 #### 2.1 HostState の分離 (マルチホスト対応)
 
-```
 変更前:
-  App {
-      current: Snapshot,
-      snapshots: Vec<Snapshot>,
-      remote_host: Option<String>,
-      remote_rx: Option<Receiver<Snapshot>>,
-      ...UIの状態...
-  }
+
+```rust
+App {
+    current: Snapshot,
+    snapshots: Vec<Snapshot>,
+    remote_host: Option<String>,
+    remote_rx: Option<Receiver<Snapshot>>,
+    // ...UIの状態...
+}
+```
 
 変更後:
-  HostState {
-      label: String,              "localhost" | "user@server1"
-      current: Snapshot,
-      history: Vec<Snapshot>,
-      connection: ConnectionState,
-      rx: Option<Receiver<Snapshot>>,
-  }
 
-  App {
-      hosts: Vec<HostState>,      全ホスト
-      active_host: usize,         アクティブなホストのインデックス
-      alerts: Vec<AlertState>,    アラート状態
-      config: Config,             TOML設定
-      ...UIの状態...
-  }
+```rust
+HostState {
+    label: String,              // "localhost" | "user@server1"
+    current: Snapshot,
+    history: Vec<Snapshot>,
+    connection: ConnectionState,
+    rx: Option<Receiver<Snapshot>>,
+}
+
+App {
+    hosts: Vec<HostState>,      // 全ホスト
+    active_host: usize,         // アクティブなホストのインデックス
+    alerts: Vec<AlertState>,    // アラート状態
+    config: Config,             // TOML設定
+    // ...UIの状態...
+}
 ```
 
 #### 2.2 パーサーの parse_content() 分離
 
-```
 変更前 (各パーサー):
-  pub fn parse() -> Result<ProcEntry> {
-      let content = std::fs::read_to_string("/proc/meminfo")?;
-      // パース処理 ...
-  }
+
+```rust
+pub fn parse() -> Result<ProcEntry> {
+    let content = std::fs::read_to_string("/proc/meminfo")?;
+    // パース処理 ...
+}
+```
 
 変更後:
-  pub fn parse() -> Result<ProcEntry> {
-      let content = std::fs::read_to_string("/proc/meminfo")?;
-      parse_content(&content)
-  }
 
-  pub fn parse_content(content: &str) -> Result<ProcEntry> {
-      // パース処理 (純粋関数、テスト可能)
-  }
+```rust
+pub fn parse() -> Result<ProcEntry> {
+    let content = std::fs::read_to_string("/proc/meminfo")?;
+    parse_content(&content)
+}
+
+pub fn parse_content(content: &str) -> Result<ProcEntry> {
+    // パース処理 (純粋関数、テスト可能)
+}
 ```
 
 全43パーサーに適用。これによりファイルI/Oなしでユニットテスト可能になる。
@@ -226,114 +243,79 @@ syslenz/
 
 ### 3.1 ローカルモード
 
-```
-  /proc/meminfo ─┐
-  /proc/cpuinfo ─┤
-  /proc/stat ────┤    ┌──────────────┐    ┌──────────┐    ┌────────┐
-  /proc/uptime ──┼──> │ 43 パーサー  │──> │ Snapshot │──> │  App   │
-  /proc/net/* ───┤    │ parse()      │    │ .entries │    │.current│
-  /proc/vmstat ──┤    └──────────────┘    └──────────┘    └───┬────┘
-  ...            ┘                                            │
-                                                              v
-                                                        ┌──────────┐
-                                                        │ render() │
-                                                        │ ratatui  │
-                                                        └────┬─────┘
-                                                             │
-                                                             v
-                                                        ┌──────────┐
-                                                        │ Terminal │
-                                                        └──────────┘
+```mermaid
+flowchart LR
+    P1[/proc/meminfo/]
+    P2[/proc/cpuinfo/]
+    P3[/proc/stat/]
+    P4[/proc/uptime/]
+    P5[/proc/net/*/]
+    P6[/proc/vmstat/]
+    Parsers["43 パーサー<br/>parse()"]
+    Snap["Snapshot<br/>.entries"]
+    App["App<br/>.current"]
+    Render["render()<br/>ratatui"]
+    Term[Terminal]
+    P1 --> Parsers
+    P2 --> Parsers
+    P3 --> Parsers
+    P4 --> Parsers
+    P5 --> Parsers
+    P6 --> Parsers
+    Parsers --> Snap --> App --> Render --> Term
 ```
 
 ### 3.2 SSHモード
 
-```
-  ┌─────────────────────────────────────┐
-  │ リモートホスト                       │
-  │   syslenz --export - (JSON出力)     │
-  └────────────┬────────────────────────┘
-               │ ssh -T (stdout)
-               v
-  ┌──────────────────────┐    ┌──────────┐    ┌──────┐
-  │ stream_remote()      │──> │ Snapshot │──> │ App  │
-  │ mpsc::channel        │    │ (deser)  │    │      │
-  │ バックグラウンドスレッド│    └──────────┘    └──┬───┘
-  └──────────────────────┘                       │
-                                                 v
-                                            ┌──────────┐
-                                            │ render() │
-                                            └──────────┘
+```mermaid
+flowchart TB
+    Remote["リモートホスト<br/>syslenz --export - (JSON出力)"]
+    Stream["stream_remote()<br/>mpsc::channel<br/>バックグラウンドスレッド"]
+    Snap["Snapshot (deser)"]
+    App[App]
+    Render["render()"]
+    Remote -- "ssh -T (stdout)" --> Stream
+    Stream --> Snap --> App --> Render
 ```
 
 ### 3.3 マルチホストモード (目標)
 
-```
-  localhost ─────> parse() ──────> Snapshot ─┐
-                                             │
-  user@srv1 ─────> ssh ──> JSON ─> Snapshot ─┼──> hosts: Vec<HostState>
-                                             │         │
-  user@srv2 ─────> ssh ──> JSON ─> Snapshot ─┘         │
-                                                       v
-                                              active_host = N
-                                                       │
-                                                       v
-                                                 ┌──────────┐
-                                                 │ render() │
-                                                 │ ホスト切替│
-                                                 │ タブ表示  │
-                                                 └──────────┘
+```mermaid
+flowchart LR
+    L[localhost] --> LP["parse()"] --> LS[Snapshot]
+    S1[user@srv1] --> S1P[ssh] --> S1J[JSON] --> S1S[Snapshot]
+    S2[user@srv2] --> S2P[ssh] --> S2J[JSON] --> S2S[Snapshot]
+    LS --> Hosts["hosts: Vec&lt;HostState&gt;"]
+    S1S --> Hosts
+    S2S --> Hosts
+    Hosts --> Active["active_host = N"]
+    Active --> Render["render()<br/>ホスト切替 / タブ表示"]
 ```
 
 ### 3.4 OTELモード
 
-```
-  /proc/* ─> 43 パーサー ─> Snapshot
-                               │
-                               v
-                    ┌────────────────────┐
-                    │ otel::run_otel()   │
-                    │                    │
-                    │ Snapshot.entries   │
-                    │   └─> fields      │
-                    │     └─> FieldValue │
-                    │       ├─ Bytes ──> │──> Gauge<u64>  ──┐
-                    │       ├─ Int ────> │──> Gauge<i64>  ──┤
-                    │       └─ Float ──> │──> Gauge<f64>  ──┤
-                    └────────────────────┘                  │
-                                                           v
-                                                  ┌──────────────┐
-                                                  │ gRPC :4317   │
-                                                  │ OTLP Exporter│
-                                                  └──────────────┘
+```mermaid
+flowchart TB
+    Proc[/proc/*/] --> Parsers[43 パーサー] --> Snap[Snapshot]
+    Snap --> OTEL["otel::run_otel()<br/>Snapshot.entries → fields → FieldValue"]
+    OTEL -- Bytes --> G1["Gauge&lt;u64&gt;"]
+    OTEL -- Int --> G2["Gauge&lt;i64&gt;"]
+    OTEL -- Float --> G3["Gauge&lt;f64&gt;"]
+    G1 --> Exporter["gRPC :4317<br/>OTLP Exporter"]
+    G2 --> Exporter
+    G3 --> Exporter
 ```
 
 ### 3.5 Webモード
 
-```
-  /proc/* ─> 43 パーサー ─> Snapshot
-                               │
-                       ┌───────┴───────┐
-                       v               v
-              ┌──────────────┐  ┌──────────────┐
-              │ GET /api/    │  │ GET /api/    │
-              │   snapshot   │  │   stream     │
-              │ (JSON応答)   │  │ (SSE)        │
-              └──────┬───────┘  └──────┬───────┘
-                     │                 │
-                     v                 v
-              ┌─────────────────────────────┐
-              │ Axum Web サーバー            │
-              │ (tower-http CORS)           │
-              │ ポート :3000 (デフォルト)    │
-              └──────────────┬──────────────┘
-                             │ HTTP/SSE
-                             v
-                       ┌───────────┐
-                       │ ブラウザ   │
-                       │ JavaScript│
-                       │ リアルタイム│
-                       └───────────┘
+```mermaid
+flowchart TB
+    Proc[/proc/*/] --> Parsers[43 パーサー] --> Snap[Snapshot]
+    Snap --> API1["GET /api/snapshot<br/>(JSON応答)"]
+    Snap --> API2["GET /api/stream<br/>(SSE)"]
+    API1 --> Axum["Axum Web サーバー<br/>(tower-http CORS)<br/>ポート :3000 (デフォルト)"]
+    API2 --> Axum
+    Axum -- HTTP/SSE --> Browser["ブラウザ<br/>JavaScript<br/>リアルタイム"]
 ```
 
 ---
@@ -342,89 +324,60 @@ syslenz/
 
 ### 4.1 View 状態遷移
 
-```
-                    起動
-                     │
-                     v
-              ┌──────────────┐
-              │   Overview   │ <─────────────────────────┐
-              │  (ソース一覧) │                            │
-              └──────┬───────┘                            │
-                     │ Enter/Right                        │
-                     v                                    │
-              ┌──────────────┐                            │
-              │    Detail    │ ──── 'g' ────> ┌────────┐  │
-              │ (フィールド)  │                │ Graph  │──┘
-              └──────┬───────┘ <──── Esc ──── └────────┘
-                     │                                    │
-                     │ 'd'                                │
-                     v                                    │
-              ┌──────────────┐                            │
-              │     Diff     │ ──── Esc ──────────────────┘
-              │  (差分表示)   │
-              └──────────────┘
-
-  TableView: Detail 内でテーブル型データの場合に自動遷移
+```mermaid
+stateDiagram-v2
+    [*] --> Overview: 起動
+    Overview --> Detail: Enter/Right
+    Detail --> Graph: 'g'
+    Graph --> Detail: Esc
+    Detail --> Diff: 'd'
+    Diff --> Overview: Esc
+    Graph --> Overview: Esc
+    Detail --> Overview: Esc
+    note right of Detail: TableView は Detail 内で<br/>テーブル型データの場合に自動遷移
 ```
 
 ### 4.2 Focus 状態
 
-```
-              ┌───────────┐   Tab   ┌───────────┐
-              │  Sidebar  │ <────── │  Content  │
-              │  (左側)   │ ──────> │  (右側)   │
-              └───────────┘   Tab   └───────────┘
+```mermaid
+stateDiagram-v2
+    Sidebar --> Content: Tab
+    Content --> Sidebar: Tab
+    note left of Sidebar: 左側
+    note right of Content: 右側
 ```
 
 ### 4.3 アラート状態マシン (目標)
 
+```mermaid
+stateDiagram-v2
+    [*] --> Normal
+    Normal --> Firing: 条件成立
+    Firing --> Firing: 条件が継続中
+    Firing --> Resolved: 条件解除
+    Resolved --> Normal: クールダウン期間経過
 ```
-              ┌──────────┐
-              │  Normal  │
-              └────┬─────┘
-                   │ 条件成立
-                   v
-              ┌──────────┐
-              │  Firing  │ ←── 条件が継続中
-              └────┬─────┘
-                   │ 条件解除
-                   v
-              ┌──────────┐
-              │ Resolved │
-              └────┬─────┘
-                   │ クールダウン期間経過
-                   v
-              ┌──────────┐
-              │  Normal  │
-              └──────────┘
 
-  遷移条件:
-    Normal → Firing:     eval(field, condition) == true
-    Firing → Firing:     eval() == true (継続)
-    Firing → Resolved:   eval() == false
-    Resolved → Normal:   cooldown タイマー満了
-```
+遷移条件:
+
+| From → To | 条件 |
+|---|---|
+| Normal → Firing | `eval(field, condition) == true` |
+| Firing → Firing | `eval() == true` (継続) |
+| Firing → Resolved | `eval() == false` |
+| Resolved → Normal | cooldown タイマー満了 |
 
 ### 4.4 接続状態マシン (目標)
 
-```
-              ┌──────────┐
-              │  Local   │  (--ssh 引数なし)
-              └──────────┘
-
-              ┌─────────────┐
-              │ Connecting  │
-              └──────┬──────┘
-                     │ 初回Snapshot受信
-                     v
-              ┌─────────────┐
-              │  Connected  │ <──── 再接続成功
-              └──────┬──────┘
-                     │ MAX_CONSECUTIVE_FAILURES 到達
-                     v
-              ┌──────────────┐
-              │ Disconnected │ ──── 再接続試行 ──> Connecting
-              └──────────────┘
+```mermaid
+stateDiagram-v2
+    Local: Local (--ssh 引数なし)
+    [*] --> Local
+    [*] --> Connecting: --ssh あり
+    Connecting --> Connected: 初回Snapshot受信
+    Connected --> Disconnected: MAX_CONSECUTIVE_FAILURES 到達
+    Disconnected --> Connecting: 再接続試行
+    Connecting --> Connected: 再接続成功
 ```
 
 ---
@@ -433,21 +386,12 @@ syslenz/
 
 ### フラグ一覧
 
-```
-  ┌──────────────┬──────────────────────────────────────────────┐
-  │ Feature      │ 追加される依存関係                            │
-  ├──────────────┼──────────────────────────────────────────────┤
-  │ (default)    │ ratatui, crossterm, serde, serde_json,      │
-  │              │ toml, anyhow                                 │
-  ├──────────────┼──────────────────────────────────────────────┤
-  │ otel         │ opentelemetry, opentelemetry_sdk,            │
-  │              │ opentelemetry-otlp, tokio                    │
-  ├──────────────┼──────────────────────────────────────────────┤
-  │ web          │ axum, tokio, tower-http, tokio-stream        │
-  ├──────────────┼──────────────────────────────────────────────┤
-  │ x11widget    │ x11rb                                        │
-  └──────────────┴──────────────────────────────────────────────┘
-```
+| Feature | 追加される依存関係 |
+|---|---|
+| `(default)` | `ratatui`, `crossterm`, `serde`, `serde_json`, `toml`, `anyhow` |
+| `otel` | `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, `tokio` |
+| `web` | `axum`, `tokio`, `tower-http`, `tokio-stream` |
+| `x11widget` | `x11rb` |
 
 ### コンパイル時ゲート構造
 
@@ -488,22 +432,11 @@ syslenz/
 
 ### プラットフォーム別データソース
 
-```
-  ┌──────────┬───────────────────────┬──────────────────────┐
-  │ Platform │ データソース            │ パーサー数            │
-  ├──────────┼───────────────────────┼──────────────────────┤
-  │ Linux    │ /proc/* ファイル       │ 43 パーサー           │
-  ├──────────┼───────────────────────┼──────────────────────┤
-  │ macOS    │ sysctl                │ 9 ソース              │
-  │          │ vm_stat               │                      │
-  │          │ system_profiler       │                      │
-  │          │ df, ps 等             │                      │
-  ├──────────┼───────────────────────┼──────────────────────┤
-  │ Windows  │ PowerShell            │ 7 ソース              │
-  │          │ WMI (Get-CimInstance) │                      │
-  │          │ systeminfo            │                      │
-  └──────────┴───────────────────────┴──────────────────────┘
-```
+| Platform | データソース | パーサー数 |
+|---|---|---|
+| Linux | `/proc/*` ファイル | 43 パーサー |
+| macOS | `sysctl`, `vm_stat`, `system_profiler`, `df`, `ps` 等 | 9 ソース |
+| Windows | `PowerShell`, `WMI (Get-CimInstance)`, `systeminfo` | 7 ソース |
 
 ### コンパイル時分岐
 
@@ -545,28 +478,13 @@ syslenz/
 
 ### テスト戦略
 
-```
-  ┌─────────────────────┬──────────────────────────────────────────────┐
-  │ レイヤー             │ テスト内容                                    │
-  ├─────────────────────┼──────────────────────────────────────────────┤
-  │ ユニットテスト        │ format_bytes(), format_duration()            │
-  │ (純粋関数)           │ diff_snapshots()                             │
-  │                     │ i18n::Locale::from_str()                     │
-  │                     │ FieldValue::display()                        │
-  ├─────────────────────┼──────────────────────────────────────────────┤
-  │ パーサーテスト        │ parse_content(&str) × 43パーサー              │
-  │ (フィクスチャ文字列)   │ 正常系 + エッジケース + 空入力                  │
-  ├─────────────────────┼──────────────────────────────────────────────┤
-  │ エクスポートテスト     │ export → import ラウンドトリップ              │
-  │                     │ JSON互換性                                    │
-  ├─────────────────────┼──────────────────────────────────────────────┤
-  │ スモークテスト        │ Snapshot::capture() がパニックしない           │
-  │ (Linux限定)         │ App::new() が正常に初期化される                 │
-  ├─────────────────────┼──────────────────────────────────────────────┤
-  │ リモートテスト        │ capture_remote() 無効ホストでエラー            │
-  │                     │ (既存テスト)                                   │
-  └─────────────────────┴──────────────────────────────────────────────┘
-```
+| レイヤー | テスト内容 |
+|---|---|
+| ユニットテスト (純粋関数) | `format_bytes()`, `format_duration()`, `diff_snapshots()`, `i18n::Locale::from_str()`, `FieldValue::display()` |
+| パーサーテスト (フィクスチャ文字列) | `parse_content(&str)` × 43パーサー、正常系 + エッジケース + 空入力 |
+| エクスポートテスト | `export → import` ラウンドトリップ、JSON互換性 |
+| スモークテスト (Linux限定) | `Snapshot::capture()` がパニックしない、`App::new()` が正常に初期化される |
+| リモートテスト | `capture_remote()` 無効ホストでエラー (既存テスト) |
 
 ### パーサーテストのパターン
 
@@ -588,24 +506,23 @@ MemAvailable:    4000000 kB
 
 ### CIマトリクス
 
-```
-  ┌─────────────────┬───────────────────┬──────────────────────┐
-  │ ジョブ           │ features          │ 検証内容              │
-  ├─────────────────┼───────────────────┼──────────────────────┤
-  │ default         │ (なし)             │ コア機能              │
-  │ otel            │ --features otel   │ OTEL コンパイル        │
-  │ web             │ --features web    │ Web UI コンパイル      │
-  │ x11widget       │ --features x11..  │ X11 コンパイル         │
-  │ all-features    │ --all-features    │ 全機能結合             │
-  │ clippy          │ --all-features    │ lint                  │
-  │ fmt             │ -                 │ フォーマットチェック     │
-  └─────────────────┴───────────────────┴──────────────────────┘
+| ジョブ | features | 検証内容 |
+|---|---|---|
+| default | (なし) | コア機能 |
+| otel | `--features otel` | OTEL コンパイル |
+| web | `--features web` | Web UI コンパイル |
+| x11widget | `--features x11..` | X11 コンパイル |
+| all-features | `--all-features` | 全機能結合 |
+| clippy | `--all-features` | lint |
+| fmt | - | フォーマットチェック |
 
-  OS マトリクス:
-    Linux:   全テスト実行 (43パーサー + スモーク)
-    macOS:   platform_macos テストのみ
-    Windows: platform_windows テストのみ
-```
+OS マトリクス:
+
+| OS | テスト範囲 |
+|---|---|
+| Linux | 全テスト実行 (43パーサー + スモーク) |
+| macOS | platform_macos テストのみ |
+| Windows | platform_windows テストのみ |
 
 ---
 
@@ -613,33 +530,31 @@ MemAvailable:    4000000 kB
 
 ### モジュール間依存関係
 
-```
-                          ┌──────────┐
-                          │ main.rs  │
-                          └────┬─────┘
-            ┌─────────┬───────┼───────┬──────────┬──────────┐
-            v         v       v       v          v          v
-       ┌────────┐ ┌──────┐ ┌────┐ ┌──────┐ ┌───────┐ ┌─────────┐
-       │ ui::   │ │export│ │proc│ │remote│ │ i18n  │ │  otel   │
-       │  app   │ │      │ │    │ │      │ │       │ │[feature]│
-       │  render│ │      │ │    │ │      │ │       │ └────┬────┘
-       │  graph │ │      │ │    │ │      │ │       │      │
-       └───┬────┘ └──┬───┘ └─┬──┘ └──┬───┘ └───────┘      │
-           │         │       │       │                     │
-           │         │       │       │                     │
-           v         v       v       v                     v
-       ┌────────────────────────────────────────────────────┐
-       │                  proc::Snapshot                     │
-       │           (全モジュールの共通データ型)                 │
-       └────────────────────────────────────────────────────┘
-
-  ┌──────────┐    ┌──────────────┐
-  │  web.rs  │    │ x11_widget.rs│
-  │[feature] │    │  [feature]   │
-  └────┬─────┘    └──────┬───────┘
-       │                 │
-       v                 v
-    proc::Snapshot    proc::Snapshot
+```mermaid
+flowchart TB
+    Main[main.rs]
+    UI["ui::app / render / graph"]
+    Export[export]
+    Proc[proc]
+    Remote[remote]
+    I18n[i18n]
+    OTEL["otel [feature]"]
+    Web["web.rs [feature]"]
+    X11["x11_widget.rs [feature]"]
+    Snap["proc::Snapshot<br/>(全モジュールの共通データ型)"]
+    Main --> UI
+    Main --> Export
+    Main --> Proc
+    Main --> Remote
+    Main --> I18n
+    Main --> OTEL
+    UI --> Snap
+    Export --> Snap
+    Proc --> Snap
+    Remote --> Snap
+    OTEL --> Snap
+    Web --> Snap
+    X11 --> Snap
 ```
 
 ### 詳細依存マトリクス

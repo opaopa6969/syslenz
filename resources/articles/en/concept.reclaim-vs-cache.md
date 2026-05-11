@@ -10,15 +10,14 @@ Linux uses free memory as file cache — this is normal and desirable. But there
 
 **Working set** = pages actively needed by running processes. Evicting these causes refaults (disk reads).
 
-```
-  RAM usage breakdown:
-  ┌─────────────────────────────────────┐
-  │ AnonPages (app heap/stack)  ← keep  │
-  │ File cache: Active(file)    ← keep  │
-  │ File cache: Inactive(file)  ← evict │
-  │ MemFree                             │
-  └─────────────────────────────────────┘
-```
+RAM usage breakdown:
+
+| Region | Reclaim policy |
+|---|---|
+| AnonPages (app heap/stack) | keep |
+| File cache: Active(file) | keep |
+| File cache: Inactive(file) | evict |
+| MemFree | (free pool) |
 
 **When reclaim is healthy:**
 - `Inactive(file)` shrinks

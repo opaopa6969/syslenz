@@ -35,30 +35,15 @@ lang: ja
 
 syslenz は単一バイナリの Rust ツールで、Linux カーネルのデータを `/proc` と `/sys` から読み込み、型付きフィールドに構造化し、複数のフロントエンドでレンダリングします: ターミナル UI (TUI)、Web ダッシュボード、JSON エクスポートパイプライン。
 
-```
-CLI 引数 / config.toml
-        │
-        ▼
-    ┌────────┐       ┌──────────┐       ┌───────────┐
-    │ main() │──────▶│ Snapshot  │──────▶│ TUI / Web │
-    └────────┘       │ .capture()│◀──────│ render()  │
-        │            └──────────┘       └───────────┘
-        │                 │
-        ▼                 ▼
-   ┌─────────┐     ┌────────────┐
-   │ Remote  │     │ パーサー   │
-   │ (SSH /  │     │ /proc (43) │
-   │  Docker │     │ /sys  (3)  │
-   │  TCP)   │     │ net   (5)  │
-   └─────────┘     │ plugins    │
-                   └────────────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │ エクスポート  │
-                 │ JSON / OTEL   │
-                 │ Prometheus    │
-                 └───────────────┘
+```mermaid
+flowchart TB
+    Args["CLI 引数 / config.toml"] --> Main["main()"]
+    Main --> Snap["Snapshot<br/>.capture()"]
+    Snap --> Frontends["TUI / Web<br/>render()"]
+    Frontends -. データ取得 .-> Snap
+    Main --> Remote["Remote<br/>(SSH / Docker / TCP)"]
+    Snap --> Parsers["パーサー<br/>/proc (43)<br/>/sys (3)<br/>net (5)<br/>plugins"]
+    Parsers --> Export["エクスポート<br/>JSON / OTEL / Prometheus"]
 ```
 
 ---

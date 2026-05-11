@@ -8,13 +8,22 @@ Node.js client library for connecting to [syslenz](https://github.com/opaopa6969
 
 ### Architecture
 
-```
-syslenz (--serve 0.0.0.0:9100)       Node.js Application
-  TCP Server                            └─ syslenz4node (client library)
-    │                                        ├─ SyslenzClient
-    │  ◄── "SNAPSHOT\n" ─────────────────────┤
-    │  ──► JSON (single line) ──────────────►├─ Parsed Snapshot
-    │                                        └─ getField(), formatFieldValue()
+```mermaid
+flowchart LR
+    subgraph Server["syslenz (--serve 0.0.0.0:9100)"]
+        TCP[TCP Server]
+    end
+    subgraph App["Node.js Application"]
+        Lib["syslenz4node (client library)"]
+        SC[SyslenzClient]
+        PS[Parsed Snapshot]
+        Helpers["getField(), formatFieldValue()"]
+        Lib --> SC
+        Lib --> PS
+        Lib --> Helpers
+    end
+    SC -- "SNAPSHOT\\n" --> TCP
+    TCP -- "JSON (single line)" --> PS
 ```
 
 ## Installation

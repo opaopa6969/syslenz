@@ -1018,8 +1018,11 @@ fn field_value_to_f64(fv: &FieldValue) -> Option<f64> {
 
 ### 5.4 状態遷移
 
-```
-Normal ──(条件成立)──> Firing ──(条件解除)──> Resolved ──(次サイクル)──> Normal
+```mermaid
+stateDiagram-v2
+    Normal --> Firing: 条件成立
+    Firing --> Resolved: 条件解除
+    Resolved --> Normal: 次サイクル
 ```
 
 | 遷移 | トリガー | 処理 |

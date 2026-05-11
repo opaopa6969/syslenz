@@ -8,13 +8,13 @@ JVM および アプリケーション のメトリクスを [syslenz](https://g
 
 ### アーキテクチャ
 
-```
-Java Application
-  └─ syslenz-java (ライブラリ)
-       ├─ JVM メトリクス収集 (MXBeans)
-       ├─ アプリケーション カスタムメトリクス
-       └─ TCP サーバー (syslenz --connect 対応)
-           または stdout 出力 (プラグインモード)
+```mermaid
+flowchart TB
+    App[Java Application]
+    App --> Lib["syslenz-java (ライブラリ)"]
+    Lib --> M1["JVM メトリクス収集 (MXBeans)"]
+    Lib --> M2[アプリケーション カスタムメトリクス]
+    Lib --> Out["TCP サーバー (syslenz --connect 対応)<br/>または stdout 出力 (プラグインモード)"]
 ```
 
 ## インストール
@@ -116,13 +116,13 @@ A Java library for exporting JVM and application metrics to [syslenz](https://gi
 
 ### Architecture
 
-```
-Java Application
-  └─ syslenz-java (library)
-       ├─ Collects JVM metrics (MXBeans)
-       ├─ Collects application custom metrics
-       └─ Serves on TCP port (syslenz --connect)
-           or writes to stdout (plugin mode)
+```mermaid
+flowchart TB
+    App[Java Application]
+    App --> Lib["syslenz-java (library)"]
+    Lib --> M1["Collects JVM metrics (MXBeans)"]
+    Lib --> M2[Collects application custom metrics]
+    Lib --> Out["Serves on TCP port (syslenz --connect)<br/>or writes to stdout (plugin mode)"]
 ```
 
 ## Installation

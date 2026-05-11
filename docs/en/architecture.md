@@ -35,30 +35,15 @@ lang: en
 
 syslenz is a single-binary Rust tool that reads Linux kernel data from `/proc` and `/sys`, structures it into typed fields, and renders it through multiple frontends: a terminal UI (TUI), a web dashboard, and a JSON export pipeline.
 
-```
-CLI args / config.toml
-        │
-        ▼
-    ┌────────┐       ┌──────────┐       ┌───────────┐
-    │ main() │──────▶│ Snapshot  │──────▶│ TUI / Web │
-    └────────┘       │ .capture()│◀──────│ render()  │
-        │            └──────────┘       └───────────┘
-        │                 │
-        ▼                 ▼
-   ┌─────────┐     ┌────────────┐
-   │ Remote  │     │ Parsers    │
-   │ (SSH /  │     │ /proc (43) │
-   │  Docker │     │ /sys  (3)  │
-   │  TCP)   │     │ net   (5)  │
-   └─────────┘     │ plugins    │
-                   └────────────┘
-                         │
-                         ▼
-                 ┌───────────────┐
-                 │ Export        │
-                 │ JSON / OTEL   │
-                 │ Prometheus    │
-                 └───────────────┘
+```mermaid
+flowchart TB
+    Args["CLI args / config.toml"] --> Main["main()"]
+    Main --> Snap["Snapshot<br/>.capture()"]
+    Snap --> Frontends["TUI / Web<br/>render()"]
+    Frontends -. fetch .-> Snap
+    Main --> Remote["Remote<br/>(SSH / Docker / TCP)"]
+    Snap --> Parsers["Parsers<br/>/proc (43)<br/>/sys (3)<br/>net (5)<br/>plugins"]
+    Parsers --> Export["Export<br/>JSON / OTEL / Prometheus"]
 ```
 
 ---

@@ -6,15 +6,12 @@
 
 A Linux server has four primary resources. Every performance problem traces back to one or more of them.
 
-```
-  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐
-  │   CPU   │  │ Memory  │  │   I/O   │  │Network  │
-  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘
-       │            │             │              │
-  Runqueue      LRU lists    I/O queue     Socket buffers
-  Context sw.   Swap/reclaim  Disk queue    TCP stack
-  Scheduling    OOM           IOPS limit    Bandwidth
-```
+| Resource | Substructure | Concerns |
+|---|---|---|
+| CPU | Runqueue | Context switching, Scheduling |
+| Memory | LRU lists | Swap/reclaim, OOM |
+| I/O | I/O queue | Disk queue, IOPS limit |
+| Network | Socket buffers | TCP stack, Bandwidth |
 
 **Monitoring each:**
 - CPU: `loadavg`, `stat.cpu_user`, `pressure.cpu_some_avg10`

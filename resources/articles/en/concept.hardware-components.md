@@ -6,20 +6,19 @@
 
 Understanding hardware components helps interpret metrics correctly.
 
-```
-  ┌─────────────────────────────────────────┐
-  │  CPU Package                            │
-  │  ┌────────────┐  ┌────────────┐        │
-  │  │ Core 0     │  │ Core 1     │        │
-  │  │ L1/L2 cache│  │ L1/L2 cache│        │
-  │  └────────────┘  └────────────┘        │
-  │         └──────┬──────┘                │
-  │              L3 Cache                  │
-  │         └──────┴──────┐                │
-  │              Memory Controller         │
-  └──────────────────┬──────────────────────┘
-                     │
-                   DRAM (RAM)
+```mermaid
+flowchart TB
+    subgraph CPU["CPU Package"]
+        direction TB
+        Core0["Core 0<br/>L1/L2 cache"]
+        Core1["Core 1<br/>L1/L2 cache"]
+        L3["L3 Cache"]
+        MC["Memory Controller"]
+        Core0 --> L3
+        Core1 --> L3
+        L3 --> MC
+    end
+    CPU --> DRAM["DRAM (RAM)"]
 ```
 
 **Latency hierarchy:**

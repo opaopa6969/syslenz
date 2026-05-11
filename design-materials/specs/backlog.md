@@ -22,34 +22,41 @@ DGE Session 001-008 で発見された全 Gap を優先度付きバックログ�
 
 ## 依存関係グラフ (クリティカルパス)
 
+```mermaid
+flowchart LR
+    BL001[BL-001] --> BL022["BL-022 (CI)"]
+    BL002[BL-002] --> BL022
+    BL022 --> BL050["BL-050 (Release WF)"]
+    BL050 --> BL051["BL-051 (crates.io)"]
+    BL050 --> BL052["BL-052 (SHA256)"]
+
+    BL010[BL-010] --> BL011["BL-011 (Dashboard)"]
+    BL010 --> BL012["BL-012 (Welcome)"]
+    BL010 --> BL016["BL-016 (i18n)"]
+    BL011 --> BL013["BL-013 (ドリルイン)"]
+
+    BL014[BL-014] --> BL015["BL-015 (Config統合)"]
+    BL015 --> BL032["BL-032 (アラート, config [[alert]] 依存)"]
+
+    BL020[BL-020] --> BL021["BL-021 (テスト Phase 1)"]
+
+    BL030["BL-030 (HostState切り出し)"] --> BL031["BL-031 (タイムトラベル diff)"]
+    BL030 --> BL032
+    BL030 --> BL033["BL-033 (マルチホスト)"]
+
+    BL040["BL-040 (README刷新)"] --> BL041["BL-041 (GIF)"]
+    BL041 --> BL042["BL-042 (スクリーンショット)"]
+    BL040 --> BL025["BL-025 (バッジ)"]
+
+    BL060["BL-060 (parse_content分離)"] --> BL061["BL-061 (fixture テスト)"]
+    BL060 --> BL063["BL-063 (残り38パーサー)"]
 ```
-BL-001 ─┐
-BL-002 ─┼─→ BL-022 (CI) ─→ BL-050 (Release WF) ─→ BL-051 (crates.io)
-         │                                            └─→ BL-052 (SHA256)
-         │
-BL-010 ─┬─→ BL-011 (Dashboard) ─→ BL-013 (ドリルイン)
-         ├─→ BL-012 (Welcome)
-         └─→ BL-016 (i18n)
-         │
-BL-014 ─→ BL-015 (Config統合) ─→ BL-032 (アラート, config [[alert]] 依存)
-         │
-BL-020 ─→ BL-021 (テスト Phase 1)
-         │
-BL-030 (HostState切り出し) ─→ BL-031 (タイムトラベル diff)
-                              ├─→ BL-032 (アラート)
-                              └─→ BL-033 (マルチホスト)
-         │
-BL-040 (README刷新) ─→ BL-041 (GIF) ─→ BL-042 (スクリーンショット)
-                       └─→ BL-025 (バッジ)
-         │
-BL-060 (parse_content分離) ─→ BL-061 (fixture テスト)
-                              └─→ BL-063 (残り38パーサー)
 
 クリティカルパス:
-  BL-001/002 → BL-022 → BL-050 → BL-051
-  BL-010 → BL-011 → BL-013
-  BL-030 → BL-031 → BL-032
-```
+
+- BL-001/002 → BL-022 → BL-050 → BL-051
+- BL-010 → BL-011 → BL-013
+- BL-030 → BL-031 → BL-032
 
 ---
 

@@ -8,17 +8,19 @@ Python client library for connecting to [syslenz](https://github.com/opaopa6969/
 
 ### Architecture
 
-```
-syslenz (--serve mode)
-  └─ TCP server on port 9100
-       ↑
-       │  SNAPSHOT\n  →  JSON response\n
-       │
-syslenz4py (this library)
-  └─ SyslenzClient
-       ├─ get_snapshot()  → Snapshot object
-       ├─ get_field()     → Field object
-       └─ get_value()     → raw value
+```mermaid
+flowchart LR
+    subgraph Server["syslenz (--serve mode)"]
+        TCP[TCP server on port 9100]
+    end
+    subgraph Client["syslenz4py (this library)"]
+        SC[SyslenzClient]
+        SC --> S1["get_snapshot() → Snapshot object"]
+        SC --> S2["get_field() → Field object"]
+        SC --> S3["get_value() → raw value"]
+    end
+    SC -- "SNAPSHOT\\n" --> TCP
+    TCP -- "JSON response\\n" --> SC
 ```
 
 ## Installation
