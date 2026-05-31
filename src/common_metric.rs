@@ -4,6 +4,7 @@ use crate::proc::{FieldValue, Snapshot};
 
 /// How closely the cross-platform mapping matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum MappingConfidence {
     /// Identical definition. Values are directly comparable across platforms.
     Exact,
@@ -15,6 +16,7 @@ pub enum MappingConfidence {
 
 /// Unit of measurement for a metric value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum MetricUnit {
     Bytes,
     Percent,
@@ -28,6 +30,7 @@ pub enum MetricUnit {
 
 /// Platform identifier for cross-platform metric resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum Platform {
     Linux,
     MacOS,
@@ -36,6 +39,7 @@ pub enum Platform {
 
 impl Platform {
     /// Detect the current compilation target platform.
+    #[allow(dead_code)]
     pub fn current() -> Self {
         #[cfg(target_os = "linux")]
         {
@@ -66,6 +70,7 @@ impl Platform {
 /// Metrics that cannot be meaningfully mapped (e.g., Load1 on Windows) return `None`
 /// from `resolve()` for that platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum CommonMetric {
     /// Total physical RAM.
     MemTotal,
