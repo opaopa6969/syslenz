@@ -143,13 +143,14 @@ pub fn capture_remote(host: &str) -> anyhow::Result<Snapshot> {
         anyhow::bail!(hint);
     }
 
-    let snapshot: Snapshot = serde_json::from_str(&stdout_buf).map_err(|e| {
+    let mut snapshot: Snapshot = serde_json::from_str(&stdout_buf).map_err(|e| {
         anyhow::anyhow!(
             "failed to parse snapshot JSON from '{host}': {e}\n\
              (first 200 bytes of output: {:?})",
             &stdout_buf[..stdout_buf.len().min(200)]
         )
     })?;
+    snapshot.sanitize();
 
     Ok(snapshot)
 }
@@ -250,13 +251,14 @@ pub fn capture_docker(container: &str) -> anyhow::Result<Snapshot> {
         anyhow::bail!(hint);
     }
 
-    let snapshot: Snapshot = serde_json::from_str(&stdout_buf).map_err(|e| {
+    let mut snapshot: Snapshot = serde_json::from_str(&stdout_buf).map_err(|e| {
         anyhow::anyhow!(
             "failed to parse snapshot JSON from container '{container}': {e}\n\
              (first 200 bytes: {:?})",
             &stdout_buf[..stdout_buf.len().min(200)]
         )
     })?;
+    snapshot.sanitize();
 
     Ok(snapshot)
 }
@@ -315,8 +317,9 @@ pub fn capture_tcp(addr: &str) -> anyhow::Result<Snapshot> {
     let mut buf = String::new();
     stream.read_to_string(&mut buf)?;
 
-    let snapshot: Snapshot = serde_json::from_str(&buf)
+    let mut snapshot: Snapshot = serde_json::from_str(&buf)
         .map_err(|e| anyhow::anyhow!("failed to parse snapshot from {addr}: {e}"))?;
+    snapshot.sanitize();
 
     Ok(snapshot)
 }

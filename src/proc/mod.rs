@@ -206,6 +206,26 @@ pub struct Snapshot {
     #[serde(with = "systemtime_iso8601")]
     pub timestamp: SystemTime,
     pub entries: BTreeMap<String, ProcEntry>,
+    /// Alerts evaluated by the agent that produced this snapshot (e.g. the
+    /// syslenz4j Watch API). Absent in snapshots from older agents; omitted
+    /// from output when empty so the wire format is unchanged in the common
+    /// case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alerts: Vec<AgentAlert>,
+}
+
+/// An alert evaluated and reported by a remote agent inside its snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentAlert {
+    pub name: String,
+    pub severity: String,
+    pub value: f64,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub condition: String,
+    #[serde(default)]
+    pub since: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,6 +275,120 @@ impl PartialEq for FieldValue {
             (FieldValue::Duration(a), FieldValue::Duration(b)) => (a - b).abs() < 1e-9,
             (FieldValue::Table(a), FieldValue::Table(b)) => a == b,
             _ => false,
+        }
+    }
+}
+
+/// Strip ANSI escape sequences and replace remaining control characters
+/// with spaces.
+///
+/// Strings entering a snapshot are not trustworthy: process names and
+/// cmdlines from /proc, plugin output, and remote snapshots can all carry
+/// escape sequences or control bytes. ratatui writes cell content to the
+/// terminal verbatim, so a single raw ESC corrupts the whole display.
+pub fn sanitize_for_display(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            match chars.peek() {
+                // CSI: ESC [ <params/intermediates> <final byte @..~>
+                Some('[') => {
+                    chars.next();
+                    while let Some(&n) = chars.peek() {
+                        chars.next();
+                        if ('\u{40}'..='\u{7e}').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                // OSC: ESC ] ... (BEL | ESC \)
+                Some(']') => {
+                    chars.next();
+                    while let Some(n) = chars.next() {
+                        if n == '\u{07}' {
+                            break;
+                        }
+                        if n == '\u{1b}' {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                // Two-character Fe escape: ESC @..Z \ ^ _
+                Some(&n) if ('\u{40}'..='\u{5f}').contains(&n) => {
+                    chars.next();
+                }
+                // Lone ESC: drop it
+                _ => {}
+            }
+        } else if c.is_control() {
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn sanitize_in_place(s: &mut String) {
+    if s.chars().any(|c| c.is_control()) {
+        *s = sanitize_for_display(s);
+    }
+}
+
+impl ProcEntry {
+    /// Sanitize all display-bound strings in this entry (see
+    /// [`sanitize_for_display`]).
+    pub fn sanitize(&mut self) {
+        sanitize_in_place(&mut self.source);
+        for f in &mut self.fields {
+            sanitize_in_place(&mut f.name);
+            sanitize_in_place(&mut f.description);
+            if let Some(unit) = &mut f.unit {
+                sanitize_in_place(unit);
+            }
+            match &mut f.value {
+                FieldValue::Text(s) => sanitize_in_place(s),
+                FieldValue::Table(rows) => {
+                    for row in rows {
+                        for cell in row {
+                            sanitize_in_place(cell);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Snapshot {
+    /// Sanitize every entry in the snapshot. Called at the ingestion
+    /// boundaries (local capture, remote/docker/tcp parse) so that no
+    /// downstream consumer ever sees raw control characters.
+    pub fn sanitize(&mut self) {
+        let needs_key_fix = self.entries.keys().any(|k| k.chars().any(|c| c.is_control()));
+        for entry in self.entries.values_mut() {
+            entry.sanitize();
+        }
+        if needs_key_fix {
+            let entries = std::mem::take(&mut self.entries);
+            self.entries = entries
+                .into_iter()
+                .map(|(k, e)| (sanitize_for_display(&k), e))
+                .collect();
+        }
+        for alert in &mut self.alerts {
+            sanitize_in_place(&mut alert.name);
+            sanitize_in_place(&mut alert.severity);
+            sanitize_in_place(&mut alert.message);
+            sanitize_in_place(&mut alert.condition);
+            if let Some(since) = &mut alert.since {
+                sanitize_in_place(since);
+            }
         }
     }
 }
@@ -464,20 +598,29 @@ impl Snapshot {
             entries.insert(key, entry);
         }
 
-        Ok(Snapshot {
+        let mut snapshot = Snapshot {
             timestamp: SystemTime::now(),
             entries,
-        })
+            alerts: Vec::new(),
+        };
+        snapshot.sanitize();
+        Ok(snapshot)
     }
 
     #[cfg(target_os = "macos")]
     pub fn capture() -> anyhow::Result<Self> {
-        platform_macos::capture()
+        platform_macos::capture().map(|mut s| {
+            s.sanitize();
+            s
+        })
     }
 
     #[cfg(target_os = "windows")]
     pub fn capture() -> anyhow::Result<Self> {
-        platform_windows::capture()
+        platform_windows::capture().map(|mut s| {
+            s.sanitize();
+            s
+        })
     }
 }
 
@@ -517,6 +660,129 @@ pub struct DiffItem {
 }
 
 #[cfg(test)]
+mod sanitize_tests {
+    use super::*;
+
+    #[test]
+    fn strips_csi_color_sequences() {
+        assert_eq!(
+            sanitize_for_display("\u{1b}[31mERROR\u{1b}[0m disk full"),
+            "ERROR disk full"
+        );
+    }
+
+    #[test]
+    fn strips_osc_title_sequence() {
+        assert_eq!(
+            sanitize_for_display("\u{1b}]0;evil title\u{07}name"),
+            "name"
+        );
+        assert_eq!(
+            sanitize_for_display("\u{1b}]8;;http://x\u{1b}\\link"),
+            "link"
+        );
+    }
+
+    #[test]
+    fn replaces_bare_control_chars_with_spaces() {
+        assert_eq!(sanitize_for_display("a\nb\tc\u{7f}d"), "a b c d");
+    }
+
+    #[test]
+    fn drops_lone_esc_at_end() {
+        assert_eq!(sanitize_for_display("abc\u{1b}"), "abc");
+    }
+
+    #[test]
+    fn leaves_clean_strings_unchanged() {
+        assert_eq!(sanitize_for_display("日本語 OK / plain"), "日本語 OK / plain");
+    }
+
+    #[test]
+    fn snapshot_without_alerts_key_still_parses() {
+        // Older agents (and syslenz itself pre-alerts) omit the key entirely.
+        let json = r#"{"timestamp": "2026-06-12T01:02:03Z", "entries": {}}"#;
+        let snap: Snapshot = serde_json::from_str(json).unwrap();
+        assert!(snap.alerts.is_empty());
+    }
+
+    #[test]
+    fn parses_syslenz4j_snapshot_with_alerts() {
+        // Exact shape emitted by syslenz4j's JsonExporter.exportSnapshot()
+        let json = r#"{"timestamp": "2026-06-12T01:02:03.456Z", "entries": {"jvm": {"source": "jvm/pid-42", "fields": [{"name": "heap_used", "value": {"Bytes": 1024}, "unit": null, "description": "Current heap memory usage"}]}}, "alerts": [{"name": "queue_size", "severity": "critical", "value": 250.0, "message": "[critical] queue_size > 100 (value: 250.00)", "condition": "> 100", "since": "2026-06-12T01:02:00Z"}]}"#;
+        let snap: Snapshot = serde_json::from_str(json).unwrap();
+        assert_eq!(snap.entries["jvm"].source, "jvm/pid-42");
+        assert_eq!(snap.alerts.len(), 1);
+        assert_eq!(snap.alerts[0].name, "queue_size");
+        assert_eq!(snap.alerts[0].severity, "critical");
+        assert_eq!(snap.alerts[0].condition, "> 100");
+    }
+
+    #[test]
+    fn empty_alerts_are_not_serialized() {
+        let snap = Snapshot {
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+            entries: std::collections::BTreeMap::new(),
+            alerts: Vec::new(),
+        };
+        let json = serde_json::to_string(&snap).unwrap();
+        assert!(!json.contains("alerts"));
+    }
+
+    #[test]
+    fn snapshot_sanitize_covers_agent_alerts() {
+        let mut snap = Snapshot {
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+            entries: std::collections::BTreeMap::new(),
+            alerts: vec![AgentAlert {
+                name: "x\u{1b}[31m".to_string(),
+                severity: "critical".to_string(),
+                value: 1.0,
+                message: "boom\u{1b}[2J".to_string(),
+                condition: "> 1".to_string(),
+                since: None,
+            }],
+        };
+        snap.sanitize();
+        assert_eq!(snap.alerts[0].name, "x");
+        assert_eq!(snap.alerts[0].message, "boom");
+    }
+
+    #[test]
+    fn entry_sanitize_covers_text_and_table() {
+        let mut entry = ProcEntry {
+            source: "proc\u{1b}[2Jesses".to_string(),
+            fields: vec![
+                Field {
+                    name: "status\u{1b}[31m".to_string(),
+                    value: FieldValue::Text("\u{1b}[31mRED\u{1b}[0m".to_string()),
+                    unit: None,
+                    description: "desc".to_string(),
+                },
+                Field {
+                    name: "procs".to_string(),
+                    value: FieldValue::Table(vec![vec![
+                        "1234".to_string(),
+                        "bad\u{1b}[9999;9999Hname".to_string(),
+                    ]]),
+                    unit: None,
+                    description: "desc".to_string(),
+                },
+            ],
+        };
+        entry.sanitize();
+        assert_eq!(entry.source, "processes");
+        assert_eq!(entry.fields[0].name, "status");
+        assert_eq!(entry.fields[0].value, FieldValue::Text("RED".to_string()));
+        if let FieldValue::Table(rows) = &entry.fields[1].value {
+            assert_eq!(rows[0][1], "badname");
+        } else {
+            panic!("expected table");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
@@ -541,6 +807,7 @@ mod tests {
         Snapshot {
             timestamp: SystemTime::now(),
             entries,
+            alerts: Vec::new(),
         }
     }
 

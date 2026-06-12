@@ -157,6 +157,7 @@ mod tests {
         Snapshot {
             timestamp: SystemTime::now(),
             entries,
+            alerts: Vec::new(),
         }
     }
 

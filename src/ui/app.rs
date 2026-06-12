@@ -436,11 +436,13 @@ impl App {
                 receiver.try_recv().unwrap_or_else(|_| Snapshot {
                     timestamp: SystemTime::now(),
                     entries: BTreeMap::new(),
+                    alerts: Vec::new(),
                 })
             } else {
                 Snapshot {
                     timestamp: SystemTime::now(),
                     entries: BTreeMap::new(),
+                    alerts: Vec::new(),
                 }
             };
             let conn_status = if rx.is_some() {
@@ -623,6 +625,12 @@ impl App {
         // G20-9: Record alert state transitions to history
         let history_dir = crate::history::default_alert_history_dir();
         alert::record_alert_history(&history_dir, &self.active_alerts, &prev_firing, host_label);
+
+        // Agent-evaluated alerts (e.g. syslenz4j Watch API) ride along in the
+        // snapshot itself. They are display-only here: actions, notifications
+        // and history belong to the agent that evaluated them, so they are
+        // appended after the local pipelines above have run.
+        alert::merge_agent_alerts(&mut self.active_alerts, &self.current, self.alert_rules.len());
 
         // Sync active host state
         self.hosts[self.active_host].current = self.current.clone();
@@ -1770,6 +1778,7 @@ mod tests {
         Snapshot {
             timestamp: SystemTime::now(),
             entries,
+            alerts: Vec::new(),
         }
     }
 

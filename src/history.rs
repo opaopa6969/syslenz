@@ -205,6 +205,7 @@ mod tests {
         Snapshot {
             timestamp: SystemTime::now(),
             entries: BTreeMap::new(),
+            alerts: Vec::new(),
         }
     }
 

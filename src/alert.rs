@@ -190,6 +190,50 @@ pub fn field_alert_severity<'a>(
     None
 }
 
+/// Merge agent-evaluated alerts (carried inside the snapshot, e.g. from the
+/// syslenz4j Watch API) into the active alert list for display.
+///
+/// These are display-only: actions, notifications and history belong to the
+/// agent that evaluated them. `rule_base` should be `rules.len()` so the
+/// synthetic `rule_index` values never collide with local rule indices in
+/// `prev_firing` debouncing (and `rules.get(index)` safely yields `None`).
+///
+/// Each alert is attributed to the snapshot entry that carries the matching
+/// metric (directly or with an `app_` prefix) so sidebar severity badges
+/// light up; alerts with no matching entry fall back to the source `"agent"`.
+pub fn merge_agent_alerts(
+    active: &mut Vec<AlertEvent>,
+    snapshot: &crate::proc::Snapshot,
+    rule_base: usize,
+) {
+    for (i, agent_alert) in snapshot.alerts.iter().enumerate() {
+        let prefixed = format!("app_{}", agent_alert.name);
+        let source = snapshot
+            .entries
+            .iter()
+            .find(|(_, e)| {
+                e.fields
+                    .iter()
+                    .any(|f| f.name == agent_alert.name || f.name == prefixed)
+            })
+            .map(|(k, _)| k.clone())
+            .unwrap_or_else(|| "agent".to_string());
+        active.push(AlertEvent {
+            rule_index: rule_base + i,
+            source,
+            field: agent_alert.name.clone(),
+            severity: agent_alert.severity.clone(),
+            message: if agent_alert.message.is_empty() {
+                format!("{} {}", agent_alert.name, agent_alert.condition)
+            } else {
+                agent_alert.message.clone()
+            },
+            current_value: format!("{:.2}", agent_alert.value),
+            firing: true,
+        });
+    }
+}
+
 /// Execute external action commands for newly-firing alerts (BL-071).
 ///
 /// Only fires actions for alerts that are newly firing (not in `prev_firing`).
@@ -538,5 +582,68 @@ mod tests {
             !alert_file.exists(),
             "No file should be created for non-transition events"
         );
+    }
+
+    #[test]
+    fn merge_agent_alerts_maps_source_and_indices() {
+        use crate::proc::{AgentAlert, Field, FieldValue, ProcEntry, Snapshot};
+        use std::collections::BTreeMap;
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "jvm".to_string(),
+            ProcEntry {
+                source: "jvm/pid-42".to_string(),
+                fields: vec![Field {
+                    name: "app_queue_size".to_string(),
+                    value: FieldValue::Float(250.0),
+                    unit: None,
+                    description: "queue".to_string(),
+                }],
+            },
+        );
+        let snapshot = Snapshot {
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+            entries,
+            alerts: vec![
+                AgentAlert {
+                    name: "queue_size".to_string(),
+                    severity: "critical".to_string(),
+                    value: 250.0,
+                    message: "[critical] queue_size > 100".to_string(),
+                    condition: "> 100".to_string(),
+                    since: None,
+                },
+                AgentAlert {
+                    name: "unknown_metric".to_string(),
+                    severity: "warning".to_string(),
+                    value: 1.0,
+                    message: String::new(),
+                    condition: "> 0".to_string(),
+                    since: None,
+                },
+            ],
+        };
+
+        let mut active = Vec::new();
+        merge_agent_alerts(&mut active, &snapshot, 3);
+
+        assert_eq!(active.len(), 2);
+        // Attributed to the entry carrying the app_-prefixed metric
+        assert_eq!(active[0].source, "jvm");
+        assert_eq!(active[0].field, "queue_size");
+        assert_eq!(active[0].severity, "critical");
+        assert!(active[0].firing);
+        // rule_index starts past local rules and never collides
+        assert_eq!(active[0].rule_index, 3);
+        assert_eq!(active[1].rule_index, 4);
+        // No matching entry: falls back to "agent"; empty message synthesized
+        assert_eq!(active[1].source, "agent");
+        assert_eq!(active[1].message, "unknown_metric > 0");
+        // Sidebar badge lookup works against the merged alerts
+        assert_eq!(source_max_severity(&active, "jvm"), Some("critical"));
+        // Status bar counts include the merged alerts
+        let (_, warn, crit) = count_by_severity(&active);
+        assert_eq!((warn, crit), (1, 1));
     }
 }

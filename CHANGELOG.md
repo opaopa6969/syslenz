@@ -9,6 +9,12 @@ Versions are published to [crates.io](https://crates.io/crates/syslenz) and [Doc
 
 ## [Unreleased]
 
+### Fixed
+- **TUI corruption from untrusted strings** — process names/cmdlines from /proc, plugin output, and remote snapshots can carry ANSI escape sequences or control bytes that ratatui writes to the terminal verbatim, garbling the display. All snapshots are now sanitized at the ingestion boundaries (local capture, ssh/docker/tcp parse): ANSI sequences are stripped, remaining control characters become spaces.
+
+### Added
+- **Agent-evaluated alerts** — snapshots may carry a top-level `alerts` array (emitted e.g. by the syslenz4j Watch API). They are merged into the active alert display (status bar counts, sidebar severity badges), attributed to the entry holding the matching metric. Display-only: actions/notifications/history remain the agent's responsibility. Older snapshots without the key parse unchanged.
+
 ### Planned
 - **Fleet View** (`/fleet`) — multi-host web dashboard with status matrix and auto-refresh
 - **Web authentication** — Basic Auth and Token Auth via `[web]` config section

@@ -86,6 +86,7 @@ pub fn capture() -> anyhow::Result<Snapshot> {
     Ok(Snapshot {
         timestamp: SystemTime::now(),
         entries,
+        alerts: Vec::new(),
     })
 }
 
