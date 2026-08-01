@@ -34,15 +34,15 @@ jobs:
       - name: Test
         run: cargo test
 
-  # License audit via cargo-deny (disabled: manifest parse error on action v1;
-  # re-enable after adding deny.toml and pinning a compatible action version)
-  # deny:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: EmbarkStudios/cargo-deny-action@v1
-  #       with:
-  #         command: check licenses
+  # License/advisory/ban/source audit via cargo-deny.
+  # deny.toml is present; action pinned to v2 to avoid the v1 manifest parse error.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
 
   # macOS build is also blocked by proc::processes (procfs crate is Linux-only).
   # Re-enable after platform abstraction is completed.

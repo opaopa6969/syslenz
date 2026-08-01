@@ -65,6 +65,12 @@ Capture full system state as JSON, compare across hosts, track changes over time
 
 ## Quick Start
 
+> [!CAUTION]
+> `curl | sh` runs an arbitrary script from the internet. Review
+> [`scripts/install.sh`](scripts/install.sh) before piping it to a shell, and pin
+> the URL to a signed tag if you need integrity guarantees. crates.io and
+> source installs below avoid this risk.
+
 ```bash
 # One-liner install
 curl -sSf https://raw.githubusercontent.com/opaopa6969/syslenz/main/scripts/install.sh | sh
@@ -81,6 +87,12 @@ syslenz
 ---
 
 ## Install
+
+> [!CAUTION]
+> `curl | sh` executes an arbitrary script from the internet (MITM /
+> repository-tampering risk). Review
+> [`scripts/install.sh`](scripts/install.sh) first, or prefer the crates.io /
+> source builds below, which do not pipe a remote script to a shell.
 
 ```bash
 # One-liner install script

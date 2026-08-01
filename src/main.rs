@@ -46,6 +46,12 @@ use ui::app::App;
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    // --help / -h — print usage and exit 0
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return Ok(());
+    }
+
     // --export <file.json>
     if let Some(pos) = args.iter().position(|a| a == "--export") {
         let path = args
@@ -984,4 +990,82 @@ fn run_query(query: Option<&str>, json_mode: bool) -> i32 {
             }
         }
     }
+}
+
+fn print_help() {
+    println!(
+        "syslenz {} — live system metrics viewer, exporter, and server\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("USAGE:");
+    println!("    syslenz [OPTIONS]\n");
+    println!("OPTIONS:");
+    let opts: &[(&str, &str)] = &[
+        ("--help, -h", "Print this help and exit"),
+        (
+            "--query [source[.field]] [--json]",
+            "CLI query mode (no TUI)",
+        ),
+        (
+            "--export <file.json>",
+            "Capture one snapshot and write JSON",
+        ),
+        (
+            "--export-series <dir> --interval <secs> --count <n>",
+            "Capture a time series of snapshots",
+        ),
+        (
+            "--export-article-resources <dir>",
+            "Export article index/en/ja JSON",
+        ),
+        (
+            "--export-article-markdown-resources <dir>",
+            "Export markdown article resources",
+        ),
+        (
+            "--import <file.json>",
+            "Import a snapshot or series into the TUI",
+        ),
+        (
+            "--serve [bind_addr]",
+            "TCP server mode (default 0.0.0.0:9100)",
+        ),
+        (
+            "--prometheus [bind_addr]",
+            "Prometheus metrics HTTP server (default 0.0.0.0:9101)",
+        ),
+        ("--web [port]", "Web UI server (default 3000, feature: web)"),
+        (
+            "--otel [endpoint] [--otel-level core|full]",
+            "OpenTelemetry export",
+        ),
+        ("--widget", "X11 desktop widget (feature: x11widget)"),
+        (
+            "--ssh <user@host>",
+            "Monitor remote host via SSH (repeatable)",
+        ),
+        (
+            "--docker <container>",
+            "Monitor Docker container (repeatable)",
+        ),
+        (
+            "--connect <host:port>",
+            "Connect to a --serve endpoint (repeatable)",
+        ),
+        ("--lang <en|ja>", "Override UI/CLI language"),
+        ("--classic", "Start in classic Overview mode"),
+        ("--tutorial", "Start with the tutorial"),
+        (
+            "--install-service",
+            "Generate and install a systemd service file",
+        ),
+        (
+            "--uninstall-service",
+            "Stop, disable, and remove the systemd service",
+        ),
+    ];
+    for (flag, desc) in opts {
+        println!("    {:<48} {}", flag, desc);
+    }
+    println!("\nRun without options to start the interactive TUI.");
 }

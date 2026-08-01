@@ -19,14 +19,19 @@ fn binary_builds_successfully() {
 #[cfg(target_os = "linux")]
 #[test]
 fn binary_responds_to_help_or_version() {
-    // Verify the binary can at least start (may fail without a terminal,
-    // so we just check it was built).
-    let output = std::process::Command::new("cargo")
-        .args(["build", "--quiet"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .expect("Failed to run cargo build");
-    assert!(output.status.success(), "Binary failed to build");
+    let output = run_binary(&["--help"]);
+    assert!(output.status.success(), "--help should exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("USAGE:"),
+        "--help should print usage; got:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("--query"),
+        "--help should list --query; got:\n{}",
+        stdout
+    );
 }
 
 /// Helper: run the built binary with the given arguments.
