@@ -135,53 +135,43 @@ hosts = [
 ```toml
 # syslenz 設定
 
-[🇬🇧 English](../en/config.md)
 # 場所: ~/.config/syslenz/config.toml
 
-[🇬🇧 English](../en/config.md)
 
 [general]
 # インターフェース言語: "en" または "ja"
 
-[🇬🇧 English](../en/config.md)
 lang = "ja"
 
 # 自動リフレッシュ間隔 (ミリ秒)
 
-[🇬🇧 English](../en/config.md)
 interval_ms = 1000
 
 # 起動時のビュー: "dashboard" または "classic"
 
-[🇬🇧 English](../en/config.md)
 default_view = "dashboard"
 
 # グラフ用に保持するスナップショット数
 
-[🇬🇧 English](../en/config.md)
 history_size = 60
 
 [otel]
 # OTLP gRPCエンドポイント
 
-[🇬🇧 English](../en/config.md)
 endpoint = "http://otel-collector.local:4317"
 
 # メトリクスプッシュ間隔 (秒)
 
-[🇬🇧 English](../en/config.md)
 interval_secs = 10
 
 [web]
 # Web UIポート
 
-[🇬🇧 English](../en/config.md)
 port = 8080
 
 [ssh]
 # 事前登録のリモートホスト
 
-[🇬🇧 English](../en/config.md)
 hosts = [
     "admin@prod-web-01",
     "admin@prod-web-02",

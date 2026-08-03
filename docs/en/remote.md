@@ -95,7 +95,7 @@ FROM ubuntu:24.04
 # ... your app setup ...
 
 [🇯🇵 日本語版](../ja/remote.md)
-COPY --from=syslenz/syslenz:latest /usr/local/bin/syslenz /usr/local/bin/syslenz
+COPY --from=opaopa6969/syslenz:latest /usr/local/bin/syslenz /usr/local/bin/syslenz
 ```
 
 ## TCP Server/Client Mode
@@ -149,7 +149,7 @@ services:
     # ... your app config ...
 
   syslenz-agent:
-    image: syslenz/syslenz:latest
+    image: opaopa6969/syslenz:latest
     command: ["syslenz", "--serve", "0.0.0.0:9100"]
     pid: "host"
     privileged: true

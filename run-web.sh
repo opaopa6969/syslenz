@@ -14,10 +14,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Build with web feature if needed
-if [ ! -f target/release/syslenz ] || ! target/release/syslenz --help 2>&1 | grep -q web; then
+# Check by looking at the binary modification time vs. a marker file
+MARKER="target/release/.web_feature_built"
+if [ ! -f target/release/syslenz ] || [ ! -f "$MARKER" ] || [ target/release/syslenz -nt "$MARKER" ]; then
     echo "Building syslenz with web feature..."
     source ~/.cargo/env 2>/dev/null || true
     cargo build --release --features web
+    touch "$MARKER"
 fi
 
 echo "Starting syslenz Web UI on http://localhost:${PORT}"

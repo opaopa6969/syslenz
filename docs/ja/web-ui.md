@@ -47,17 +47,14 @@ cargo build --release --features web
 ```bash
 # デフォルトポート (3000)
 
-[🇬🇧 English](../en/web-ui.md)
 syslenz --web
 
 # カスタムポート
 
-[🇬🇧 English](../en/web-ui.md)
 syslenz --web 8080
 
 # 日本語ロケール
 
-[🇬🇧 English](../en/web-ui.md)
 syslenz --web 8080 --lang ja
 ```
 

@@ -47,17 +47,14 @@ cargo build --release --features web
 ```bash
 # Default port (3000)
 
-[🇯🇵 日本語版](../ja/web-ui.md)
 syslenz --web
 
 # Custom port
 
-[🇯🇵 日本語版](../ja/web-ui.md)
 syslenz --web 8080
 
 # With Japanese locale
 
-[🇯🇵 日本語版](../ja/web-ui.md)
 syslenz --web 8080 --lang ja
 ```
 

@@ -143,34 +143,36 @@ As of v1.1.0, you can define custom alert rules using TOML array-of-tables synta
 |-----|------|----------|-------------|
 | `source` | String | Yes | Data source name (e.g., `"meminfo"`, `"loadavg"`) |
 | `field` | String | Yes | Field name within the source (e.g., `"MemAvailable"`, `"load1"`) |
-| `op` | String | Yes | Comparison operator: `">"`, `">="`, `"<"`, `"<="`, `"=="`, `"!="` |
-| `value` | Float | Yes | Threshold value to compare against |
-| `label` | String | No | Optional human-readable label for the alert |
+| `condition` | String | Yes | Comparison expression, e.g. `"< 500000000"` or `">= 8.0"` |
+| `severity` | String | Yes | Alert severity: `"info"`, `"warning"`, or `"critical"` |
+| `message` | String | Yes | Human-readable alert message |
+| `action` | String | No | External command for newly firing alerts; supports `{message}`, `{source}`, `{field}`, `{value}`, and `{severity}` |
+| `notify` | Array of Strings | No | Notification endpoints such as `slack:URL` or `webhook:URL` |
 
 ```toml
 # Alert when available memory drops below 500 MB (in kB)
 [[alert]]
 source = "meminfo"
 field = "MemAvailable"
-op = "<"
-value = 512000.0
-label = "Low memory"
+condition = "< 512000"
+severity = "critical"
+message = "Low memory"
 
 # Alert when 1-minute load exceeds 8
 [[alert]]
 source = "loadavg"
 field = "load1"
-op = ">"
-value = 8.0
-label = "High load"
+condition = "> 8.0"
+severity = "warning"
+message = "High load"
 
 # Alert when root disk usage exceeds 90%
 [[alert]]
 source = "df"
 field = "use_percent"
-op = ">"
-value = 90.0
-label = "Disk almost full"
+condition = "> 90.0"
+severity = "warning"
+message = "Disk almost full"
 ```
 
 **Notes:**
@@ -184,53 +186,43 @@ label = "Disk almost full"
 ```toml
 # syslenz configuration
 
-[🇯🇵 日本語版](../ja/config.md)
 # Location: ~/.config/syslenz/config.toml
 
-[🇯🇵 日本語版](../ja/config.md)
 
 [general]
 # Interface language: "en" or "ja"
 
-[🇯🇵 日本語版](../ja/config.md)
 lang = "en"
 
 # Auto-refresh interval (milliseconds)
 
-[🇯🇵 日本語版](../ja/config.md)
 interval_ms = 1000
 
 # Starting view: "dashboard" or "classic"
 
-[🇯🇵 日本語版](../ja/config.md)
 default_view = "dashboard"
 
 # Number of snapshots to keep for graphs
 
-[🇯🇵 日本語版](../ja/config.md)
 history_size = 60
 
 [otel]
 # OTLP gRPC endpoint
 
-[🇯🇵 日本語版](../ja/config.md)
 endpoint = "http://otel-collector.local:4317"
 
 # Metric push interval (seconds)
 
-[🇯🇵 日本語版](../ja/config.md)
 interval_secs = 10
 
 [web]
 # Web UI port
 
-[🇯🇵 日本語版](../ja/config.md)
 port = 8080
 
 [ssh]
 # Pre-configured remote hosts
 
-[🇯🇵 日本語版](../ja/config.md)
 hosts = [
     "admin@prod-web-01",
     "admin@prod-web-02",

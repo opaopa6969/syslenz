@@ -93,11 +93,11 @@ cargo install --path .
 cargo install --path . --features "otel,web"
 
 # Docker — TCP サーバーモード (認証なし。信頼できるネットワークのみで使用)
-docker run --rm -p 9100:9100 --pid=host syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
 syslenz --connect localhost:9100
 
 # Docker — Web UI
-docker compose --profile web up -d
+docker compose up -d
 # http://localhost:3000 を開く
 
 # Docker — Grafana + Prometheus + syslenz

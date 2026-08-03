@@ -50,7 +50,7 @@ cargo install --path . --features "web,otel,x11widget"
 **Docker:**
 
 ```bash
-docker run --rm -it --pid=host --privileged syslenz/syslenz
+docker run --rm -it --pid=host --privileged opaopa6969/syslenz
 ```
 
 **バイナリダウンロード:**

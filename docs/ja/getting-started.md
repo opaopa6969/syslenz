@@ -94,16 +94,16 @@ cargo build --release --features "web,otel,x11widget"
 
 ```bash
 # インタラクティブ実行（コンテナ内 TUI）
-docker run --rm -it --pid=host --privileged ghcr.io/opaopa6969/syslenz
+docker run --rm -it --pid=host --privileged opaopa6969/syslenz
 
 # スナップショットを stdout にエクスポート
-docker run --rm --pid=host --privileged ghcr.io/opaopa6969/syslenz --export /dev/stdout > snapshot.json
+docker run --rm --pid=host --privileged opaopa6969/syslenz --export /dev/stdout > snapshot.json
 
 # TCP サーバーモード — ポート 9100 でリッスン（認証なし。信頼できるネットワークのみ）
-docker run --rm -p 9100:9100 --pid=host ghcr.io/opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
 
 # Web UI
-docker compose --profile web up -d
+docker compose up -d
 # http://localhost:3000 を開く
 
 # Grafana + Prometheus + syslenz

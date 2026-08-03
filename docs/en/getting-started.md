@@ -94,16 +94,16 @@ cargo build --release --features "web,otel,x11widget"
 
 ```bash
 # Run interactively (TUI inside container)
-docker run --rm -it --pid=host --privileged ghcr.io/opaopa6969/syslenz
+docker run --rm -it --pid=host --privileged opaopa6969/syslenz
 
 # Export a snapshot to stdout
-docker run --rm --pid=host --privileged ghcr.io/opaopa6969/syslenz --export /dev/stdout > snapshot.json
+docker run --rm --pid=host --privileged opaopa6969/syslenz --export /dev/stdout > snapshot.json
 
 # TCP server mode — listen on port 9100 (no auth; use on trusted networks only)
-docker run --rm -p 9100:9100 --pid=host ghcr.io/opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
 
 # Web UI
-docker compose --profile web up -d
+docker compose up -d
 # Open http://localhost:3000
 
 # Grafana + Prometheus + syslenz
