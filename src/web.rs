@@ -96,6 +96,9 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             .route("/api/v1/settings", get(settings_api_handler))
             .route("/api/v1/settings/alerts", post(settings_alerts_handler))
             .route("/api/article", get(article_handler))
+            // Liveness probe for external monitoring. Intentionally exposes no
+            // system information — body is a fixed "ok" string.
+            .route("/healthz", get(healthz_handler))
             .with_state(state);
 
         let addr = format!("0.0.0.0:{}", port);
@@ -104,6 +107,16 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
         axum::serve(listener, app).await?;
         Ok(())
     })
+}
+
+/// Health check endpoint for external monitoring.
+///
+/// Deliberately requires no state and returns a fixed minimal body so that no
+/// log content, system information, or internal configuration can leak through
+/// an unauthenticated path.
+#[cfg(feature = "web")]
+async fn healthz_handler() -> impl IntoResponse {
+    (StatusCode::OK, "ok")
 }
 
 #[cfg(feature = "web")]
