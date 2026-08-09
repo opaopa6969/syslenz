@@ -630,7 +630,11 @@ impl App {
         // snapshot itself. They are display-only here: actions, notifications
         // and history belong to the agent that evaluated them, so they are
         // appended after the local pipelines above have run.
-        alert::merge_agent_alerts(&mut self.active_alerts, &self.current, self.alert_rules.len());
+        alert::merge_agent_alerts(
+            &mut self.active_alerts,
+            &self.current,
+            self.alert_rules.len(),
+        );
 
         // Sync active host state
         self.hosts[self.active_host].current = self.current.clone();
