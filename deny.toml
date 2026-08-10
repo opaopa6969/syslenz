@@ -4,6 +4,16 @@
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
+# Ignored advisories — tracked in syslenz #23. These come from transitive
+# deps (webpki-roots via ureq, paste via tonic, anyhow via various) that we
+# cannot update without a breaking change upstream. Re-review on bump.
+ignore = [
+    "RUSTSEC-2026-0190",  # anyhow Error::downcast_mut unsoundness — upstream not yet patched in our pinned version
+    "RUSTSEC-2024-0436",  # paste unmaintained — transitive via tonic/opentelemetry, no drop-in replacement
+    "RUSTSEC-2026-0098",  # webpki name constraints URI — transitive via webpki-roots/ureq
+    "RUSTSEC-2026-0099",  # webpki wildcard name constraints — same
+    "RUSTSEC-2026-0104",  # webpki CRL parsing reachable panic — same
+]
 
 [licenses]
 allow = [
