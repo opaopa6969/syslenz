@@ -38,6 +38,8 @@
 #![allow(clippy::unnecessary_filter_map)]
 #![allow(clippy::unnecessary_get_then_check)]
 #![allow(clippy::manual_contains)]
+#![allow(clippy::question_mark)]
+#![allow(unknown_lints)] // CI clippy may know lints that local clippy doesn't (version skew)
 
 mod alert;
 mod article;
