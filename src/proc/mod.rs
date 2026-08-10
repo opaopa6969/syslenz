@@ -370,7 +370,10 @@ impl Snapshot {
     /// boundaries (local capture, remote/docker/tcp parse) so that no
     /// downstream consumer ever sees raw control characters.
     pub fn sanitize(&mut self) {
-        let needs_key_fix = self.entries.keys().any(|k| k.chars().any(|c| c.is_control()));
+        let needs_key_fix = self
+            .entries
+            .keys()
+            .any(|k| k.chars().any(|c| c.is_control()));
         for entry in self.entries.values_mut() {
             entry.sanitize();
         }
@@ -695,7 +698,10 @@ mod sanitize_tests {
 
     #[test]
     fn leaves_clean_strings_unchanged() {
-        assert_eq!(sanitize_for_display("日本語 OK / plain"), "日本語 OK / plain");
+        assert_eq!(
+            sanitize_for_display("日本語 OK / plain"),
+            "日本語 OK / plain"
+        );
     }
 
     #[test]
