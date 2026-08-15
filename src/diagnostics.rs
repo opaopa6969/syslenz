@@ -106,6 +106,44 @@ pub fn analyze(
     findings
 }
 
+/// Fetch several byte fields from one source in a single pass.
+///
+/// Each name in `names` is paired with the result of looking it up; missing
+/// fields map to `None`. Walking the source's field list once — instead of
+/// once per requested field — turns an O(F*K) linear scan (F fields, K
+/// requested fields) into O(F+K), which matters for large sources like
+/// `vmstat` (~179 fields) and `net/snmp` (~86 fields) when several fields
+/// are read together.
+///
+/// Returns a stack-allocated array of `Option<u64>` sized to `names.len()`,
+/// in the same order as `names`. No heap allocation.
+fn get_bytes_many<const N: usize>(
+    snapshot: &Snapshot,
+    source: &str,
+    names: [&str; N],
+) -> [Option<u64>; N] {
+    let mut out: [Option<u64>; N] = [const { None }; N];
+    let Some(entry) = snapshot.entries.get(source) else {
+        return out;
+    };
+    let mut remaining = N;
+    for f in &entry.fields {
+        if remaining == 0 {
+            break;
+        }
+        for i in 0..N {
+            if out[i].is_none() && f.name == names[i] {
+                if let FieldValue::Bytes(v) = f.value {
+                    out[i] = Some(v);
+                    remaining -= 1;
+                }
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn get_bytes(snapshot: &Snapshot, source: &str, field: &str) -> Option<u64> {
     snapshot
         .entries
@@ -145,6 +183,44 @@ fn get_integer(snapshot: &Snapshot, source: &str, field: &str) -> Option<i64> {
             FieldValue::Integer(v) => Some(v),
             _ => None,
         })
+}
+
+/// Fetch several integer fields from one source in a single pass.
+///
+/// Each name in `names` is paired with the result of looking it up; missing
+/// fields map to `None`. Walking the source's field list once — instead of
+/// once per requested field — turns an O(F*K) linear scan (F fields, K
+/// requested fields) into O(F+K), which matters for large sources like
+/// `vmstat` (~179 fields) and `net/snmp` (~86 fields) when several fields
+/// are read together.
+///
+/// Returns a stack-allocated array of `Option<i64>` sized to `names.len()`,
+/// in the same order as `names`. No heap allocation.
+fn get_integers<const N: usize>(
+    snapshot: &Snapshot,
+    source: &str,
+    names: [&str; N],
+) -> [Option<i64>; N] {
+    let mut out: [Option<i64>; N] = [const { None }; N];
+    let Some(entry) = snapshot.entries.get(source) else {
+        return out;
+    };
+    let mut remaining = N;
+    for f in &entry.fields {
+        if remaining == 0 {
+            break;
+        }
+        for i in 0..N {
+            if out[i].is_none() && f.name == names[i] {
+                if let FieldValue::Integer(v) = f.value {
+                    out[i] = Some(v);
+                    remaining -= 1;
+                }
+                break;
+            }
+        }
+    }
+    out
 }
 
 fn get_table_row_count(snapshot: &Snapshot, source: &str, field: &str) -> Option<usize> {
@@ -190,11 +266,12 @@ fn get_table_rows<'a>(
 }
 
 fn check_memory(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
-    let total = match get_bytes(snap, "meminfo", "MemTotal") {
+    let vals = get_bytes_many(snap, "meminfo", ["MemTotal", "MemAvailable"]);
+    let total = match vals[0] {
         Some(v) => v,
         None => return,
     };
-    let available = get_bytes(snap, "meminfo", "MemAvailable").unwrap_or(total);
+    let available = vals[1].unwrap_or(total);
 
     if total == 0 {
         return;
@@ -966,13 +1043,15 @@ fn check_systemd(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale:
 }
 
 fn check_memory_leak(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
-    let total = match get_bytes(snap, "meminfo", "MemTotal") {
+    // Single-pass fetch of the 3 byte fields from meminfo (~54 fields).
+    let vals = get_bytes_many(snap, "meminfo", ["MemTotal", "Cached", "Dirty"]);
+    let total = match vals[0] {
         Some(v) if v > 0 => v,
         _ => return,
     };
 
     // Check if Cached is very low relative to MemTotal
-    if let Some(cached) = get_bytes(snap, "meminfo", "Cached") {
+    if let Some(cached) = vals[1] {
         let cached_pct = (cached as f64 / total as f64) * 100.0;
         if cached_pct < 5.0 {
             findings.push(if locale == Locale::Ja {
@@ -1002,7 +1081,7 @@ fn check_memory_leak(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, loc
     }
 
     // Check for write storm (Dirty > 10% of MemTotal)
-    if let Some(dirty) = get_bytes(snap, "meminfo", "Dirty") {
+    if let Some(dirty) = vals[2] {
         let dirty_pct = (dirty as f64 / total as f64) * 100.0;
         if dirty_pct > 10.0 {
             findings.push(if locale == Locale::Ja {
@@ -1037,8 +1116,10 @@ fn check_swap_activity(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, l
         return;
     }
 
-    let pswpin = get_integer(snap, "vmstat", "pswpin").unwrap_or(0);
-    let pswpout = get_integer(snap, "vmstat", "pswpout").unwrap_or(0);
+    // Single-pass fetch from vmstat (~179 fields).
+    let vals = get_integers(snap, "vmstat", ["pswpin", "pswpout"]);
+    let pswpin = vals[0].unwrap_or(0);
+    let pswpout = vals[1].unwrap_or(0);
 
     if pswpin > 0 || pswpout > 0 {
         findings.push(if locale == Locale::Ja {
@@ -1141,11 +1222,23 @@ fn check_network_errors(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, 
         return;
     }
 
-    let tcp_in_errs = get_integer(snap, "net/snmp", "Tcp_InErrs").unwrap_or(0);
-    let tcp_retrans = get_integer(snap, "net/snmp", "Tcp_RetransSegs").unwrap_or(0);
-    let tcp_out_segs = get_integer(snap, "net/snmp", "Tcp_OutSegs").unwrap_or(0);
-    let udp_in_errs = get_integer(snap, "net/snmp", "Udp_InErrors").unwrap_or(0);
-    let udp_rcvbuf_errs = get_integer(snap, "net/snmp", "Udp_RcvbufErrors").unwrap_or(0);
+    // Single-pass fetch of all 5 integer fields from net/snmp (~86 fields).
+    let vals = get_integers(
+        snap,
+        "net/snmp",
+        [
+            "Tcp_InErrs",
+            "Tcp_RetransSegs",
+            "Tcp_OutSegs",
+            "Udp_InErrors",
+            "Udp_RcvbufErrors",
+        ],
+    );
+    let tcp_in_errs = vals[0].unwrap_or(0);
+    let tcp_retrans = vals[1].unwrap_or(0);
+    let tcp_out_segs = vals[2].unwrap_or(0);
+    let udp_in_errs = vals[3].unwrap_or(0);
+    let udp_rcvbuf_errs = vals[4].unwrap_or(0);
 
     if tcp_in_errs > 0 {
         findings.push(if locale == Locale::Ja {
@@ -1681,5 +1774,355 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KiB", bytes as f64 / KIB as f64)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod benches {
+    use super::*;
+    use crate::i18n::Locale;
+    use crate::proc::{Field, FieldValue, ProcEntry, Snapshot};
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+
+    fn field(name: &str, value: FieldValue) -> Field {
+        Field {
+            name: name.into(),
+            value,
+            unit: None,
+            description: String::new(),
+        }
+    }
+
+    fn make_snapshot() -> Snapshot {
+        let mut entries = BTreeMap::new();
+
+        let mut meminfo_fields: Vec<Field> = (0..47)
+            .map(|i| field(&format!("filler_{i}"), FieldValue::Bytes(0)))
+            .collect();
+        meminfo_fields.extend([
+            field("MemTotal", FieldValue::Bytes(16 * 1024 * 1024 * 1024)),
+            field("MemFree", FieldValue::Bytes(8 * 1024 * 1024 * 1024)),
+            field("MemAvailable", FieldValue::Bytes(12 * 1024 * 1024 * 1024)),
+            field("Cached", FieldValue::Bytes(4 * 1024 * 1024 * 1024)),
+            field("SwapTotal", FieldValue::Bytes(8 * 1024 * 1024 * 1024)),
+            field("SwapFree", FieldValue::Bytes(8 * 1024 * 1024 * 1024)),
+            field("Dirty", FieldValue::Bytes(100 * 1024 * 1024)),
+            field("SReclaimable", FieldValue::Bytes(200 * 1024 * 1024)),
+        ]);
+        entries.insert(
+            "meminfo".into(),
+            ProcEntry {
+                source: "meminfo".into(),
+                fields: meminfo_fields,
+            },
+        );
+
+        let loadavg = ProcEntry {
+            source: "loadavg".into(),
+            fields: vec![
+                field("load1", FieldValue::Float(2.5)),
+                field("load5", FieldValue::Float(2.0)),
+                field("load15", FieldValue::Float(1.8)),
+                field("load_1min", FieldValue::Float(2.5)),
+                field("load_5min", FieldValue::Float(2.0)),
+                field("load_15min", FieldValue::Float(1.8)),
+            ],
+        };
+        entries.insert("loadavg".into(), loadavg);
+
+        let stat = ProcEntry {
+            source: "stat".into(),
+            fields: vec![
+                field("cpu_user", FieldValue::Float(25.0)),
+                field("cpu_system", FieldValue::Float(10.0)),
+                field("cpu_iowait", FieldValue::Float(5.0)),
+                field("cpu_count", FieldValue::Integer(8)),
+                field("procs_running", FieldValue::Integer(4)),
+            ],
+        };
+        entries.insert("stat".into(), stat);
+
+        let cpuinfo = ProcEntry {
+            source: "cpuinfo".into(),
+            fields: vec![field("cpu_count", FieldValue::Integer(8))],
+        };
+        entries.insert("cpuinfo".into(), cpuinfo);
+
+        let uptime = ProcEntry {
+            source: "uptime".into(),
+            fields: vec![
+                field("uptime", FieldValue::Duration(86400.0)),
+                field("idle", FieldValue::Duration(43200.0)),
+            ],
+        };
+        entries.insert("uptime".into(), uptime);
+
+        let mut pressure_fields: Vec<Field> = (0..21)
+            .map(|i| field(&format!("filler_{i}"), FieldValue::Float(0.0)))
+            .collect();
+        pressure_fields.extend([
+            field("cpu_some_avg10", FieldValue::Float(5.0)),
+            field("cpu_some_avg60", FieldValue::Float(4.0)),
+            field("memory_some_avg10", FieldValue::Float(2.0)),
+        ]);
+        entries.insert(
+            "pressure".into(),
+            ProcEntry {
+                source: "pressure".into(),
+                fields: pressure_fields,
+            },
+        );
+
+        let mut vmstat_fields: Vec<Field> = (0..174)
+            .map(|i| field(&format!("filler_{i}"), FieldValue::Integer(0)))
+            .collect();
+        vmstat_fields.extend([
+            field("oom_kill", FieldValue::Integer(0)),
+            field("pswpin", FieldValue::Integer(0)),
+            field("pswpout", FieldValue::Integer(0)),
+            field("pgfault", FieldValue::Integer(1_000_000)),
+            field("pgmajfault", FieldValue::Integer(100)),
+        ]);
+        entries.insert(
+            "vmstat".into(),
+            ProcEntry {
+                source: "vmstat".into(),
+                fields: vmstat_fields,
+            },
+        );
+
+        let processes = ProcEntry {
+            source: "processes".into(),
+            fields: vec![
+                field("process_count", FieldValue::Integer(150)),
+                field(
+                    "processes",
+                    FieldValue::Table(vec![
+                        vec!["1234".into(), "chrome".into(), "500000".into()],
+                        vec!["5678".into(), "firefox".into(), "400000".into()],
+                    ]),
+                ),
+            ],
+        };
+        entries.insert("processes".into(), processes);
+
+        let mut net_snmp_fields: Vec<Field> = (0..80)
+            .map(|i| field(&format!("filler_{i}"), FieldValue::Integer(0)))
+            .collect();
+        net_snmp_fields.extend([
+            field("Tcp_InErrs", FieldValue::Integer(0)),
+            field("Tcp_OutSegs", FieldValue::Integer(1_000_000)),
+            field("Tcp_RetransSegs", FieldValue::Integer(100)),
+            field("Udp_InErrors", FieldValue::Integer(0)),
+            field("Udp_RcvbufErrors", FieldValue::Integer(0)),
+            field("Ip_Forwarding", FieldValue::Integer(0)),
+        ]);
+        entries.insert(
+            "net/snmp".into(),
+            ProcEntry {
+                source: "net/snmp".into(),
+                fields: net_snmp_fields,
+            },
+        );
+
+        let net_tcp = ProcEntry {
+            source: "net/tcp".into(),
+            fields: vec![field(
+                "connections",
+                FieldValue::Table(vec![
+                    vec![
+                        "0".into(),
+                        "0100007F:1F90".into(),
+                        "00000000:0000".into(),
+                        "0A".into(),
+                    ],
+                    vec![
+                        "1".into(),
+                        "0100007F:2328".into(),
+                        "0100007F:D431".into(),
+                        "01".into(),
+                    ],
+                ]),
+            )],
+        };
+        entries.insert("net/tcp".into(), net_tcp);
+
+        let ss = ProcEntry {
+            source: "ss".into(),
+            fields: vec![field("tcp_orphaned", FieldValue::Integer(0))],
+        };
+        entries.insert("ss".into(), ss);
+
+        let conntrack = ProcEntry {
+            source: "conntrack".into(),
+            fields: vec![
+                field("usage_pct", FieldValue::Float(30.0)),
+                field("conntrack_max", FieldValue::Integer(65536)),
+            ],
+        };
+        entries.insert("conntrack".into(), conntrack);
+
+        let df = ProcEntry {
+            source: "df".into(),
+            fields: vec![field("root_use_pct", FieldValue::Float(45.0))],
+        };
+        entries.insert("df".into(), df);
+
+        let file_nr = ProcEntry {
+            source: "file-nr".into(),
+            fields: vec![field("fd_usage_pct", FieldValue::Float(20.0))],
+        };
+        entries.insert("file-nr".into(), file_nr);
+
+        let thermal = ProcEntry {
+            source: "thermal".into(),
+            fields: vec![field("max_temp", FieldValue::Float(55.0))],
+        };
+        entries.insert("thermal".into(), thermal);
+
+        let gpu = ProcEntry {
+            source: "gpu".into(),
+            fields: vec![
+                field("gpu_util", FieldValue::Float(10.0)),
+                field("gpu_temp", FieldValue::Float(50.0)),
+            ],
+        };
+        entries.insert("gpu".into(), gpu);
+
+        let dns = ProcEntry {
+            source: "dns".into(),
+            fields: vec![field(
+                "nameservers",
+                FieldValue::Table(vec![vec!["8.8.8.8".into()]]),
+            )],
+        };
+        entries.insert("dns".into(), dns);
+
+        let systemd = ProcEntry {
+            source: "systemd".into(),
+            fields: vec![
+                field("failed_count", FieldValue::Integer(0)),
+                field("system_state", FieldValue::Text("running".into())),
+            ],
+        };
+        entries.insert("systemd".into(), systemd);
+
+        let kernel = ProcEntry {
+            source: "kernel".into(),
+            fields: vec![field("tainted", FieldValue::Integer(0))],
+        };
+        entries.insert("kernel".into(), kernel);
+
+        let sysctl = ProcEntry {
+            source: "sysctl".into(),
+            fields: vec![field("kernel_tainted", FieldValue::Integer(0))],
+        };
+        entries.insert("sysctl".into(), sysctl);
+
+        let interrupts = ProcEntry {
+            source: "interrupts".into(),
+            fields: vec![field("cpu_count", FieldValue::Integer(8))],
+        };
+        entries.insert("interrupts".into(), interrupts);
+
+        Snapshot {
+            timestamp: std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            entries,
+            alerts: vec![],
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_diagnostics_engine() {
+        let snap = make_snapshot();
+        let runbooks: Vec<RunbookConfig> = vec![];
+        const ITERS: u32 = 100_000;
+        const WARMUP: u32 = 1_000;
+
+        for _ in 0..WARMUP {
+            let _ = analyze(&snap, Locale::En, &runbooks);
+        }
+
+        let mut samples_ns: Vec<u128> = Vec::with_capacity(ITERS as usize);
+        for _ in 0..ITERS {
+            let t0 = Instant::now();
+            let findings = analyze(&snap, Locale::En, &runbooks);
+            let t1 = Instant::now();
+            samples_ns.push(t1.duration_since(t0).as_nanos());
+            std::hint::black_box(&findings);
+        }
+        samples_ns.sort_unstable();
+        let median_ns = samples_ns[(ITERS as usize) / 2];
+        let mean_ns: u128 = samples_ns.iter().sum::<u128>() / ITERS as u128;
+        let p99_ns = samples_ns[(ITERS as usize * 99) / 100];
+        eprintln!(
+            "bench_diagnostics_engine: iters={ITERS} | median={median_ns}ns mean={mean_ns}ns p99={p99_ns}ns"
+        );
+    }
+
+    /// Per-check profiler: runs each check_* in isolation over many
+    /// iterations to find the hottest checks. Helps target optimization.
+    #[test]
+    #[ignore]
+    fn profile_each_check() {
+        let snap = make_snapshot();
+        const ITERS: usize = 200_000;
+        let mut profile: Vec<(&'static str, u128)> = Vec::new();
+
+        macro_rules! run_check {
+            ($name:expr, $func:path) => {{
+                let mut findings = Vec::new();
+                for _ in 0..1000 {
+                    $func(&mut findings, &snap, Locale::En);
+                }
+                let t0 = Instant::now();
+                for _ in 0..ITERS {
+                    let mut f = Vec::new();
+                    $func(&mut f, &snap, Locale::En);
+                    std::hint::black_box(&f);
+                }
+                let ns = t0.elapsed().as_nanos() / ITERS as u128;
+                profile.push(($name, ns));
+            }};
+        }
+
+        run_check!("check_memory", check_memory);
+        run_check!("check_load", check_load);
+        run_check!("check_swap", check_swap);
+        run_check!("check_pressure", check_pressure);
+        run_check!("check_processes", check_processes);
+        run_check!("check_network", check_network);
+        run_check!("check_disk", check_disk);
+        run_check!("check_temperature", check_temperature);
+        run_check!("check_fd", check_fd);
+        run_check!("check_dns", check_dns);
+        run_check!("check_conntrack", check_conntrack);
+        run_check!("check_gpu", check_gpu);
+        run_check!("check_systemd", check_systemd);
+        run_check!("check_memory_leak", check_memory_leak);
+        run_check!("check_swap_activity", check_swap_activity);
+        run_check!("check_context_switches", check_context_switches);
+        run_check!("check_oom_kills", check_oom_kills);
+        run_check!("check_network_errors", check_network_errors);
+        run_check!("check_inode_pressure", check_inode_pressure);
+        run_check!("check_uptime", check_uptime);
+        run_check!("check_load_trend", check_load_trend);
+        run_check!("check_tcp_listen", check_tcp_listen);
+        run_check!("check_kernel_taint", check_kernel_taint);
+        run_check!("check_high_memory_process", check_high_memory_process);
+        run_check!("check_ss_orphaned", check_ss_orphaned);
+        run_check!("check_conntrack_rate", check_conntrack_rate);
+        run_check!("check_ip_forwarding", check_ip_forwarding);
+
+        profile.sort_by(|a, b| b.1.cmp(&a.1));
+        eprintln!("profile_each_check (ns/iter, sorted desc):");
+        let total: u128 = profile.iter().map(|(_, n)| *n).sum();
+        for (name, ns) in &profile {
+            let pct = (*ns as f64 / total as f64) * 100.0;
+            eprintln!("  {name:30} {ns:>5} ns  ({pct:4.1}%)");
+        }
+        eprintln!("  TOTAL                          {total:>5} ns");
     }
 }
