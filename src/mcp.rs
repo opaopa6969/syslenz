@@ -11,7 +11,7 @@ use crate::web::AppState;
 #[cfg(feature = "web")]
 use axum::{
     Json,
-    http::header::CONTENT_ENCODING,
+    http::{header::CONTENT_ENCODING, HeaderName},
     response::IntoResponse,
 };
 #[cfg(feature = "web")]
@@ -676,10 +676,33 @@ fn read_resource(uri: &str, state: &AppState) -> Result<Value, (i32, String, Opt
 pub async fn mcp_handler(
     state: axum::extract::State<Arc<AppState>>,
     Json(req): Json<JsonRpcRequest>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    let is_initialize = req.method == "initialize";
     let response = handle_jsonrpc(req, &state);
-    // content-encoding: identity (gateway gzip bypass for SSE)
-    ([(CONTENT_ENCODING, "identity")], Json(response))
+
+    if is_initialize {
+        let session_id = uuid_v4();
+        (
+            [
+                (CONTENT_ENCODING, "identity"),
+                (HeaderName::from_static("mcp-session-id"), session_id.as_str()),
+            ],
+            Json(response),
+        )
+            .into_response()
+    } else {
+        ([(CONTENT_ENCODING, "identity")], Json(response)).into_response()
+    }
+}
+
+#[cfg(feature = "web")]
+fn uuid_v4() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("syslenz-{now:016x}")
 }
 
 #[cfg(feature = "web")]
