@@ -1,0 +1,15 @@
+[Unit]
+Description=syslenz — Web UI + MCP server
+After=network.target
+
+[Service]
+Type=simple
+Environment=PORT=3009
+EnvironmentFile=-/home/opa/volta-secrets/syslenz.env
+ExecStart=/home/opa/syslenz/run.sh
+WorkingDirectory=/home/opa/syslenz
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -6,8 +6,9 @@
 use crate::config::RunbookConfig;
 use crate::i18n::Locale;
 use crate::proc::{FieldValue, Snapshot};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Severity {
     Info,
     Warning,
@@ -27,7 +28,7 @@ impl Severity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticFinding {
     pub severity: Severity,
     pub source: String,

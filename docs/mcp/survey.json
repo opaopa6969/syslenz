@@ -1,0 +1,199 @@
+{
+  "repo": "syslenz",
+  "surveyed_at": "2026-08-22T08:35:00Z",
+  "kind": "service",
+  "summary": "Rust 製の TUI/Web システムモニタリングツール（\"Wireshark for /proc\"）。/proc・/sys・ネットワークから 50+ ソースを構造化・型付き JSON として取得し、TUI・Web UI・TCP サーバ・Docker で提供する。HTTP API（axum, /api/snapshot, /api/history, /api/sources, /api/stream, /api/view, /api/field-help, /api/article, /api/v1/settings, /healthz）と TCP サーバ（SNAPSHOT/METRICS/QUIT プロトコル）、Prometheus export、OTLP export、JSON import/export、27 の自動診断チェック、691 メトリクスの教育記事を備える。",
+  "decision": "wrap",
+  "decision_reason": "既に Streamable HTTP（axum）で /healthz が 200 を返し、0.0.0.0 bind、PORT 環境変数（--web <port>）対応、JSON API（snapshot/history/sources/view/field-help/article/diagnostics）が揃っている。volta catalog にも既に syslenz, syslenz4j として登録済み（dev:3008, prod:3009）。MCP サーバを新規に立てるより、既存 HTTP API を薄く包む MCP レイヤーを追加するのが最適。ただし MCP エンドポイント（/mcp, Streamable HTTP）自体はまだ無いため、Phase 2 で追加が必要。",
+  "existing": {
+    "http_api": true,
+    "cli": true,
+    "mcp": false,
+    "healthz": true,
+    "volta_manifest": false,
+    "hosted_url": null
+  },
+  "proposed_namespace": "syslenz",
+  "capabilities": [
+    {
+      "verb": "システムスナップショットを取得する",
+      "kind": "tool",
+      "name": "snapshot",
+      "io": "→ { timestamp, entries: { [source]: { source, fields: [{ name, value, unit, description }] } }, alerts }",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:snapshot_handler → GET /api/snapshot"
+    },
+    {
+      "verb": "スナップショット履歴を取得する",
+      "kind": "tool",
+      "name": "history",
+      "io": "→ [{ snapshot }, ...] (最大60件)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:history_handler → GET /api/history"
+    },
+    {
+      "verb": "利用可能なデータソース一覧を取得する",
+      "kind": "tool",
+      "name": "sources",
+      "io": "→ string[] (50+ source names)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:sources_handler → GET /api/sources"
+    },
+    {
+      "verb": "指定ビューの描画データを取得する",
+      "kind": "tool",
+      "name": "view",
+      "io": "{ view?, locale?, source?, field?, pid? } → ViewData JSON (TUI と同等の描画済みデータ)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:view_handler → GET /api/view"
+    },
+    {
+      "verb": "フィールドのヘルプ・説明を取得する",
+      "kind": "tool",
+      "name": "field_help",
+      "io": "{ source, field, lang? } → { description: {normal, detailed, extra}, see_also: [...], breadcrumbs: [...], contextual_hint }",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:field_help_handler → GET /api/field-help"
+    },
+    {
+      "verb": "メトリクスの教育記事を取得する",
+      "kind": "tool",
+      "name": "article",
+      "io": "{ source?, field?, id?, locale? } → Article JSON (691 metrics × EN+JA)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:article_handler → GET /api/article"
+    },
+    {
+      "verb": "自動診断を実行する",
+      "kind": "tool",
+      "name": "diagnostics",
+      "io": "→ [{ severity, source, title, detail, suggestion, related_metrics, runbook_url }] (27 checks, 40+ patterns)",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/diagnostics.rs:analyze() — 現状は TUI 内部のみ。Phase 2 で /api/diagnostics エンドポイントを追加して wrap"
+    },
+    {
+      "verb": "スナップショットを JSON にエクスポートする",
+      "kind": "tool",
+      "name": "export",
+      "io": "{ path? } → JSON (ファイル or stdout)",
+      "side_effect": "write",
+      "long_running": false,
+      "maps_to": "src/export.rs:export_snapshot — CLI --export と同等"
+    },
+    {
+      "verb": "JSON スナップショットをインポートして再生する",
+      "kind": "tool",
+      "name": "import",
+      "io": "{ path } → Snapshot",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/export.rs:import_snapshot — CLI --import と同等"
+    },
+    {
+      "verb": "アラートルールを設定する",
+      "kind": "tool",
+      "name": "set_alerts",
+      "io": "[{ source, field, condition, severity, message }] → void (config.toml に書き込み)",
+      "side_effect": "write",
+      "long_running": false,
+      "maps_to": "src/web.rs:settings_alerts_handler → POST /api/v1/settings/alerts"
+    },
+    {
+      "verb": "現在の設定を取得する",
+      "kind": "tool",
+      "name": "get_settings",
+      "io": "→ Config JSON",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "src/web.rs:settings_api_handler → GET /api/v1/settings"
+    },
+    {
+      "verb": "能力の仕様",
+      "kind": "resource",
+      "name": "spec",
+      "uri": "syslenz://spec"
+    },
+    {
+      "verb": "使い方ガイド",
+      "kind": "resource",
+      "name": "guide",
+      "uri": "syslenz://guide"
+    },
+    {
+      "verb": "データソース一覧と分類",
+      "kind": "resource",
+      "name": "sources",
+      "uri": "syslenz://sources"
+    },
+    {
+      "verb": "診断チェック一覧",
+      "kind": "resource",
+      "name": "diagnostics_catalog",
+      "uri": "syslenz://diagnostics"
+    },
+    {
+      "verb": "メトリクス分類体系（MetricKind 8種）",
+      "kind": "resource",
+      "name": "metric_kinds",
+      "uri": "syslenz://metric-kinds"
+    },
+    {
+      "verb": "syslenz のシステム状態を監視・診断する手順",
+      "kind": "skill",
+      "name": "monitor-and-diagnose",
+      "locality": "service"
+    },
+    {
+      "verb": "複数ホストを syslenz で監視する手順",
+      "kind": "skill",
+      "name": "multi-host-monitoring",
+      "locality": "service"
+    }
+  ],
+  "composition_examples": [
+    "syslenz__snapshot → syslenz__diagnostics → index__agent_send（診断結果をエージェント端末に通知）",
+    "syslenz__export → volta__svc_health（スナップショットを取得してから他サービスのヘルスと突き合わせる）",
+    "syslenz__snapshot → LLM で解析 → syslenz__set_alerts（異常パターンからアラートルールを自動生成）"
+  ],
+  "dependencies": [
+    {
+      "repo": "syslenz4j",
+      "direction": "depends_on",
+      "capability": "JVM メトリクス収集（syslenz4j が TCP サーバにメトリクスを送り、syslenz が --connect で受ける）",
+      "exists_now": true,
+      "note": "syslenz4j は syslenz の TCP プロトコル（SNAPSHOT/METRICS）に依存。catalog に別エントリとして登録済み。"
+    },
+    {
+      "repo": "volta-mcp",
+      "direction": "provides_to",
+      "capability": "syslenz namespace の MCP tools/resources（ファサード経由で他エージェントが syslenz の能力を呼べる）",
+      "exists_now": false,
+      "note": "Phase 2 で /mcp エンドポイントを追加し、volta__svc_add で catalog の mcp 項を有効化する必要がある。"
+    }
+  ],
+  "library_serve": {
+    "needed": false,
+    "new_work": [],
+    "runtime": "rust",
+    "estimated_effort": "S"
+  },
+  "risks": [
+    "HTTP サーバに認証がない（README に明記）。MCP 経由で外部に公開する場合、ファサード側で認証を付けるか syslenz 側に Basic Auth / Token を実装する必要がある（Roadmap に planned あり）。",
+    "Snapshot::capture() は /proc・/sys を読むため Linux ホストでのみ動作。Docker では --pid=host が必要。MCP サーバが別ホストで動く場合は接続先の Web/TCP サーバを通す必要がある。",
+    "POST /api/v1/settings/alerts は config.toml に書き込む（副作用あり）。MCP tool 化する場合は confirm: bool=false で dry-run を実装すべき。",
+    "snapshot データはホストのシステム情報を含む。セキュリティ上、MCP 経由の公開範囲を考慮する必要がある。"
+  ],
+  "open_questions": [
+    "MCP エンドポイント（/mcp, Streamable HTTP）は syslenz 本体に追加するか、別プロセス（薄いラッパ）で立てるか？本体は Rust で MCP SDK が未確認。",
+    "volt catalog の syslenz エントリには mcp 項が未設定。Phase 2 で /mcp を実装した後に mcp: { enabled: true, ... } を追記する。",
+    "認証は syslenz 側（Roadmap の Basic Auth / Token）を実装してから MCP 化するか、ファサード側で遮断するか？",
+    "diagnostics は現在 TUI 内部 API のみ。HTTP エンドポイント（/api/diagnostics）を新設する必要がある。"
+  ]
+}
