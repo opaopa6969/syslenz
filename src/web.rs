@@ -33,15 +33,15 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
 #[cfg(feature = "web")]
-struct AppState {
-    current: Mutex<Snapshot>,
-    history: Mutex<Vec<Snapshot>>,
-    tx: broadcast::Sender<String>,
-    locale: Locale,
-    config_path: Option<std::path::PathBuf>,
-    alert_rules: Mutex<Vec<crate::alert::AlertRule>>,
-    history_config: crate::config::HistoryTomlConfig,
-    diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
+pub(crate) struct AppState {
+    pub(crate) current: Mutex<Snapshot>,
+    pub(crate) history: Mutex<Vec<Snapshot>>,
+    pub(crate) tx: broadcast::Sender<String>,
+    pub(crate) locale: Locale,
+    pub(crate) config_path: Option<std::path::PathBuf>,
+    pub(crate) alert_rules: Mutex<Vec<crate::alert::AlertRule>>,
+    pub(crate) history_config: crate::config::HistoryTomlConfig,
+    pub(crate) diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
 }
 
 #[cfg(feature = "web")]
@@ -96,6 +96,10 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             .route("/api/v1/settings", get(settings_api_handler))
             .route("/api/v1/settings/alerts", post(settings_alerts_handler))
             .route("/api/article", get(article_handler))
+            // Phase 2: MCP Streamable HTTP endpoint (JSON-RPC 2.0 over HTTP)
+            .route("/mcp", post(crate::mcp::mcp_handler))
+            // Phase 2: Diagnostics HTTP API (was TUI-internal only)
+            .route("/api/diagnostics", get(diagnostics_handler))
             // Liveness probe for external monitoring. Intentionally exposes no
             // system information — body is a fixed "ok" string.
             .route("/healthz", get(healthz_handler))
@@ -2878,4 +2882,12 @@ loadSettings();
         delete_label = delete_label,
         back_label = back_label,
     )
+}
+
+/// GET /api/diagnostics — Phase 2: HTTP endpoint for diagnostics (was TUI-internal only)
+#[cfg(feature = "web")]
+async fn diagnostics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let snapshot = state.current.lock().unwrap().clone();
+    let findings = crate::diagnostics::analyze(&snapshot, state.locale, &state.diagnostic_runbooks);
+    Json(findings)
 }

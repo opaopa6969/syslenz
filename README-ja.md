@@ -457,6 +457,31 @@ cargo fmt --check && cargo clippy && cargo test
 
 ---
 
+## MCP (Model Context Protocol)
+
+syslenz は MCP サーバとして動作し、volta ファサード経由でエージェントがシステム監視能力を利用できる。
+
+- **namespace**: `syslenz`
+- **エンドポイント**: `http://<host>:3009/mcp` (Streamable HTTP, JSON-RPC 2.0)
+- **tools**: `snapshot`, `history`, `sources`, `view`, `field_help`, `article`, `diagnostics`, `get_settings`, `set_alerts`
+- **resources**: `syslenz://spec`, `syslenz://guide`, `syslenz://sources`, `syslenz://diagnostics`, `syslenz://metric-kinds`
+- **仕様**: `syslenz://spec` resource を参照
+
+### 起動
+
+```sh
+syslenz --web 3009 --lang en
+```
+
+MCP エンドポイントは Web サーバと同じプロセス・同じポートで提供される。
+
+### volta 参加状況
+
+- volta catalog に `syslenz` として登録済み（prod: 3009）
+- MCP 化により `mcp` 項が有効化され、ファサード経由で `syslenz__*` tools が利用可能
+
+---
+
 ## ライセンス
 
 MIT

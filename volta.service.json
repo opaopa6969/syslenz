@@ -1,0 +1,25 @@
+{
+  "id": "syslenz",
+  "name": "syslenz",
+  "description": "Wireshark for Linux — explore /proc, /sys, and network as structured, typed data. MCP: 50+ source snapshot, 27 diagnostics checks, 691 metric education articles.",
+  "type": "rust",
+  "hostname": "syslenz.unlaxer.org",
+  "port": 3009,
+  "host": "192.168.1.50",
+  "runtime": "systemd",
+  "exec_start": "/home/opa/syslenz/run.sh",
+  "user": "opa",
+  "auth": "minRole:MEMBER",
+  "health_check": "/healthz",
+  "tags": ["monitoring", "system", "diagnostics", "rust", "mcp"],
+  "repo_url": "https://github.com/opaopa6969/syslenz",
+  "mcp": {
+    "enabled": true,
+    "port": 3009,
+    "path": "/mcp",
+    "namespace": "syslenz",
+    "min_role": "MEMBER",
+    "timeoutMs": 110000,
+    "description": "システムモニタリング・診断（50+ ソース、27 診断チェック、691 メトリクス教育記事）"
+  }
+}

@@ -56,6 +56,7 @@ mod export;
 mod history;
 mod i18n;
 mod metric_kind;
+mod mcp;
 mod net;
 mod otel;
 mod plugin;
