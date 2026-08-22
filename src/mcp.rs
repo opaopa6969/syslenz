@@ -11,7 +11,7 @@ use crate::web::AppState;
 #[cfg(feature = "web")]
 use axum::{
     Json,
-    http::{header::CONTENT_ENCODING, HeaderName},
+    http::{StatusCode, header::CONTENT_ENCODING, HeaderName},
     response::IntoResponse,
 };
 #[cfg(feature = "web")]
@@ -678,6 +678,17 @@ pub async fn mcp_handler(
     Json(req): Json<JsonRpcRequest>,
 ) -> axum::response::Response {
     let is_initialize = req.method == "initialize";
+    let is_notification = req.id.is_none();
+
+    // JSON-RPC notifications (no id) → HTTP 202 Accepted, empty body
+    if is_notification {
+        return axum::response::Response::builder()
+            .status(StatusCode::ACCEPTED)
+            .header(CONTENT_ENCODING, "identity")
+            .body(axum::body::Body::empty())
+            .unwrap();
+    }
+
     let response = handle_jsonrpc(req, &state);
 
     if is_initialize {
