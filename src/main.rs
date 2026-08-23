@@ -88,6 +88,16 @@ use std::time::Duration;
 use ui::app::App;
 
 fn main() -> Result<()> {
+    // glibc malloc の arena 数を制限する。
+    // デフォルトは 8×CPU コア数で、多数のスレッドがそれぞれ巨大なアロケーションを
+    // 繰り返すと、arena ごとにカーネルに返さない断片化メモリが蓄積し RSS が膨張する。
+    // （実測: 120 回の capture で RSS 49MB、malloc_trim(0) で 11MB に戻った = 38MB が断片化）
+    // MALLOC_ARENA_MAX=2 相当に抑える。
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
+
     let args: Vec<String> = std::env::args().collect();
 
     // --help / -h — print usage and exit 0

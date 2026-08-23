@@ -42,6 +42,7 @@ pub(crate) struct AppState {
     pub(crate) alert_rules: Mutex<Vec<crate::alert::AlertRule>>,
     pub(crate) history_config: crate::config::HistoryTomlConfig,
     pub(crate) diagnostic_runbooks: Vec<crate::config::RunbookConfig>,
+    pub(crate) web_config: crate::config::WebConfig,
 }
 
 #[cfg(feature = "web")]
@@ -52,6 +53,7 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
         let initial = Snapshot::capture()?;
 
         let cfg = crate::config::Config::load();
+        let web_cfg = cfg.web.clone();
         let state = Arc::new(AppState {
             current: Mutex::new(initial),
             history: Mutex::new(Vec::new()),
@@ -61,25 +63,69 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             alert_rules: Mutex::new(cfg.alert.clone()),
             history_config: cfg.history.clone(),
             diagnostic_runbooks: cfg.diagnostic_runbook.clone(),
+            web_config: web_cfg.clone(),
         });
+
+        // 起動時にメモリ上限をログに出す（確認用）
+        eprintln!(
+            "syslenz web config: capture_interval={}s, max_history_count={}, max_history_bytes={}MB, truncate_tables={}",
+            web_cfg.capture_interval_secs,
+            web_cfg.max_history_count,
+            web_cfg.max_history_bytes / 1024 / 1024,
+            web_cfg.truncate_large_tables,
+        );
 
         // Background task: capture snapshots periodically
         let bg_state = state.clone();
         tokio::spawn(async move {
+            let interval = Duration::from_secs(bg_state.web_config.capture_interval_secs.max(1));
+            let max_count = bg_state.web_config.max_history_count;
+            let max_bytes = bg_state.web_config.max_history_bytes;
+            let truncate = bg_state.web_config.truncate_large_tables;
+            let truncate_rows = bg_state.web_config.truncate_table_rows;
+            let mut trim_counter: u64 = 0;
             loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(interval).await;
                 if let Ok(snapshot) = Snapshot::capture() {
                     let json = serde_json::to_string(&snapshot).unwrap_or_default();
                     {
                         let mut history = bg_state.history.lock().unwrap();
                         let old = bg_state.current.lock().unwrap().clone();
-                        history.push(old);
-                        if history.len() > 60 {
+                        // 古いスナップショットを履歴に追加する際、巨大テーブルを縮約
+                        let mut old_for_history = old;
+                        if truncate {
+                            truncate_snapshot_tables(&mut old_for_history, truncate_rows);
+                        }
+                        history.push(old_for_history);
+                        // 件数上限
+                        while history.len() > max_count {
                             history.remove(0);
+                        }
+                        // バイト数上限（概算: 各 Snapshot の JSON サイズで見積もり）
+                        if max_bytes > 0 {
+                            let mut total_bytes: usize = history
+                                .iter()
+                                .map(|s| approx_snapshot_bytes(s))
+                                .sum();
+                            while total_bytes > max_bytes && history.len() > 1 {
+                                let removed = history.remove(0);
+                                total_bytes = total_bytes.saturating_sub(approx_snapshot_bytes(&removed));
+                            }
                         }
                     }
                     *bg_state.current.lock().unwrap() = snapshot;
                     let _ = bg_state.tx.send(json);
+                }
+                // 60 秒ごとに malloc_trim を呼んで、glibc malloc が
+                // カーネルに返さない断片化メモリを解放する。
+                // （毎秒呼ぶとオーバーヘッドが大きいため 60 秒間隔）
+                trim_counter += 1;
+                if trim_counter >= 60 {
+                    trim_counter = 0;
+                    #[cfg(target_os = "linux")]
+                    unsafe {
+                        libc::malloc_trim(0);
+                    }
                 }
             }
         });
@@ -115,12 +161,81 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
 
 /// Health check endpoint for external monitoring.
 ///
-/// Deliberately requires no state and returns a fixed minimal body so that no
-/// log content, system information, or internal configuration can leak through
-/// an unauthenticated path.
+/// Returns a small JSON object with liveness ("ok") plus memory-guard
+/// configuration so operators can confirm the bounds are active.
+/// No system information (process list, etc.) is exposed.
 #[cfg(feature = "web")]
-async fn healthz_handler() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+async fn healthz_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let history_len = state.history.lock().unwrap().len();
+    let wc = &state.web_config;
+    let body = serde_json::json!({
+        "status": "ok",
+        "history_len": history_len,
+        "max_history_count": wc.max_history_count,
+        "max_history_bytes": wc.max_history_bytes,
+        "capture_interval_secs": wc.capture_interval_secs,
+        "truncate_large_tables": wc.truncate_large_tables,
+    });
+    (StatusCode::OK, Json(body))
+}
+
+/// 履歴保持用に Snapshot 内の巨大テーブルを縮約する。
+/// 最新の1件（current）はフルで保持されるため、この関数は履歴に
+/// 追加する *古い* スナップショットにのみ適用される。
+///
+/// `max_rows` を超える Table フィールドは、先頭 `max_rows` 行＋
+/// `[truncated: N rows]` の1行に置き換わり、`truncated: true` を示す
+/// ダミー行が残る。これにより「データが省かれた」ことが分かる。
+#[cfg(feature = "web")]
+fn truncate_snapshot_tables(snap: &mut crate::proc::Snapshot, max_rows: usize) {
+    use crate::proc::FieldValue;
+    for entry in snap.entries.values_mut() {
+        for field in &mut entry.fields {
+            if let FieldValue::Table(rows) = &mut field.value {
+                if rows.len() > max_rows {
+                    let truncated_count = rows.len() - max_rows;
+                    let mut kept = rows.drain(..max_rows).collect::<Vec<_>>();
+                    kept.push(vec![format!(
+                        "[truncated: {} rows]",
+                        truncated_count
+                    )]);
+                    *rows = kept;
+                }
+            }
+        }
+    }
+}
+
+/// Snapshot の概算メモリサイズ（バイト）を返す。
+/// バイト数上限の判定に使う。正確な値ではなく、文字列・テーブルの
+/// バイト数の和で見積もる。Vec のオーバーヘッドは含まない。
+#[cfg(feature = "web")]
+fn approx_snapshot_bytes(snap: &crate::proc::Snapshot) -> usize {
+    use crate::proc::FieldValue;
+    let mut total = 0usize;
+    for (k, e) in &snap.entries {
+        total += k.len();
+        total += e.source.len();
+        for f in &e.fields {
+            total += f.name.len();
+            total += f.description.len();
+            if let Some(u) = &f.unit {
+                total += u.len();
+            }
+            match &f.value {
+                FieldValue::Text(s) => total += s.len(),
+                FieldValue::Table(rows) => {
+                    for r in rows {
+                        for c in r {
+                            total += c.len();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    total
 }
 
 #[cfg(feature = "web")]

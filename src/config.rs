@@ -90,15 +90,35 @@ impl Default for OtelConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct WebConfig {
     pub port: u16,
+    /// キャプチャ間隔（秒）。既定 1。
+    pub capture_interval_secs: u64,
+    /// メモリ内履歴の件数上限。既定 60。
+    pub max_history_count: usize,
+    /// メモリ内履歴の合計バイト数上限（概算）。既定 64 * 1024 * 1024 (64 MB)。
+    /// 0 でバイト数上限を無効化（件数上限のみ）。
+    pub max_history_bytes: usize,
+    /// 履歴内の巨大テーブルを縮約するか。既定 true。
+    /// 縮約時、履歴（最新以外）の Table フィールドは
+    /// 先頭数行＋ "[truncated: N rows]" の要約に置き換わる。
+    pub truncate_large_tables: bool,
+    /// 履歴保持中にテーブルを縮約する行数しきい値。既定 20。
+    pub truncate_table_rows: usize,
 }
 
 impl Default for WebConfig {
     fn default() -> Self {
-        Self { port: 3000 }
+        Self {
+            port: 3000,
+            capture_interval_secs: 1,
+            max_history_count: 60,
+            max_history_bytes: 64 * 1024 * 1024,
+            truncate_large_tables: true,
+            truncate_table_rows: 20,
+        }
     }
 }
 
@@ -134,6 +154,11 @@ mod tests {
     fn web_config_default_port() {
         let cfg = WebConfig::default();
         assert_eq!(cfg.port, 3000);
+        assert_eq!(cfg.capture_interval_secs, 1);
+        assert_eq!(cfg.max_history_count, 60);
+        assert_eq!(cfg.max_history_bytes, 64 * 1024 * 1024);
+        assert!(cfg.truncate_large_tables);
+        assert_eq!(cfg.truncate_table_rows, 20);
     }
 
     #[test]
