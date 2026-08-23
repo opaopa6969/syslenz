@@ -100,10 +100,40 @@ Web UI設定（`--web` モード用）。
 | キー | 型 | デフォルト | 説明 |
 |------|-----|---------|------|
 | `port` | Integer | `3000` | WebサーバーのHTTPポート |
+| `capture_interval_secs` | Integer | `1` | スナップショットのキャプチャ間隔（秒） |
+| `max_history_count` | Integer | `60` | メモリ内履歴の件数上限 |
+| `max_history_bytes` | Integer | `67108864` | メモリ内履歴の合計バイト数上限（概算、0 で無効） |
+| `truncate_large_tables` | Boolean | `true` | 履歴内の巨大テーブルを縮約するか |
+| `truncate_table_rows` | Integer | `20` | テーブル縮約時の保持行数しきい値 |
 
 ```toml
 [web]
 port = 3000
+capture_interval_secs = 1
+max_history_count = 60
+max_history_bytes = 67108864  # 64 MB
+truncate_large_tables = true
+truncate_table_rows = 20
+```
+
+**メモリ使用量について:**
+
+`--web` モードはバックグラウンドタスクで定期的に `/proc` 全体をキャプチャし、
+メモリ内に履歴を保持します。長時間稼働でもRSSが膨張しないよう、以下の対策を講じています。
+
+- **件数上限** (`max_history_count`): 履歴のスナップショット数を上限で頭打ち
+- **バイト数上限** (`max_history_bytes`): 履歴の合計サイズが上限を超えたら古いものから破棄
+- **テーブル縮約** (`truncate_large_tables`): 履歴内の巨大テーブル（プロセス一覧など）を
+  先頭 `truncate_table_rows` 行＋ `[truncated: N rows]` 注記に縮約。
+  最新の1件（`/api/snapshot`）は常にフルサイズ
+- **malloc_trim**: 60秒ごとに `malloc_trim(0)` を呼び、glibc malloc の断片化メモリをカーネルに返す
+- **MALLOC_ARENA_MAX**: 起動時に `mallopt(M_ARENA_MAX, 2)` で glibc malloc の arena 数を制限
+
+`/healthz` で現在のメモリ設定と履歴件数を確認できます。
+
+```bash
+curl http://localhost:3000/healthz
+# {"status":"ok","history_len":42,"max_history_count":60,...}
 ```
 
 **注意:**

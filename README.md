@@ -252,6 +252,12 @@ default_view = "dashboard"  # "dashboard" or "classic"
 
 [web]
 port = 3000
+# Memory management (prevents RSS bloat over long uptimes)
+capture_interval_secs = 1       # capture interval in seconds
+max_history_count = 60          # max history snapshot count
+max_history_bytes = 67108864    # max history total bytes (64 MB, 0 disables)
+truncate_large_tables = true    # truncate large tables in history
+truncate_table_rows = 20        # rows to keep when truncating
 
 [otel]
 endpoint = "http://localhost:4317"

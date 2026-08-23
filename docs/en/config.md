@@ -101,10 +101,45 @@ Web UI settings (used by `--web` mode).
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `port` | Integer | `3000` | HTTP port for the web server |
+| `capture_interval_secs` | Integer | `1` | Snapshot capture interval in seconds |
+| `max_history_count` | Integer | `60` | Maximum number of in-memory history snapshots |
+| `max_history_bytes` | Integer | `67108864` | Maximum total bytes of in-memory history (approx, 0 disables) |
+| `truncate_large_tables` | Boolean | `true` | Truncate large tables in history to save memory |
+| `truncate_table_rows` | Integer | `20` | Row threshold for table truncation in history |
 
 ```toml
 [web]
 port = 3000
+capture_interval_secs = 1
+max_history_count = 60
+max_history_bytes = 67108864  # 64 MB
+truncate_large_tables = true
+truncate_table_rows = 20
+```
+
+**Memory usage:**
+
+`--web` mode runs a background task that periodically captures the entire
+`/proc` tree and keeps history in memory. The following guards prevent RSS
+from growing unbounded over long uptimes:
+
+- **Count limit** (`max_history_count`): caps the number of snapshots kept
+- **Byte limit** (`max_history_bytes`): drops oldest snapshots when total
+  size exceeds the limit
+- **Table truncation** (`truncate_large_tables`): replaces large tables
+  (e.g. process lists) in historical snapshots with the first
+  `truncate_table_rows` rows plus a `[truncated: N rows]` marker.
+  The latest snapshot (`/api/snapshot`) is always full-size
+- **malloc_trim**: calls `malloc_trim(0)` every 60 seconds to return
+  fragmented glibc malloc memory to the kernel
+- **MALLOC_ARENA_MAX**: sets `mallopt(M_ARENA_MAX, 2)` at startup to
+  limit glibc malloc arena count
+
+Check current memory settings and history count via `/healthz`:
+
+```bash
+curl http://localhost:3000/healthz
+# {"status":"ok","history_len":42,"max_history_count":60,...}
 ```
 
 **Notes:**

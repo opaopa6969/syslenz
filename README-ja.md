@@ -216,6 +216,12 @@ default_view = "dashboard"  # "dashboard" または "classic"
 
 [web]
 port = 3000
+# メモリ管理（長時間稼働時のRSS膨張を防ぐ）
+capture_interval_secs = 1       # キャプチャ間隔（秒）
+max_history_count = 60          # 履歴件数上限
+max_history_bytes = 67108864    # 履歴バイト数上限（64MB、0で無効）
+truncate_large_tables = true    # 履歴内の巨大テーブルを縮約
+truncate_table_rows = 20        # 縮約時の保持行数
 
 [otel]
 endpoint = "http://localhost:4317"
