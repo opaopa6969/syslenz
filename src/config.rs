@@ -218,6 +218,26 @@ port = 8080
     }
 
     #[test]
+    fn parse_web_section_memory_settings() {
+        let toml = r#"
+[web]
+port = 3009
+capture_interval_secs = 5
+max_history_count = 30
+max_history_bytes = 33554432
+truncate_large_tables = false
+truncate_table_rows = 10
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.web.port, 3009);
+        assert_eq!(cfg.web.capture_interval_secs, 5);
+        assert_eq!(cfg.web.max_history_count, 30);
+        assert_eq!(cfg.web.max_history_bytes, 33554432);
+        assert!(!cfg.web.truncate_large_tables);
+        assert_eq!(cfg.web.truncate_table_rows, 10);
+    }
+
+    #[test]
     fn parse_history_section_with_path() {
         let toml = r#"
 [history]
