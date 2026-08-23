@@ -3006,3 +3006,171 @@ async fn diagnostics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
     let findings = crate::diagnostics::analyze(&snapshot, state.locale, &state.diagnostic_runbooks);
     Json(findings)
 }
+
+#[cfg(all(test, feature = "web"))]
+mod tests {
+    use super::*;
+    use crate::proc::{FieldValue, ProcEntry};
+    use std::time::SystemTime;
+
+    fn make_snapshot_with_table(rows: usize) -> crate::proc::Snapshot {
+        use std::collections::BTreeMap;
+        let table_rows: Vec<Vec<String>> = (0..rows)
+            .map(|i| vec![format!("pid_{}", i), format!("proc_{}", i), format!("{}", i)])
+            .collect();
+        let entry = ProcEntry {
+            source: "processes".to_string(),
+            fields: vec![crate::proc::Field {
+                name: "process_list".to_string(),
+                value: FieldValue::Table(table_rows),
+                unit: None,
+                description: "Process list".to_string(),
+            }],
+        };
+        let mut entries = BTreeMap::new();
+        entries.insert("processes".to_string(), entry);
+        crate::proc::Snapshot {
+            timestamp: SystemTime::now(),
+            entries,
+            alerts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn truncate_reduces_large_tables() {
+        let mut snap = make_snapshot_with_table(100);
+        truncate_snapshot_tables(&mut snap, 20);
+        let entry = snap.entries.get("processes").unwrap();
+        if let FieldValue::Table(rows) = &entry.fields[0].value {
+            // 20 rows + 1 truncated marker = 21
+            assert_eq!(rows.len(), 21, "should have 20 kept + 1 truncated marker");
+            assert!(
+                rows[20][0].contains("[truncated: 80 rows]"),
+                "last row should be truncation marker, got: {}",
+                rows[20][0]
+            );
+        } else {
+            panic!("expected Table");
+        }
+    }
+
+    #[test]
+    fn truncate_leaves_small_tables_alone() {
+        let mut snap = make_snapshot_with_table(10);
+        truncate_snapshot_tables(&mut snap, 20);
+        let entry = snap.entries.get("processes").unwrap();
+        if let FieldValue::Table(rows) = &entry.fields[0].value {
+            assert_eq!(rows.len(), 10, "small table should be unchanged");
+            assert!(
+                !rows.iter().any(|r| r[0].contains("[truncated")),
+                "no truncation marker expected"
+            );
+        }
+    }
+
+    #[test]
+    fn approx_bytes_counts_table_cells() {
+        let snap = make_snapshot_with_table(100);
+        let bytes = approx_snapshot_bytes(&snap);
+        // 100 rows × ~3 cells × ~10 chars = ~3000+ bytes minimum
+        assert!(
+            bytes > 1000,
+            "approx bytes should account for table cells, got {}",
+            bytes
+        );
+    }
+
+    /// 回帰テスト: 履歴がバイト数上限で頭打ちになることを確認。
+    /// 1 件が 5KB のスナップショットを 100 件積み、上限を 20KB に設定した場合、
+    /// 保持される件数が 20KB / 5KB = 4 件程度に抑えられることを確認する。
+    #[test]
+    fn history_respects_byte_limit() {
+        let snap = make_snapshot_with_table(100);
+        let snap_bytes = approx_snapshot_bytes(&snap);
+        assert!(snap_bytes > 1000, "snap should be >1KB, got {}", snap_bytes);
+
+        let max_bytes = snap_bytes * 4; // 4 件分程度
+        let mut history: Vec<crate::proc::Snapshot> = Vec::new();
+        for _ in 0..100 {
+            let s = snap.clone();
+            // 履歴用に縮約せずそのまま積む（テスト用）
+            history.push(s.clone());
+            let max_count = 60;
+            while history.len() > max_count {
+                history.remove(0);
+            }
+            // バイト数上限
+            if max_bytes > 0 {
+                let mut total: usize = history.iter().map(approx_snapshot_bytes).sum();
+                while total > max_bytes && history.len() > 1 {
+                    let removed = history.remove(0);
+                    total = total.saturating_sub(approx_snapshot_bytes(&removed));
+                }
+            }
+        }
+        let total_bytes: usize = history.iter().map(approx_snapshot_bytes).sum();
+        assert!(
+            total_bytes <= max_bytes,
+            "total {} should be <= max {}",
+            total_bytes,
+            max_bytes
+        );
+        assert!(
+            history.len() <= 5,
+            "history len {} should be small (around 4)",
+            history.len()
+        );
+    }
+
+    /// 回帰テスト: 件数上限がバイト数上限より小さい場合は件数で抑えられる。
+    #[test]
+    fn history_respects_count_limit() {
+        let snap = make_snapshot_with_table(10); // small table
+        let max_count = 30;
+        let max_bytes = 1_000_000_000; // 1 GB — 実質無効
+        let mut history: Vec<crate::proc::Snapshot> = Vec::new();
+        for _ in 0..100 {
+            history.push(snap.clone());
+            while history.len() > max_count {
+                history.remove(0);
+            }
+            if max_bytes > 0 {
+                let mut total: usize = history.iter().map(approx_snapshot_bytes).sum();
+                while total > max_bytes && history.len() > 1 {
+                    let removed = history.remove(0);
+                    total = total.saturating_sub(approx_snapshot_bytes(&removed));
+                }
+            }
+        }
+        assert_eq!(
+            history.len(),
+            max_count,
+            "should be capped at count limit {}",
+            max_count
+        );
+    }
+
+    /// 回帰テスト: truncate_snapshot_tables を通した履歴は
+    /// フルサイズより小さくなる。
+    #[test]
+    fn truncated_history_is_smaller() {
+        let snap = make_snapshot_with_table(500);
+        let full_bytes = approx_snapshot_bytes(&snap);
+        let mut truncated = snap.clone();
+        truncate_snapshot_tables(&mut truncated, 20);
+        let truncated_bytes = approx_snapshot_bytes(&truncated);
+        assert!(
+            truncated_bytes < full_bytes,
+            "truncated {} should be < full {}",
+            truncated_bytes,
+            full_bytes
+        );
+        // 500 rows → 21 rows なので大幅に小さいはず
+        assert!(
+            truncated_bytes < full_bytes / 5,
+            "truncated {} should be much smaller than full {}",
+            truncated_bytes,
+            full_bytes
+        );
+    }
+}
