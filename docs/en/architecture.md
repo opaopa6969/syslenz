@@ -283,7 +283,9 @@ Multiple flags of the same type can be combined; each creates one `HostState` en
 
 ## i18n and Help System
 
-All field descriptions live in `src/i18n.rs`, keyed by `(source_name, field_name)`.
+Explicit localized field-description overrides live in `src/i18n.rs`, keyed by
+`(source_name, field_name)`. Fields without an override use the description
+provided by their parser.
 
 Each field has up to 4 levels:
 - **OFF**: no help panel
@@ -291,7 +293,11 @@ Each field has up to 4 levels:
 - **DETAILED**: 2–4 sentences with context
 - **EXTRA**: full explanation + SEE ALSO cross-links + learning breadcrumb
 
-`L` key toggles locale at runtime between `en` and `ja`. 600 fields have English descriptions; 521 (86%) have Japanese translations.
+`L` key toggles locale at runtime between `en` and `ja`. As of v1.7.0, the
+English and Japanese override tables each contain the same 584 field keys
+(584/584 aligned overrides). In Japanese mode, fields without an override fall
+back to the parser's English description; the TUI marks them as translation
+pending.
 
 ---
 
