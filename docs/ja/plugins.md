@@ -361,27 +361,24 @@ cat /tmp/syslenz-errors.log
 
 ## Provider (v1.3.0)
 
-v1.3.0 で Provider システムが導入されました。Provider はプラグインの上位概念で、データベースやミドルウェアなど外部サービスのメトリクスを標準化された方法で収集します。`providers/template/` にテンプレートが用意されており、すぐに自作の Provider を開発できます。
+v1.3.0 から、よく使われる外部サービス向けの実行可能プラグインを Provider として配布しています。Provider は別の実行基盤ではなく、通常のプラグインローダーと ProcEntry JSON プロトコルを使います。`providers/template/` に自作用テンプレートがあります。
 
 ### Provider テンプレート
 
 リポジトリの `providers/template/` ディレクトリに、Provider の雛形が含まれています。このテンプレートをコピーして独自の Provider を作成できます:
 
 ```bash
-cp -r providers/template/ providers/my-service/
-cd providers/my-service/
-# provider スクリプトを編集
-vim provider
-chmod +x provider
+cp providers/template/syslenz-provider-template syslenz-provider-my-service
+# collect_metrics 関数を編集
+chmod +x syslenz-provider-my-service
 ```
 
 テンプレートの構造:
 
 ```
 providers/template/
-├── provider          # 実行可能スクリプト (ProcEntry JSON を出力)
-├── README.md         # 使い方と設定の説明
-└── install.sh        # プラグインディレクトリへのインストールスクリプト
+├── syslenz-provider-template  # 実行可能スクリプト (ProcEntry JSON を出力)
+└── README.md                  # 使い方と設定の説明
 ```
 
 Provider は通常のプラグインと同じ ProcEntry JSON プロトコルに準拠します。違いは、接続情報を環境変数で受け取る規約と、`providers/` ディレクトリで管理される点です。
@@ -394,20 +391,22 @@ MySQL/MariaDB のグローバルステータスとプロセスリストを収集
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `MYSQL_HOST` | `127.0.0.1` | 接続先ホスト |
+| `MYSQL_HOST` | `localhost` | 接続先ホスト |
 | `MYSQL_PORT` | `3306` | 接続先ポート |
 | `MYSQL_USER` | `root` | ユーザー名 |
-| `MYSQL_PASSWORD` | (なし) | パスワード |
+| `MYSQL_PASS` | (なし) | パスワード |
 
-**収集メトリクス:** Threads_connected, Threads_running, Questions (QPS), Slow_queries, Innodb_buffer_pool_reads, Innodb_buffer_pool_read_requests, Uptime
+**収集メトリクス:** threads_connected, threads_running, questions, slow_queries, innodb_buffer_pool_reads, innodb_buffer_pool_read_requests, buffer_pool_hit_rate, uptime
 
 **使い方:**
 
 ```bash
 # 環境変数を設定してインストール
+mkdir -p ~/.config/syslenz/plugins
+cp providers/mysql/syslenz-provider-mysql ~/.config/syslenz/plugins/
+chmod +x ~/.config/syslenz/plugins/syslenz-provider-mysql
 export MYSQL_HOST=127.0.0.1
-export MYSQL_PASSWORD=secret
-providers/mysql/install.sh
+export MYSQL_PASS=secret
 
 # syslenz を起動すると plugin/mysql として表示される
 syslenz
@@ -421,7 +420,7 @@ PostgreSQL の接続数、データベースサイズ、キャッシュヒット
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `PGHOST` | `127.0.0.1` | 接続先ホスト |
+| `PGHOST` | `localhost` | 接続先ホスト |
 | `PGPORT` | `5432` | 接続先ポート |
 | `PGUSER` | `postgres` | ユーザー名 |
 | `PGPASSWORD` | (なし) | パスワード |
@@ -432,8 +431,10 @@ PostgreSQL の接続数、データベースサイズ、キャッシュヒット
 **使い方:**
 
 ```bash
+mkdir -p ~/.config/syslenz/plugins
+cp providers/postgres/syslenz-provider-postgres ~/.config/syslenz/plugins/
+chmod +x ~/.config/syslenz/plugins/syslenz-provider-postgres
 export PGPASSWORD=secret
-providers/postgresql/install.sh
 syslenz
 ```
 
@@ -445,16 +446,19 @@ Redis のメモリ使用量、接続数、キースペース情報を収集し�
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `REDIS_HOST` | `127.0.0.1` | 接続先ホスト |
+| `REDIS_HOST` | `localhost` | 接続先ホスト |
 | `REDIS_PORT` | `6379` | 接続先ポート |
-| `REDIS_PASSWORD` | (なし) | パスワード |
+| `REDIS_PASS` | (なし) | パスワード |
+| `REDIS_URL` | (なし) | host/port/password より優先する接続 URL |
 
-**収集メトリクス:** used_memory, used_memory_rss, connected_clients, blocked_clients, keyspace_hits, keyspace_misses, evicted_keys, instantaneous_ops_per_sec
+**収集メトリクス:** used_memory, used_memory_rss, connected_clients, blocked_clients, keyspace_hits, keyspace_misses, hit_rate, instantaneous_ops_per_sec
 
 **使い方:**
 
 ```bash
-providers/redis/install.sh
+mkdir -p ~/.config/syslenz/plugins
+cp providers/redis/syslenz-provider-redis ~/.config/syslenz/plugins/
+chmod +x ~/.config/syslenz/plugins/syslenz-provider-redis
 syslenz
 ```
 
@@ -466,7 +470,7 @@ nginx のスタブステータスモジュールから接続数とリクエス�
 
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `NGINX_STATUS_URL` | `http://127.0.0.1/nginx_status` | stub_status エンドポイントの URL |
+| `NGINX_STATUS_URL` | `http://localhost/nginx_status` | stub_status エンドポイントの URL |
 
 **前提条件:** nginx の `ngx_http_stub_status_module` が有効で、ステータスエンドポイントが設定されていること。
 
@@ -475,8 +479,10 @@ nginx のスタブステータスモジュールから接続数とリクエス�
 **使い方:**
 
 ```bash
+mkdir -p ~/.config/syslenz/plugins
+cp providers/nginx/syslenz-provider-nginx ~/.config/syslenz/plugins/
+chmod +x ~/.config/syslenz/plugins/syslenz-provider-nginx
 export NGINX_STATUS_URL=http://localhost:8080/nginx_status
-providers/nginx/install.sh
 syslenz
 ```
 
@@ -487,60 +493,22 @@ syslenz
 **1. テンプレートをコピー**
 
 ```bash
-cp -r providers/template/ providers/my-app/
+cp providers/template/syslenz-provider-template syslenz-provider-my-app
 ```
 
-**2. provider スクリプトを編集**
+**2. スクリプトを編集**
 
-接続情報を環境変数から取得し、外部サービスにクエリを発行して ProcEntry JSON を出力します:
+`syslenz-provider-my-app` の `collect_metrics` 関数を編集し、接続情報を環境変数から取得して `add_field` でメトリクスを追加します。最後の `emit_entry` が ProcEntry JSON を出力します。
 
-```bash
-#!/bin/bash
-# providers/my-app/provider
-
-HOST="${MY_APP_HOST:-127.0.0.1}"
-PORT="${MY_APP_PORT:-8080}"
-
-# サービスにクエリ
-response=$(curl -s "http://${HOST}:${PORT}/stats" 2>/dev/null)
-if [ $? -ne 0 ]; then
-    echo '{"source":"/custom/my-app","fields":[{"name":"status","value":{"Text":"接続失敗"},"unit":null,"description":"接続状態"}]}'
-    exit 0
-fi
-
-# メトリクスを抽出して ProcEntry JSON を構築
-requests=$(echo "$response" | jq -r '.total_requests // 0')
-errors=$(echo "$response" | jq -r '.total_errors // 0')
-
-cat <<EOF
-{
-  "source": "/custom/my-app",
-  "fields": [
-    {"name": "total_requests", "value": {"Integer": $requests}, "unit": null, "description": "処理済みリクエスト総数"},
-    {"name": "total_errors", "value": {"Integer": $errors}, "unit": null, "description": "エラー総数"}
-  ]
-}
-EOF
-```
-
-**3. install.sh を書く**
+**3. インストールして確認**
 
 ```bash
-#!/bin/bash
 PLUGIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/syslenz/plugins"
 mkdir -p "$PLUGIN_DIR"
-cp "$(dirname "$0")/provider" "$PLUGIN_DIR/my-app"
-chmod +x "$PLUGIN_DIR/my-app"
-echo "my-app provider をインストールしました"
-```
-
-**4. インストールして確認**
-
-```bash
-chmod +x providers/my-app/provider providers/my-app/install.sh
-providers/my-app/install.sh
-~/.config/syslenz/plugins/my-app | python3 -m json.tool  # JSON を検証
-syslenz  # plugin/my-app として表示される
+cp syslenz-provider-my-app "$PLUGIN_DIR/"
+chmod +x "$PLUGIN_DIR/syslenz-provider-my-app"
+"$PLUGIN_DIR/syslenz-provider-my-app" | python3 -m json.tool
+syslenz  # plugin/syslenz-provider-my-app として表示される
 ```
 
 Provider はプラグインと同じ仕組みで動作するため、既存のプラグインデバッグ手法がそのまま使えます。

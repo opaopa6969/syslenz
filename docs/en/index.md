@@ -100,7 +100,7 @@ Download the latest release from the [GitHub Releases](https://github.com/opaopa
 - **GPU monitoring** -- real-time GPU utilization, memory, temperature, power draw, and per-process GPU usage for NVIDIA (via NVML) and AMD (via sysfs) GPUs; GPU metrics appear in the Dashboard, Classic mode, and are exported via OTLP/Prometheus
 - **systemd integration** -- new data sources for systemd unit status, failed services, and timers; failed service count feeds into the diagnostics engine
 - **Prometheus export** -- new `--prometheus` flag starts a built-in HTTP server exposing a `/metrics` endpoint in standard Prometheus exposition format, eliminating the need for an OTLP collector; works alongside the TUI
-- **Provider ecosystem** -- curated, ready-to-use metric providers for MySQL, PostgreSQL, Redis, and nginx; enable via `[[provider]]` in config.toml or `--provider` CLI flag
+- **Provider ecosystem** -- curated executable plugins for MySQL, PostgreSQL, Redis, and nginx; install them from `providers/` into the plugins directory
 - **14 new diagnostic patterns** -- memory leak detection, swap activity monitoring, OOM kill tracking, network error alerting, recent reboot detection, load trend analysis, high-memory process flagging, orphaned TCP socket detection, IP forwarding check, kernel taint inspection, inode pressure monitoring, context switch rate analysis, conntrack growth rate tracking, and TCP listen port auditing
 - **60+ data sources** -- expanded from 55+ with the addition of GPU, systemd, and inode sources
 

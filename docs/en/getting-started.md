@@ -268,7 +268,6 @@ Open `http://localhost:3000/settings` to edit alert rules in the browser. Change
 | `--web` | `[port]` | Start Web UI (default: 3000, requires `web`) |
 | `--otel` | `[endpoint]` | OTLP export (default: `http://localhost:4317`, requires `otel`) |
 | `--prometheus` | `[port]` | Prometheus `/metrics` endpoint (default: 9101, requires `otel`) |
-| `--provider` | `<name>` | Enable a provider by name (repeatable) |
 | `--widget` | — | X11 floating widget (requires `x11widget`) |
 | `--lang` | `<en\|ja>` | Set UI language (overrides config) |
 | `--classic` | — | Start in Classic mode instead of Dashboard |
@@ -313,8 +312,8 @@ syslenz --otel http://otel-collector:4317 --interval 10
 # Prometheus metrics endpoint
 syslenz --prometheus
 
-# Prometheus on custom port with MySQL provider
-syslenz --prometheus 9102 --provider mysql
+# Prometheus on a custom port (installed providers are discovered automatically)
+syslenz --prometheus 9102
 
 # Launch tutorial mode
 syslenz --tutorial

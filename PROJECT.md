@@ -17,9 +17,9 @@ syslenz/
 ├── providers/              ← 外部メトリクス取得プラグイン
 │   ├── jvm/                ← JVM メトリクス (jstat/jcmd)
 │   ├── docker-stats.sh     ← Docker コンテナメトリクス
-│   ├── mysql/              ← MySQL メトリクス [planned]
-│   ├── postgres/           ← PostgreSQL メトリクス [planned]
-│   └── nginx/              ← nginx メトリクス [planned]
+│   ├── mysql/              ← MySQL メトリクス
+│   ├── postgres/           ← PostgreSQL メトリクス
+│   └── nginx/              ← nginx メトリクス
 │
 ├── docs/                   ← ユーザードキュメント
 │   ├── en/                 ← English (13 docs)
@@ -63,9 +63,9 @@ stdout に ProcEntry JSON を出力する実行ファイル。
 |----------|------|------|
 | jvm | JVM | jstat + jcmd |
 | docker | Docker | docker stats |
-| mysql | MySQL | SHOW STATUS [planned] |
-| postgres | PostgreSQL | pg_stat [planned] |
-| nginx | nginx | stub_status [planned] |
+| mysql | MySQL | SHOW GLOBAL STATUS |
+| postgres | PostgreSQL | pg_stat_database / pg_stat_activity |
+| nginx | nginx | stub_status |
 
 ## ビルド・テスト
 

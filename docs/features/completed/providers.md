@@ -2,26 +2,27 @@
 
 - **Status**: completed
 - **Version**: v1.3.0
-- **Source module**: `src/providers/`
-- **User docs**: [en](../../en/plugins.md#provider-ecosystem-v130) | [ja](../../ja/plugins.md)
+- **Runtime**: `src/plugin/mod.rs`
+- **Provider scripts**: `providers/`
+- **User docs**: [en](../../en/plugins.md#provider-ecosystem-v130) | [ja](../../ja/plugins.md#provider-v130)
 
 ## Summary
 
-A curated provider system for collecting metrics from popular services. Providers
-follow the same ProcEntry protocol as plugins but ship with syslenz and are configured
-via `[[provider]]` entries in config.toml or the `--provider` CLI flag. Initial
-providers cover MySQL, PostgreSQL, Redis, and nginx.
+syslenz ships curated executable providers for common services. A provider is a
+shell-based plugin: install its executable in `~/.config/syslenz/plugins/`, set
+the documented environment variables, and start syslenz. The regular plugin
+loader discovers and executes it automatically.
 
-## Key capabilities
+Providers use the same `ProcEntry` JSON protocol, five-second timeout, automatic
+discovery, and `plugin/<filename>` sidebar key as other plugins.
 
-- `Provider` trait for implementing Rust-native providers
-- Script-based providers supported via `~/.config/syslenz/providers/` directory
-- Configuration via `[[provider]]` in config.toml with per-provider `[provider.config]`
-- CLI activation via `--provider <name>` (repeatable)
-- Built-in providers:
-  - **MySQL**: connections, query rate, slow queries, InnoDB buffer pool, replication lag
-  - **PostgreSQL**: connections, transaction rate, cache hit ratio, dead tuples, DB size
-  - **Redis**: clients, memory, hit rate, ops/sec, evictions, blocked clients
-  - **nginx**: active connections, accepts, handled, requests, reading/writing/waiting
-- Providers coexist with user plugins; both appear in sidebar and all views
-- Credentials read from environment variables for security (password_env pattern)
+## Shipped providers
+
+- **MySQL**: `providers/mysql/syslenz-provider-mysql`
+- **PostgreSQL**: `providers/postgres/syslenz-provider-postgres`
+- **Redis**: `providers/redis/syslenz-provider-redis`
+- **nginx**: `providers/nginx/syslenz-provider-nginx`
+- **Template**: `providers/template/syslenz-provider-template`
+
+Each provider directory contains a README with dependencies, environment
+variables, installation, and direct-execution test instructions.
