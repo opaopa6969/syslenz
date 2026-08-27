@@ -143,8 +143,8 @@ curl http://localhost:3000/healthz
 ```
 
 **Notes:**
-- The web server always binds to `0.0.0.0` (all interfaces)
-- CLI flag `--web [port]` overrides `web.port`
+- Automatic Web UI startup uses `0.0.0.0` and `web.port`
+- Standalone `--web [addr:port]` accepts an explicit bind address; a port-only value keeps the `0.0.0.0` behavior
 
 ### `[ssh]`
 

@@ -201,7 +201,7 @@ All views share a `ViewData` struct that the Web UI fetches from `/api/view`. Th
 
 ## HTTP Server Layer (axum)
 
-Started by `--web [port]` (requires `web` feature). Implemented in `src/web.rs`.
+Started by `--web [addr:port]` (requires the `web` feature; defaults to `0.0.0.0:3000`). Implemented in `src/web.rs`.
 
 ### Routes
 

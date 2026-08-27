@@ -46,7 +46,8 @@ pub(crate) struct AppState {
 }
 
 #[cfg(feature = "web")]
-pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
+pub fn run_web_server(bind: &str, locale: Locale) -> anyhow::Result<()> {
+    let addr = normalize_web_bind(bind);
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let (tx, _) = broadcast::channel::<String>(64);
@@ -151,12 +152,19 @@ pub fn run_web_server(port: u16, locale: Locale) -> anyhow::Result<()> {
             .route("/healthz", get(healthz_handler))
             .with_state(state);
 
-        let addr = format!("0.0.0.0:{}", port);
-        eprintln!("syslenz web UI: http://localhost:{}", port);
+        eprintln!("syslenz web UI listening on http://{}", addr);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         axum::serve(listener, app).await?;
         Ok(())
     })
+}
+
+#[cfg(feature = "web")]
+fn normalize_web_bind(bind: &str) -> String {
+    match bind.parse::<u16>() {
+        Ok(port) => format!("0.0.0.0:{}", port),
+        Err(_) => bind.to_owned(),
+    }
 }
 
 /// Health check endpoint for external monitoring.
@@ -3012,6 +3020,17 @@ mod tests {
     use super::*;
     use crate::proc::{FieldValue, ProcEntry};
     use std::time::SystemTime;
+
+    #[test]
+    fn web_bind_port_preserves_legacy_all_interfaces_default() {
+        assert_eq!(normalize_web_bind("3000"), "0.0.0.0:3000");
+    }
+
+    #[test]
+    fn web_bind_explicit_address_is_preserved() {
+        assert_eq!(normalize_web_bind("127.0.0.1:3000"), "127.0.0.1:3000");
+        assert_eq!(normalize_web_bind("[::1]:3000"), "[::1]:3000");
+    }
 
     fn make_snapshot_with_table(rows: usize) -> crate::proc::Snapshot {
         use std::collections::BTreeMap;

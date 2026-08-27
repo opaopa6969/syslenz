@@ -265,7 +265,7 @@ syslenz --web 3000
 | `--docker` | `<container>` | Docker コンテナ監視 |
 | `--connect` | `<host:port>` | syslenz TCP サーバーに接続 |
 | `--serve` | `[bind_addr]` | TCP サーバー起動（デフォルト: `0.0.0.0:9100`） |
-| `--web` | `[port]` | Web UI 起動（デフォルト: 3000、`web` 必要） |
+| `--web` | `[addr:port]` | Web UI 起動（デフォルト: `0.0.0.0:3000`、`web` 必要） |
 | `--otel` | `[endpoint]` | OTLP エクスポート（デフォルト: `http://localhost:4317`、`otel` 必要） |
 | `--prometheus` | `[port]` | Prometheus `/metrics` エンドポイント（デフォルト: 9101、`otel` 必要） |
 | `--widget` | — | X11 フローティングウィジェット（`x11widget` 必要） |

@@ -265,7 +265,7 @@ Open `http://localhost:3000/settings` to edit alert rules in the browser. Change
 | `--docker` | `<container>` | Monitor a Docker container via exec |
 | `--connect` | `<host:port>` | Connect to a syslenz TCP server |
 | `--serve` | `[bind_addr]` | Start TCP server (default: `0.0.0.0:9100`) |
-| `--web` | `[port]` | Start Web UI (default: 3000, requires `web`) |
+| `--web` | `[addr:port]` | Start Web UI (default: `0.0.0.0:3000`, requires `web`) |
 | `--otel` | `[endpoint]` | OTLP export (default: `http://localhost:4317`, requires `otel`) |
 | `--prometheus` | `[port]` | Prometheus `/metrics` endpoint (default: 9101, requires `otel`) |
 | `--widget` | — | X11 floating widget (requires `x11widget`) |
