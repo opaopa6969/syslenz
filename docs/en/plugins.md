@@ -356,48 +356,22 @@ Error messages look like:
 
 ## Provider Ecosystem (v1.3.0)
 
-As of v1.3.0, syslenz ships with a **provider** system -- a curated set of ready-to-use plugins for popular services. Providers follow the same plugin protocol but are distributed with syslenz and can be enabled via configuration.
+As of v1.3.0, syslenz ships a curated set of executable plugins for popular services. "Provider" describes how these scripts are distributed; at runtime they use the regular plugin loader and protocol.
 
-### Enabling a provider
+### Installing a provider
 
-In `~/.config/syslenz/config.toml`:
-
-```toml
-[[provider]]
-name = "mysql"
-enabled = true
-
-[provider.config]
-host = "127.0.0.1"
-port = 3306
-user = "monitor"
-password_env = "MYSQL_MONITOR_PASSWORD"  # read from environment variable
-```
-
-Or enable at runtime:
+Copy the desired executable from `providers/` into the plugin directory and make it executable. Installed providers are discovered automatically.
 
 ```bash
-syslenz --provider mysql --provider redis
+mkdir -p ~/.config/syslenz/plugins
+cp providers/mysql/syslenz-provider-mysql ~/.config/syslenz/plugins/
+chmod +x ~/.config/syslenz/plugins/syslenz-provider-mysql
+MYSQL_USER=monitor MYSQL_PASS=secret syslenz
 ```
 
 ### Provider template
 
-All providers follow a standard template. To create your own provider, implement the `Provider` trait:
-
-```rust
-pub trait Provider: Send + Sync {
-    /// Unique name for this provider (e.g., "mysql", "redis")
-    fn name(&self) -> &str;
-
-    /// Collect metrics and return a ProcEntry
-    fn collect(&self, config: &ProviderConfig) -> Result<ProcEntry>;
-
-    /// Default configuration values
-    fn default_config(&self) -> ProviderConfig;
-}
-```
-
-Or for script-based providers, place an executable in `~/.config/syslenz/providers/` following the same ProcEntry JSON protocol as plugins.
+Copy `providers/template/syslenz-provider-template`, edit its shell `collect_metrics` function, and install the result in `~/.config/syslenz/plugins/`. It must emit one `ProcEntry` JSON object, like every other plugin. See `providers/template/README.md` for the complete workflow.
 
 ### Available providers
 
@@ -409,25 +383,12 @@ Connects to MySQL/MariaDB and collects server status metrics.
 |-------|------|-------------|
 | threads_connected | Integer | Current open connections |
 | threads_running | Integer | Currently executing queries |
-| queries_per_sec | Float | Query rate (derived from `Questions`) |
+| questions | Integer | Total statements executed |
 | slow_queries | Integer | Cumulative slow query count |
-| innodb_buffer_pool_usage | Float | Buffer pool usage percentage |
-| replication_lag | Float | Seconds behind master (if replica) |
+| buffer_pool_hit_rate | Float | Buffer pool hit ratio (0.0-1.0) |
 | uptime | Duration | Server uptime |
 
-**Configuration:**
-
-```toml
-[[provider]]
-name = "mysql"
-enabled = true
-
-[provider.config]
-host = "127.0.0.1"
-port = 3306
-user = "monitor"
-password_env = "MYSQL_MONITOR_PASSWORD"
-```
+**Configuration:** `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, and `MYSQL_PASS`. See `providers/mysql/README.md`.
 
 #### PostgreSQL
 
@@ -437,26 +398,13 @@ Connects to PostgreSQL and collects database activity metrics.
 |-------|------|-------------|
 | active_connections | Integer | Active connections |
 | idle_connections | Integer | Idle connections |
-| transactions_per_sec | Float | Transaction rate |
+| xact_commit | Integer | Transactions committed |
+| xact_rollback | Integer | Transactions rolled back |
 | cache_hit_ratio | Float | Buffer cache hit ratio (0.0-1.0) |
-| dead_tuples | Integer | Dead tuples awaiting VACUUM |
 | database_size | Bytes | Total database size |
-| replication_lag | Float | Replication lag in seconds (if replica) |
+| deadlocks | Integer | Deadlocks detected |
 
-**Configuration:**
-
-```toml
-[[provider]]
-name = "postgresql"
-enabled = true
-
-[provider.config]
-host = "127.0.0.1"
-port = 5432
-user = "monitor"
-database = "postgres"
-password_env = "PG_MONITOR_PASSWORD"
-```
+**Configuration:** standard `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, and `PGPASSWORD` variables. See `providers/postgres/README.md`.
 
 #### Redis
 
@@ -468,23 +416,10 @@ Connects to Redis and collects server info metrics.
 | used_memory | Bytes | Memory used by Redis |
 | used_memory_peak | Bytes | Peak memory usage |
 | hit_rate | Float | Keyspace hit rate (0.0-1.0) |
-| ops_per_sec | Float | Commands processed per second |
-| evicted_keys | Integer | Keys evicted due to maxmemory |
+| instantaneous_ops_per_sec | Integer | Commands processed per second |
 | blocked_clients | Integer | Clients blocked on BLPOP etc. |
 
-**Configuration:**
-
-```toml
-[[provider]]
-name = "redis"
-enabled = true
-
-[provider.config]
-host = "127.0.0.1"
-port = 6379
-password_env = "REDIS_PASSWORD"  # optional
-database = 0
-```
+**Configuration:** `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASS`, or `REDIS_URL`. See `providers/redis/README.md`.
 
 #### nginx
 
@@ -500,16 +435,7 @@ Reads the nginx stub_status module and collects connection metrics.
 | writing | Integer | Connections writing response |
 | waiting | Integer | Keep-alive connections waiting |
 
-**Configuration:**
-
-```toml
-[[provider]]
-name = "nginx"
-enabled = true
-
-[provider.config]
-status_url = "http://127.0.0.1:8080/stub_status"
-```
+**Configuration:** `NGINX_STATUS_URL`. See `providers/nginx/README.md`.
 
 **Note:** Requires the `ngx_http_stub_status_module` to be enabled in your nginx configuration:
 
@@ -526,12 +452,12 @@ location /stub_status {
 | Aspect | Provider | Plugin |
 |--------|----------|--------|
 | Distribution | Ships with syslenz | User-created |
-| Configuration | `config.toml` [[provider]] | Executable in plugins dir |
-| Language | Rust (compiled in) or script | Any executable |
-| Discovery | Enabled via config | Auto-discovered from directory |
+| Configuration | Environment variables documented with the script | Script-specific |
+| Language | Shell in the shipped set | Any executable |
+| Discovery | Auto-discovered from the plugin directory | Auto-discovered from the plugin directory |
 | Metrics | Predefined schema | Arbitrary ProcEntry |
 
-Providers and plugins can coexist. Use providers for common services where a curated metric set is valuable. Use plugins for custom or niche data sources.
+Providers are curated plugins rather than a separate runtime subsystem. Use the shipped providers for common services and create a plugin for custom or niche data sources.
 
 ---
 

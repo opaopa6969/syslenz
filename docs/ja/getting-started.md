@@ -268,7 +268,6 @@ syslenz --web 3000
 | `--web` | `[port]` | Web UI 起動（デフォルト: 3000、`web` 必要） |
 | `--otel` | `[endpoint]` | OTLP エクスポート（デフォルト: `http://localhost:4317`、`otel` 必要） |
 | `--prometheus` | `[port]` | Prometheus `/metrics` エンドポイント（デフォルト: 9101、`otel` 必要） |
-| `--provider` | `<name>` | プロバイダーを名前で有効化（複数指定可） |
 | `--widget` | — | X11 フローティングウィジェット（`x11widget` 必要） |
 | `--lang` | `<en\|ja>` | UI 言語設定（設定ファイルを上書き） |
 | `--classic` | — | ダッシュボードではなくクラシックモードで起動 |
@@ -313,8 +312,8 @@ syslenz --otel http://otel-collector:4317 --interval 10
 # Prometheus メトリクスエンドポイント
 syslenz --prometheus
 
-# カスタムポートと MySQL プロバイダーで Prometheus
-syslenz --prometheus 9102 --provider mysql
+# カスタムポートで Prometheus（インストール済み Provider は自動検出）
+syslenz --prometheus 9102
 
 # チュートリアルモードを起動
 syslenz --tutorial
