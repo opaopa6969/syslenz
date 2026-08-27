@@ -250,7 +250,7 @@ CLI フラグは設定ファイルの値を上書きします。完全なリフ�
 | `--docker container` | Docker コンテナ監視 |
 | `--serve [addr]` | TCP サーバーモード（デフォルト: `0.0.0.0:9100`） |
 | `--connect host:port` | TCP サーバーに接続 |
-| `--web [port]` | Web UI（デフォルト: 3000、`web` feature が必要） |
+| `--web [addr:port]` | Web UI（デフォルト: `0.0.0.0:3000`、ポートのみの指定は全インターフェースにバインド） |
 | `--export file.json` | スナップショットを JSON エクスポート |
 | `--import file.json` | スナップショットからリプレイモード |
 | `--prometheus [port]` | Prometheus `/metrics` エンドポイント |

@@ -53,15 +53,19 @@ syslenz --web
 
 syslenz --web 8080
 
+# Loopback only (recommended on shared hosts)
+
+syslenz --web 127.0.0.1:8080
+
 # With Japanese locale
 
 syslenz --web 8080 --lang ja
 ```
 
-The server binds to `0.0.0.0` and prints the URL:
+By default, the server binds to `0.0.0.0`. A port-only argument preserves that behavior; use `addr:port` to restrict the listening interface. The server prints its listening address:
 
 ```
-syslenz web UI: http://localhost:3000
+syslenz web UI listening on http://127.0.0.1:8080
 ```
 
 Open this URL in a browser.
@@ -228,7 +232,7 @@ docker run --rm --pid=host --privileged -p 3000:3000 syslenz-web
 
 ### Security considerations
 
-- The Web UI has no authentication. Use a reverse proxy with auth if exposing to the internet.
+- The Web UI has no authentication. Bind to loopback with `--web 127.0.0.1:3000`, or use a reverse proxy with auth if exposing it to a network.
 - The API exposes detailed system information. Restrict access to trusted networks.
 - CORS is enabled via `tower-http` for API consumers.
 

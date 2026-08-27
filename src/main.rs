@@ -271,23 +271,24 @@ fn main() -> Result<()> {
         return otel::run_otel_export_with_level(endpoint, interval, level, locale);
     }
 
-    // --web [port]
+    // --web [bind_addr]
     if args.iter().any(|a| a == "--web") {
         #[cfg(feature = "web")]
         {
-            let port = args
+            let bind = args
                 .iter()
                 .position(|a| a == "--web")
                 .and_then(|pos| args.get(pos + 1))
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(3000);
+                .filter(|s| !s.starts_with("--"))
+                .map(|s| s.as_str())
+                .unwrap_or("3000");
             let locale = args
                 .iter()
                 .position(|a| a == "--lang")
                 .and_then(|pos| args.get(pos + 1))
                 .map(|s| i18n::Locale::from_str(s))
                 .unwrap_or(i18n::Locale::En);
-            return web::run_web_server(port, locale);
+            return web::run_web_server(bind, locale);
         }
         #[cfg(not(feature = "web"))]
         {
@@ -392,9 +393,9 @@ fn main() -> Result<()> {
     #[cfg(feature = "web")]
     let _web_thread = if !no_web {
         let web_locale = locale;
-        let port = web_port;
+        let bind = web_port.to_string();
         Some(std::thread::spawn(move || {
-            if let Err(e) = web::run_web_server(port, web_locale) {
+            if let Err(e) = web::run_web_server(&bind, web_locale) {
                 eprintln!("Web server error: {}", e);
             }
         }))
@@ -1088,7 +1089,10 @@ fn print_help() {
             "--prometheus [bind_addr]",
             "Prometheus metrics HTTP server (default 0.0.0.0:9101)",
         ),
-        ("--web [port]", "Web UI server (default 3000, feature: web)"),
+        (
+            "--web [bind_addr]",
+            "Web UI server (default 0.0.0.0:3000, feature: web)",
+        ),
         (
             "--otel [endpoint] [--otel-level core|full]",
             "OpenTelemetry export",

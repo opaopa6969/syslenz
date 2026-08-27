@@ -201,7 +201,7 @@ TUI は `main.rs` の crossterm raw モードイベントループで動作。�
 
 ## HTTP サーバーレイヤー (axum)
 
-`--web [port]`（デフォルト 3000）で起動（`web` feature が必要）。`src/web.rs` に実装。
+`--web [addr:port]`（デフォルト `0.0.0.0:3000`）で起動（`web` feature が必要）。`src/web.rs` に実装。
 
 ### ルート
 
