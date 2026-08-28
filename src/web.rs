@@ -452,6 +452,8 @@ fn build_minimal_app(
         article_content_lines: 0,
         article_visible_height: 0,
         dash_zero_axis: false,
+        pins: crate::pins::PinSet::new(Vec::new()),
+        pin_filter: false,
     }
 }
 

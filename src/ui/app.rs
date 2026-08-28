@@ -1,6 +1,7 @@
 use crate::alert::{self, AlertEvent, AlertRule};
 use crate::article;
 use crate::i18n::Locale;
+use crate::pins::{Pin, PinFile, PinSet};
 use crate::proc::{DiffItem, FieldValue, Snapshot, diff_snapshots};
 use std::collections::BTreeMap;
 use std::sync::mpsc;
@@ -199,6 +200,10 @@ pub struct App {
     pub article_content_lines: usize,
     /// Visible line count of article panel (set by render)
     pub article_visible_height: usize,
+    /// Pinned items (persisted to pins.toml)
+    pub pins: PinSet,
+    /// Pin-only filter view active
+    pub pin_filter: bool,
 }
 
 impl App {
@@ -267,6 +272,8 @@ impl App {
             article_content_lines: 0,
             article_visible_height: 0,
             dash_zero_axis: false,
+            pins: PinSet::new(PinFile::load()),
+            pin_filter: false,
         })
     }
 
@@ -340,6 +347,8 @@ impl App {
             article_content_lines: 0,
             article_visible_height: 0,
             dash_zero_axis: false,
+            pins: PinSet::new(PinFile::load()),
+            pin_filter: false,
         })
     }
 
@@ -416,6 +425,8 @@ impl App {
             article_content_lines: 0,
             article_visible_height: 0,
             dash_zero_axis: false,
+            pins: PinSet::new(PinFile::load()),
+            pin_filter: false,
         })
     }
 
@@ -701,6 +712,76 @@ impl App {
 
     pub fn toggle_dashboard_axis(&mut self) {
         self.dash_zero_axis = !self.dash_zero_axis;
+    }
+
+    pub fn toggle_pin(&mut self) {
+        let source = self.current_source_name().to_string();
+        let field = self
+            .current_entry_fields()
+            .and_then(|fields| fields.get(self.selected_field))
+            .map(|f| f.name.clone());
+        let host = self.pins.current_host(&self.hosts[self.active_host].label);
+        let pin = Pin {
+            source,
+            field,
+            host,
+        };
+        let added = self.pins.toggle(&pin);
+        self.pins.save();
+        let msg = if self.locale == crate::i18n::Locale::Ja {
+            if added {
+                format!("ピン追加: {}", pin.source)
+            } else {
+                format!("ピン削除: {}", pin.source)
+            }
+        } else {
+            if added {
+                format!("Pin added: {}", pin.source)
+            } else {
+                format!("Pin removed: {}", pin.source)
+            }
+        };
+        self.status_message = Some(msg);
+    }
+
+    pub fn toggle_pin_filter(&mut self) {
+        if self.pins.is_empty() {
+            self.status_message = Some(if self.locale == crate::i18n::Locale::Ja {
+                "ピンがありません".to_string()
+            } else {
+                "No pins set".to_string()
+            });
+            return;
+        }
+        self.pin_filter = !self.pin_filter;
+        if self.pin_filter {
+            self.view = View::Overview;
+            self.focus = Focus::Sidebar;
+            self.selected_source = 0;
+            self.selected_field = 0;
+            self.sidebar_scroll = 0;
+        }
+    }
+
+    pub fn save_pins(&self) {
+        self.pins.save();
+    }
+
+    pub fn current_host_key(&self) -> String {
+        self.pins.current_host(&self.hosts[self.active_host].label)
+    }
+
+    pub fn is_current_pinned(&self) -> bool {
+        let source = self.current_source_name();
+        let host = self.current_host_key();
+        if let Some(fields) = self.current_entry_fields() {
+            if let Some(field) = fields.get(self.selected_field) {
+                return self
+                    .pins
+                    .is_pinned_field(source, &field.name, &host);
+            }
+        }
+        self.pins.is_pinned_source(source, &host)
     }
 
     const GRAPH_TIME_WINDOWS: [usize; 6] = [30, 60, 120, 300, 900, 3600];
@@ -2077,5 +2158,214 @@ mod tests {
         assert_eq!(OtelLevel::from_str("CORE"), OtelLevel::Core);
         assert_eq!(OtelLevel::from_str("full"), OtelLevel::Full);
         assert_eq!(OtelLevel::from_str("anything"), OtelLevel::Full);
+    }
+
+    // === Issue #7: Pin feature tests ===
+
+    #[test]
+    fn pin_toggle_and_persist_logic() {
+        let mut set = PinSet::new(vec![]);
+        assert!(set.is_empty());
+        let pin = Pin {
+            source: "meminfo".to_string(),
+            field: Some("MemAvailable".to_string()),
+            host: String::new(),
+        };
+        assert!(set.toggle(&pin));
+        assert!(set.contains(&pin));
+        assert_eq!(set.len(), 1);
+        assert!(!set.toggle(&pin));
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn pin_is_pinned_source_and_field() {
+        let mut set = PinSet::new(vec![]);
+        set.toggle(&Pin {
+            source: "meminfo".to_string(),
+            field: None,
+            host: String::new(),
+        });
+        assert!(set.is_pinned_source("meminfo", ""));
+        assert!(!set.is_pinned_field("meminfo", "MemAvailable", ""));
+        set.toggle(&Pin {
+            source: "meminfo".to_string(),
+            field: Some("MemAvailable".to_string()),
+            host: String::new(),
+        });
+        assert!(set.is_pinned_field("meminfo", "MemAvailable", ""));
+    }
+
+    #[test]
+    fn pin_host_key_distinguishes() {
+        let mut set = PinSet::new(vec![]);
+        set.toggle(&Pin {
+            source: "loadavg".to_string(),
+            field: None,
+            host: "ssh:host1".to_string(),
+        });
+        assert!(!set.is_pinned_source("loadavg", ""));
+        assert!(set.is_pinned_source("loadavg", "ssh:host1"));
+    }
+
+    #[test]
+    fn pin_current_host_normalizes_localhost() {
+        let set = PinSet::new(vec![]);
+        assert_eq!(set.current_host("localhost"), "");
+        assert_eq!(set.current_host("local"), "");
+        assert_eq!(set.current_host("ssh:host1"), "ssh:host1");
+    }
+
+    #[test]
+    fn pinfile_toml_roundtrip() {
+        let file = PinFile {
+            pin: vec![
+                Pin {
+                    source: "meminfo".to_string(),
+                    field: Some("MemAvailable".to_string()),
+                    host: String::new(),
+                },
+                Pin {
+                    source: "jvm".to_string(),
+                    field: Some("heap_used".to_string()),
+                    host: "tcp:127.0.0.1:9100".to_string(),
+                },
+                Pin {
+                    source: "loadavg".to_string(),
+                    field: None,
+                    host: String::new(),
+                },
+            ],
+        };
+        let toml_str = toml::to_string_pretty(&file).unwrap();
+        let parsed: PinFile = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.pin.len(), 3);
+        assert_eq!(parsed.pin[0].field, Some("MemAvailable".to_string()));
+        assert_eq!(parsed.pin[1].host, "tcp:127.0.0.1:9100");
+        assert_eq!(parsed.pin[2].field, None);
+    }
+
+    #[test]
+    fn pinfile_load_nonexistent_is_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
+        }
+        let pins = PinFile::load();
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        assert!(pins.is_empty());
+    }
+
+    #[test]
+    fn pinfile_save_and_load_roundtrip() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
+        }
+        let pins = vec![
+            Pin {
+                source: "meminfo".to_string(),
+                field: Some("MemAvailable".to_string()),
+                host: String::new(),
+            },
+            Pin {
+                source: "loadavg".to_string(),
+                field: None,
+                host: String::new(),
+            },
+        ];
+        PinFile::save(&pins);
+        let loaded = PinFile::load();
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].source, "meminfo");
+        assert_eq!(loaded[0].field, Some("MemAvailable".to_string()));
+        assert_eq!(loaded[1].source, "loadavg");
+        assert_eq!(loaded[1].field, None);
+    }
+
+    #[test]
+    fn pinfile_lenient_load_on_parse_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("syslenz").join("pins.toml");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not valid toml {{{").unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
+        }
+        let pins = PinFile::load();
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        assert!(pins.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn app_toggle_pin_sets_status_message() {
+        let mut app = App::new().unwrap();
+        app.pins = PinSet::new(vec![]);
+        app.selected_source = app
+            .source_keys
+            .iter()
+            .position(|k| k == "meminfo")
+            .unwrap_or(0);
+        app.selected_field = 0;
+        app.toggle_pin();
+        assert!(app.status_message.is_some());
+        assert!(!app.pins.is_empty());
+        app.toggle_pin();
+        assert!(app.pins.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn app_toggle_pin_filter_requires_pins() {
+        let mut app = App::new().unwrap();
+        app.pins = PinSet::new(vec![]);
+        app.toggle_pin_filter();
+        assert!(!app.pin_filter);
+        assert!(app.status_message.is_some());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn app_toggle_pin_filter_activates_with_pins() {
+        let mut app = App::new().unwrap();
+        app.pins = PinSet::new(vec![Pin {
+            source: "meminfo".to_string(),
+            field: None,
+            host: String::new(),
+        }]);
+        app.toggle_pin_filter();
+        assert!(app.pin_filter);
+        app.toggle_pin_filter();
+        assert!(!app.pin_filter);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn app_save_pins_writes_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
+        }
+        let mut app = App::new().unwrap();
+        app.pins = PinSet::new(vec![Pin {
+            source: "loadavg".to_string(),
+            field: None,
+            host: String::new(),
+        }]);
+        app.save_pins();
+        let loaded = PinFile::load();
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].source, "loadavg");
     }
 }

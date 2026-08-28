@@ -114,8 +114,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
         draw_sidebar(f, app, main_chunks[0]);
 
-        match view_data {
-            ViewData::Detail(ref data) => {
+        if app.pin_filter {
+            draw_pin_filter(f, app, main_chunks[1]);
+        } else {
+            match view_data {
+                ViewData::Detail(ref data) => {
                 // Check if selected field is numeric — auto-show graph
                 let has_numeric_field = app
                     .current_entry_fields()
@@ -146,6 +149,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             ViewData::TableView(_) => draw_table_view(f, app, main_chunks[1]),
             ViewData::ProcessDetail(ref data) => draw_process_detail(f, data, main_chunks[1]),
             _ => {}
+            }
         }
     }
 
@@ -499,6 +503,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             .map(|(i, key)| {
                 let marker = if i == selected { ">" } else { " " };
                 let alert_severity = alert::source_max_severity(&app.active_alerts, key);
+                let host_key = app.current_host_key();
+                let is_pinned = app.pins.is_pinned_source(key, &host_key);
+                let pin_marker = if is_pinned { "*" } else { " " };
                 let style = if i == selected {
                     Style::default()
                         .fg(Color::Yellow)
@@ -514,6 +521,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
+                    Span::styled(format!("{} ", pin_marker), Style::default().fg(Color::Magenta)),
                     Span::styled(format!("{:<18}", key), style),
                 ]))
             })
@@ -571,6 +579,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 let indent = "  ".repeat(*depth);
                 let marker = if is_selected { ">" } else { " " };
                 let alert_severity = alert::source_max_severity(&app.active_alerts, key);
+                let host_key = app.current_host_key();
+                let is_pinned = app.pins.is_pinned_source(key, &host_key);
+                let pin_marker = if is_pinned { "*" } else { " " };
                 let name_style = if is_selected {
                     Style::default()
                         .fg(Color::Yellow)
@@ -601,9 +612,63 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 ListItem::new(Line::from(vec![
                     Span::raw(indent),
                     Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
+                    Span::styled(format!("{} ", pin_marker), Style::default().fg(Color::Magenta)),
                     Span::styled(leaf_label, name_style),
                 ]))
             }
+        })
+        .collect();
+
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+    f.render_widget(list, area);
+}
+
+fn draw_pin_filter(f: &mut Frame, app: &App, area: Rect) {
+    let host_key = app.current_host_key();
+    let title = if app.locale == crate::i18n::Locale::Ja {
+        format!(" ピン済み ({}) [P:解除] ", app.pins.len())
+    } else {
+        format!(" Pinned ({}) [P:clear] ", app.pins.len())
+    };
+
+    let items: Vec<ListItem> = app
+        .pins
+        .pins()
+        .iter()
+        .map(|pin| {
+            let source_exists = if pin.host == host_key {
+                app.current.entries.contains_key(&pin.source)
+            } else {
+                false
+            };
+            let line = if let Some(ref field) = pin.field {
+                format!("{}.{}", pin.source, field)
+            } else {
+                pin.source.clone()
+            };
+            let host_suffix = if pin.host.is_empty() {
+                String::new()
+            } else {
+                format!(" @{}", pin.host)
+            };
+            let style = if source_exists {
+                Style::default().fg(Color::White)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let missing_tag = if source_exists {
+                ""
+            } else {
+                if app.locale == crate::i18n::Locale::Ja {
+                    " (不在)"
+                } else {
+                    " (missing)"
+                }
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled("* ", Style::default().fg(Color::Magenta)),
+                Span::styled(format!("{}{}{}", line, host_suffix, missing_tag), style),
+            ]))
         })
         .collect();
 
@@ -678,8 +743,10 @@ fn draw_detail(f: &mut Frame, data: &DetailData, locale: crate::i18n::Locale, ar
                 _ => "",
             };
 
+            let pin_prefix = if field.is_pinned { "* " } else { "" };
+
             Row::new(vec![
-                Cell::from(format!("{}{}", alert_prefix, name_display)).style(style),
+                Cell::from(format!("{}{}{}", pin_prefix, alert_prefix, name_display)).style(style),
                 Cell::from(field.value.clone()).style(
                     Style::default()
                         .fg(value_color)
@@ -2777,6 +2844,36 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             format!(" | {} ", msg),
             Style::default().fg(Color::Green),
         ));
+        Line::from(spans)
+    } else {
+        status
+    };
+
+    // Show pin count / filter state
+    let status = if !app.pins.is_empty() {
+        let mut spans = status.spans;
+        let filter_tag = if app.pin_filter {
+            if l == crate::i18n::Locale::Ja {
+                "PIN"
+            } else {
+                "PIN"
+            }
+        } else {
+            ""
+        };
+        let label = if l == crate::i18n::Locale::Ja {
+            format!(" ピン:{}", app.pins.len())
+        } else {
+            format!(" pins:{}", app.pins.len())
+        };
+        let style = if app.pin_filter {
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Magenta)
+        };
+        spans.push(Span::styled(format!(" [{}{}]", label, filter_tag), style));
         Line::from(spans)
     } else {
         status

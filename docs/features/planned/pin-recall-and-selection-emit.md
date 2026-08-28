@@ -1,6 +1,6 @@
 # Pin/Recall and Selection Emit
 
-- **Status**: planned
+- **Status**: Phase 1 implemented (issue #7)
 - **Origin**: design discussion 2026-06-12 — "syslenz is a viewer; should it save/recall selected items as logs, or hand selections to a separate process?"
 
 ## Summary
