@@ -59,6 +59,7 @@ mod metric_kind;
 mod mcp;
 mod net;
 mod otel;
+mod pins;
 mod plugin;
 mod proc;
 mod prometheus;
@@ -464,9 +465,9 @@ fn main() -> Result<()> {
     if let Err(e) = result {
         eprintln!("Error: {}", e);
     }
+
     Ok(())
 }
-
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     imported: Option<Vec<proc::Snapshot>>,
@@ -696,6 +697,12 @@ fn run(
                     KeyCode::Char('t') => {
                         app.toggle_sidebar_tree();
                     }
+                    KeyCode::Char('p') => {
+                        app.toggle_pin();
+                    }
+                    KeyCode::Char('P') => {
+                        app.toggle_pin_filter();
+                    }
                     KeyCode::Char('c') => {
                         // Copy current field value to clipboard
                         if let Some(text) = app.get_copyable_text() {
@@ -787,6 +794,8 @@ fn run(
             app.refresh()?;
         }
     }
+
+    app.save_pins();
 
     Ok(())
 }

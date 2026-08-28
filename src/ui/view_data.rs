@@ -179,6 +179,8 @@ pub struct FieldRow {
     /// Alert severity if this field is triggering an alert: "info", "warning", "critical", or empty
     #[serde(default)]
     pub alert_severity: String,
+    #[serde(default)]
+    pub is_pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1092,6 +1094,9 @@ impl App {
                             alert::field_alert_severity(&self.active_alerts, &source_name, &f.name)
                                 .unwrap_or("")
                                 .to_string();
+                        let host_key = self.current_host_key();
+                        let is_pinned =
+                            self.pins.is_pinned_field(&source_name, &f.name, &host_key);
                         FieldRow {
                             name: name_display,
                             value: f.value.display(),
@@ -1100,6 +1105,7 @@ impl App {
                             color,
                             is_table,
                             alert_severity: alert_sev,
+                            is_pinned,
                         }
                     })
                     .collect()
