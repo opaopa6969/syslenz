@@ -8,7 +8,7 @@ use crate::i18n::Locale;
 use crate::proc::{FieldValue, Snapshot};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Severity {
     Info,
     Warning,
@@ -357,14 +357,15 @@ fn check_memory(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: 
 }
 
 fn check_load(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot, locale: Locale) {
-    let load1 = match get_float(snap, "loadavg", "load1") {
+    let load1 = match get_float(snap, "loadavg", "load_1min") {
         Some(v) => v,
         None => return,
     };
 
-    // Try to get CPU count
-    let cpu_count = get_integer(snap, "stat", "cpu_count")
-        .or_else(|| get_integer(snap, "cpuinfo", "cpu_count"))
+    // Try to get CPU count (cpuinfo.logical_cpus, fallback to interrupts/schedstat cpu_count)
+    let cpu_count = get_integer(snap, "cpuinfo", "logical_cpus")
+        .or_else(|| get_integer(snap, "interrupts", "cpu_count"))
+        .or_else(|| get_integer(snap, "schedstat", "cpu_count"))
         .unwrap_or(1) as f64;
 
     if cpu_count <= 0.0 {
@@ -1153,9 +1154,9 @@ fn check_context_switches(findings: &mut Vec<DiagnosticFinding>, snap: &Snapshot
         None => return,
     };
 
-    let cpu_count = get_integer(snap, "stat", "cpu_count")
-        .or_else(|| get_integer(snap, "cpuinfo", "cpu_count"))
+    let cpu_count = get_integer(snap, "cpuinfo", "logical_cpus")
         .or_else(|| get_integer(snap, "interrupts", "cpu_count"))
+        .or_else(|| get_integer(snap, "schedstat", "cpu_count"))
         .unwrap_or(1);
 
     if cpu_count <= 0 {
@@ -1822,9 +1823,6 @@ mod benches {
         let loadavg = ProcEntry {
             source: "loadavg".into(),
             fields: vec![
-                field("load1", FieldValue::Float(2.5)),
-                field("load5", FieldValue::Float(2.0)),
-                field("load15", FieldValue::Float(1.8)),
                 field("load_1min", FieldValue::Float(2.5)),
                 field("load_5min", FieldValue::Float(2.0)),
                 field("load_15min", FieldValue::Float(1.8)),
@@ -1838,7 +1836,6 @@ mod benches {
                 field("cpu_user", FieldValue::Float(25.0)),
                 field("cpu_system", FieldValue::Float(10.0)),
                 field("cpu_iowait", FieldValue::Float(5.0)),
-                field("cpu_count", FieldValue::Integer(8)),
                 field("procs_running", FieldValue::Integer(4)),
             ],
         };
@@ -1846,7 +1843,7 @@ mod benches {
 
         let cpuinfo = ProcEntry {
             source: "cpuinfo".into(),
-            fields: vec![field("cpu_count", FieldValue::Integer(8))],
+            fields: vec![field("logical_cpus", FieldValue::Integer(8))],
         };
         entries.insert("cpuinfo".into(), cpuinfo);
 
@@ -2027,6 +2024,12 @@ mod benches {
         };
         entries.insert("interrupts".into(), interrupts);
 
+        let schedstat = ProcEntry {
+            source: "schedstat".into(),
+            fields: vec![field("cpu_count", FieldValue::Integer(8))],
+        };
+        entries.insert("schedstat".into(), schedstat);
+
         Snapshot {
             timestamp: std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
             entries,
@@ -2125,5 +2128,110 @@ mod benches {
             eprintln!("  {name:30} {ns:>5} ns  ({pct:4.1}%)");
         }
         eprintln!("  TOTAL                          {total:>5} ns");
+    }
+
+    /// Build a minimal snapshot for check_load regression tests.
+    fn load_snapshot(load_1min: f64, cpu_count: i64, cpu_source: &str, cpu_field: &str) -> Snapshot {
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "loadavg".into(),
+            ProcEntry {
+                source: "loadavg".into(),
+                fields: vec![
+                    field("load_1min", FieldValue::Float(load_1min)),
+                    field("load_5min", FieldValue::Float(load_1min)),
+                    field("load_15min", FieldValue::Float(load_1min)),
+                ],
+            },
+        );
+        entries.insert(
+            cpu_source.into(),
+            ProcEntry {
+                source: cpu_source.into(),
+                fields: vec![field(cpu_field, FieldValue::Integer(cpu_count))],
+            },
+        );
+        Snapshot {
+            timestamp: std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            entries,
+            alerts: vec![],
+        }
+    }
+
+    #[test]
+    fn check_load_uses_load_1min_and_cpuinfo_logical_cpus() {
+        // load1=20, cpu_count=8 -> ratio=2.5 > 2.0 => Critical
+        let snap = load_snapshot(20.0, 8, "cpuinfo", "logical_cpus");
+        let mut findings = Vec::new();
+        check_load(&mut findings, &snap, Locale::En);
+        let critical = findings.iter().find(|f| f.severity == Severity::Critical);
+        assert!(critical.is_some(), "expected Critical finding for high load");
+        // Title should report 8 CPUs, not 1 (regression for #37).
+        assert!(
+            critical.unwrap().title.contains("8 CPU"),
+            "title should mention 8 CPUs: {}",
+            critical.unwrap().title
+        );
+    }
+
+    #[test]
+    fn check_load_falls_back_to_interrupts_cpu_count() {
+        // No cpuinfo entry; interrupts.cpu_count should be used.
+        let snap = load_snapshot(20.0, 8, "interrupts", "cpu_count");
+        let mut findings = Vec::new();
+        check_load(&mut findings, &snap, Locale::En);
+        let critical = findings.iter().find(|f| f.severity == Severity::Critical);
+        assert!(critical.is_some(), "expected Critical via interrupts fallback");
+        assert!(
+            critical.unwrap().title.contains("8 CPU"),
+            "title should mention 8 CPUs from interrupts"
+        );
+    }
+
+    #[test]
+    fn check_load_falls_back_to_schedstat_cpu_count() {
+        let snap = load_snapshot(20.0, 8, "schedstat", "cpu_count");
+        let mut findings = Vec::new();
+        check_load(&mut findings, &snap, Locale::En);
+        let critical = findings.iter().find(|f| f.severity == Severity::Critical);
+        assert!(critical.is_some(), "expected Critical via schedstat fallback");
+        assert!(
+            critical.unwrap().title.contains("8 CPU"),
+            "title should mention 8 CPUs from schedstat"
+        );
+    }
+
+    #[test]
+    fn check_load_no_false_critical_on_normal_load() {
+        // load1=2.0, cpu_count=8 -> ratio=0.25, no finding expected.
+        let snap = load_snapshot(2.0, 8, "cpuinfo", "logical_cpus");
+        let mut findings = Vec::new();
+        check_load(&mut findings, &snap, Locale::En);
+        assert!(
+            findings.is_empty(),
+            "no finding expected for normal load, got: {:?}",
+            findings
+        );
+    }
+
+    #[test]
+    fn check_load_returns_none_when_loadavg_missing() {
+        // No loadavg entry at all.
+        let mut entries: BTreeMap<String, ProcEntry> = BTreeMap::new();
+        entries.insert(
+            "cpuinfo".into(),
+            ProcEntry {
+                source: "cpuinfo".into(),
+                fields: vec![field("logical_cpus", FieldValue::Integer(8))],
+            },
+        );
+        let snap = Snapshot {
+            timestamp: std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            entries,
+            alerts: vec![],
+        };
+        let mut findings = Vec::new();
+        check_load(&mut findings, &snap, Locale::En);
+        assert!(findings.is_empty());
     }
 }
