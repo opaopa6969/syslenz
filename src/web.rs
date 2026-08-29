@@ -319,13 +319,9 @@ async fn view_handler(
     let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
 
     // Reject path-traversal in pid early: it is interpolated into /proc paths.
-    let safe_pid = params.pid.and_then(|p| {
-        if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) {
-            Some(p)
-        } else {
-            None
-        }
-    });
+    let safe_pid = params
+        .pid
+        .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
 
     // G20-10: If source/field are specified, auto-select detail view
     let view = if safe_pid.is_some() {
