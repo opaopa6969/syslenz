@@ -645,9 +645,9 @@ impl App {
 
         // Load section
         let load = LoadSection {
-            load1: get_field_value(self, "loadavg", "load1"),
-            load5: get_field_value(self, "loadavg", "load5"),
-            load15: get_field_value(self, "loadavg", "load15"),
+            load1: get_field_value(self, "loadavg", "load_1min"),
+            load5: get_field_value(self, "loadavg", "load_5min"),
+            load15: get_field_value(self, "loadavg", "load_15min"),
             uptime: get_field_value(self, "uptime", "uptime"),
         };
 

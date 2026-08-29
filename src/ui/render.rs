@@ -2121,9 +2121,9 @@ fn style_education_line(text: &str) -> Line<'static> {
         "pgmajfault",
         "si",
         "so",
-        "load1",
-        "load5",
-        "load15",
+        "load_1min",
+        "load_5min",
+        "load_15min",
         "cpu_user",
         "cpu_system",
         "cpu_idle",
@@ -2299,10 +2299,11 @@ fn get_contextual_hint(app: &App, source: &str, field: &str) -> Option<String> {
             }
             None
         }
-        ("loadavg", "load1") => {
-            let load1 = get_float("loadavg", "load1")?;
-            let cpu_count = get_integer("stat", "cpu_count")
-                .or_else(|| get_integer("cpuinfo", "cpu_count"))
+        ("loadavg", "load_1min") => {
+            let load1 = get_float("loadavg", "load_1min")?;
+            let cpu_count = get_integer("cpuinfo", "logical_cpus")
+                .or_else(|| get_integer("interrupts", "cpu_count"))
+                .or_else(|| get_integer("schedstat", "cpu_count"))
                 .unwrap_or(1) as f64;
             if cpu_count > 0.0 && load1 > cpu_count {
                 return Some(if locale == crate::i18n::Locale::Ja {
