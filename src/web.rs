@@ -203,10 +203,7 @@ fn truncate_snapshot_tables(snap: &mut crate::proc::Snapshot, max_rows: usize) {
                 if rows.len() > max_rows {
                     let truncated_count = rows.len() - max_rows;
                     let mut kept = rows.drain(..max_rows).collect::<Vec<_>>();
-                    kept.push(vec![format!(
-                        "[truncated: {} rows]",
-                        truncated_count
-                    )]);
+                    kept.push(vec![format!("[truncated: {} rows]", truncated_count)]);
                     *rows = kept;
                 }
             }
@@ -321,8 +318,13 @@ async fn view_handler(
     // Build a minimal App to use the ViewData builders
     let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
 
+    // Reject path-traversal in pid early: it is interpolated into /proc paths.
+    let safe_pid = params
+        .pid
+        .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+
     // G20-10: If source/field are specified, auto-select detail view
-    let view = if params.pid.is_some() {
+    let view = if safe_pid.is_some() {
         View::ProcessDetail
     } else if params.source.is_some() {
         View::Detail
@@ -368,7 +370,7 @@ async fn view_handler(
         locale,
         selected_source,
         selected_field,
-        params.pid,
+        safe_pid,
     );
 
     let view_data = app.build_view_data();
@@ -3037,7 +3039,13 @@ mod tests {
     fn make_snapshot_with_table(rows: usize) -> crate::proc::Snapshot {
         use std::collections::BTreeMap;
         let table_rows: Vec<Vec<String>> = (0..rows)
-            .map(|i| vec![format!("pid_{}", i), format!("proc_{}", i), format!("{}", i)])
+            .map(|i| {
+                vec![
+                    format!("pid_{}", i),
+                    format!("proc_{}", i),
+                    format!("{}", i),
+                ]
+            })
             .collect();
         let entry = ProcEntry {
             source: "processes".to_string(),

@@ -119,36 +119,36 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         } else {
             match view_data {
                 ViewData::Detail(ref data) => {
-                // Check if selected field is numeric — auto-show graph
-                let has_numeric_field = app
-                    .current_entry_fields()
-                    .and_then(|fields| fields.get(app.selected_field))
-                    .is_some_and(|f| {
-                        matches!(
-                            f.value,
-                            FieldValue::Bytes(_)
-                                | FieldValue::Integer(_)
-                                | FieldValue::Float(_)
-                                | FieldValue::Duration(_)
-                        )
-                    });
+                    // Check if selected field is numeric — auto-show graph
+                    let has_numeric_field = app
+                        .current_entry_fields()
+                        .and_then(|fields| fields.get(app.selected_field))
+                        .is_some_and(|f| {
+                            matches!(
+                                f.value,
+                                FieldValue::Bytes(_)
+                                    | FieldValue::Integer(_)
+                                    | FieldValue::Float(_)
+                                    | FieldValue::Duration(_)
+                            )
+                        });
 
-                if has_numeric_field && app.snapshots.len() >= 2 {
-                    // Split: detail on top, auto-graph on bottom
-                    let content_split = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                        .split(main_chunks[1]);
-                    draw_detail(f, data, app.locale, content_split[0]);
-                    draw_auto_graph(f, app, content_split[1]);
-                } else {
-                    draw_detail(f, data, app.locale, main_chunks[1]);
+                    if has_numeric_field && app.snapshots.len() >= 2 {
+                        // Split: detail on top, auto-graph on bottom
+                        let content_split = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                            .split(main_chunks[1]);
+                        draw_detail(f, data, app.locale, content_split[0]);
+                        draw_auto_graph(f, app, content_split[1]);
+                    } else {
+                        draw_detail(f, data, app.locale, main_chunks[1]);
+                    }
                 }
-            }
-            ViewData::Diff(_) => draw_diff(f, app, main_chunks[1]),
-            ViewData::TableView(_) => draw_table_view(f, app, main_chunks[1]),
-            ViewData::ProcessDetail(ref data) => draw_process_detail(f, data, main_chunks[1]),
-            _ => {}
+                ViewData::Diff(_) => draw_diff(f, app, main_chunks[1]),
+                ViewData::TableView(_) => draw_table_view(f, app, main_chunks[1]),
+                ViewData::ProcessDetail(ref data) => draw_process_detail(f, data, main_chunks[1]),
+                _ => {}
             }
         }
     }
@@ -521,7 +521,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
-                    Span::styled(format!("{} ", pin_marker), Style::default().fg(Color::Magenta)),
+                    Span::styled(
+                        format!("{} ", pin_marker),
+                        Style::default().fg(Color::Magenta),
+                    ),
                     Span::styled(format!("{:<18}", key), style),
                 ]))
             })
@@ -612,7 +615,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 ListItem::new(Line::from(vec![
                     Span::raw(indent),
                     Span::styled(format!("{} ", marker), Style::default().fg(Color::Yellow)),
-                    Span::styled(format!("{} ", pin_marker), Style::default().fg(Color::Magenta)),
+                    Span::styled(
+                        format!("{} ", pin_marker),
+                        Style::default().fg(Color::Magenta),
+                    ),
                     Span::styled(leaf_label, name_style),
                 ]))
             }

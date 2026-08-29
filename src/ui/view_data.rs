@@ -1095,8 +1095,7 @@ impl App {
                                 .unwrap_or("")
                                 .to_string();
                         let host_key = self.current_host_key();
-                        let is_pinned =
-                            self.pins.is_pinned_field(&source_name, &f.name, &host_key);
+                        let is_pinned = self.pins.is_pinned_field(&source_name, &f.name, &host_key);
                         FieldRow {
                             name: name_display,
                             value: f.value.display(),

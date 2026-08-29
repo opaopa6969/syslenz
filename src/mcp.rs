@@ -11,7 +11,7 @@ use crate::web::AppState;
 #[cfg(feature = "web")]
 use axum::{
     Json,
-    http::{StatusCode, header::CONTENT_ENCODING, HeaderName},
+    http::{HeaderName, StatusCode, header::CONTENT_ENCODING},
     response::IntoResponse,
 };
 #[cfg(feature = "web")]
@@ -390,7 +390,14 @@ fn call_tool(
             let mut app = app;
             app.locale = locale;
 
-            let view = if args.get("pid").and_then(|v| v.as_str()).is_some() {
+            // Validate pid before it is interpolated into /proc paths.
+            let safe_pid: Option<String> = args
+                .get("pid")
+                .and_then(|v| v.as_str())
+                .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                .map(|p| p.to_string());
+
+            let view = if safe_pid.is_some() {
                 crate::ui::app::View::ProcessDetail
             } else if args.get("source").and_then(|v| v.as_str()).is_some() {
                 crate::ui::app::View::Detail
@@ -418,8 +425,8 @@ fn call_tool(
                     }
                 }
             }
-            if let Some(p) = args.get("pid").and_then(|v| v.as_str()) {
-                app.detailed_pid = Some(p.to_string());
+            if let Some(p) = safe_pid {
+                app.detailed_pid = Some(p);
             }
             app.view = view;
 
@@ -434,14 +441,16 @@ fn call_tool(
             }))
         }
         "field_help" => {
-            let source = args
-                .get("source")
-                .and_then(|v| v.as_str())
-                .ok_or((-32602, "source is required".into(), None))?;
-            let field = args
-                .get("field")
-                .and_then(|v| v.as_str())
-                .ok_or((-32602, "field is required".into(), None))?;
+            let source = args.get("source").and_then(|v| v.as_str()).ok_or((
+                -32602,
+                "source is required".into(),
+                None,
+            ))?;
+            let field = args.get("field").and_then(|v| v.as_str()).ok_or((
+                -32602,
+                "field is required".into(),
+                None,
+            ))?;
             let locale = args
                 .get("lang")
                 .and_then(|v| v.as_str())
@@ -494,10 +503,7 @@ fn call_tool(
             }))
         }
         "diagnostics" => {
-            let fresh = args
-                .get("fresh")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let fresh = args.get("fresh").and_then(|v| v.as_bool()).unwrap_or(false);
             let snapshot = if fresh {
                 crate::proc::Snapshot::capture()
                     .unwrap_or_else(|_| state.current.lock().unwrap().clone())
@@ -549,11 +555,15 @@ fn call_tool(
                 new_rules.len(),
                 new_rules
                     .iter()
-                    .filter(|n| !current.iter().any(|c| c.source == n.source && c.field == n.field))
+                    .filter(|n| !current
+                        .iter()
+                        .any(|c| c.source == n.source && c.field == n.field))
                     .count(),
                 current
                     .iter()
-                    .filter(|c| !new_rules.iter().any(|n| n.source == c.source && n.field == c.field))
+                    .filter(|c| !new_rules
+                        .iter()
+                        .any(|n| n.source == c.source && n.field == c.field))
                     .count()
             );
 
@@ -582,11 +592,7 @@ fn call_tool(
                 match std::fs::write(path, &updated) {
                     Ok(_) => true,
                     Err(e) => {
-                        return Err((
-                            -32603,
-                            format!("Failed to write config: {e}"),
-                            None,
-                        ));
+                        return Err((-32603, format!("Failed to write config: {e}"), None));
                     }
                 }
             } else {
@@ -655,7 +661,9 @@ fn read_resource(uri: &str, state: &AppState) -> Result<Value, (i32, String, Opt
             }))
         }
         "syslenz://metric-kinds" => {
-            let kinds = ["Memory", "Cpu", "Network", "Storage", "Process", "System", "Power", "Security"];
+            let kinds = [
+                "Memory", "Cpu", "Network", "Storage", "Process", "System", "Power", "Security",
+            ];
             Ok(json!({
                 "contents": [{
                     "uri": uri,
@@ -696,7 +704,10 @@ pub async fn mcp_handler(
         (
             [
                 (CONTENT_ENCODING, "identity"),
-                (HeaderName::from_static("mcp-session-id"), session_id.as_str()),
+                (
+                    HeaderName::from_static("mcp-session-id"),
+                    session_id.as_str(),
+                ),
             ],
             Json(response),
         )
@@ -739,9 +750,12 @@ fn handle_jsonrpc(req: JsonRpcRequest, state: &AppState) -> JsonRpcResponse {
 
         "notifications/initialized" => JsonRpcResponse::ok(id, json!({})),
 
-        "tools/list" => JsonRpcResponse::ok(id, json!({
-            "tools": tool_definitions()
-        })),
+        "tools/list" => JsonRpcResponse::ok(
+            id,
+            json!({
+                "tools": tool_definitions()
+            }),
+        ),
 
         "tools/call" => {
             let name = req
@@ -749,40 +763,41 @@ fn handle_jsonrpc(req: JsonRpcRequest, state: &AppState) -> JsonRpcResponse {
                 .get("name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let args = req
-                .params
-                .get("arguments")
-                .cloned()
-                .unwrap_or(json!({}));
+            let args = req.params.get("arguments").cloned().unwrap_or(json!({}));
             match call_tool(name, &args, state) {
                 Ok(result) => JsonRpcResponse::ok(id, result),
                 Err((code, msg, data)) => JsonRpcResponse::err(id, code, &msg, data),
             }
         }
 
-        "resources/list" => JsonRpcResponse::ok(id, json!({
-            "resources": resource_definitions()
-        })),
+        "resources/list" => JsonRpcResponse::ok(
+            id,
+            json!({
+                "resources": resource_definitions()
+            }),
+        ),
 
         "resources/read" => {
-            let uri = req
-                .params
-                .get("uri")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let uri = req.params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
             match read_resource(uri, state) {
                 Ok(result) => JsonRpcResponse::ok(id, result),
                 Err((code, msg, data)) => JsonRpcResponse::err(id, code, &msg, data),
             }
         }
 
-        "resources/templates/list" => JsonRpcResponse::ok(id, json!({
-            "resourceTemplates": []
-        })),
+        "resources/templates/list" => JsonRpcResponse::ok(
+            id,
+            json!({
+                "resourceTemplates": []
+            }),
+        ),
 
-        "prompts/list" => JsonRpcResponse::ok(id, json!({
-            "prompts": prompt_definitions()
-        })),
+        "prompts/list" => JsonRpcResponse::ok(
+            id,
+            json!({
+                "prompts": prompt_definitions()
+            }),
+        ),
 
         "prompts/get" => {
             let name = req
@@ -791,16 +806,19 @@ fn handle_jsonrpc(req: JsonRpcRequest, state: &AppState) -> JsonRpcResponse {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if name == "monitor-and-diagnose" {
-                JsonRpcResponse::ok(id, json!({
-                    "description": "スナップショット取得 → 診断実行 → 結果解釈",
-                    "messages": [{
-                        "role": "user",
-                        "content": {
-                            "type": "text",
-                            "text": "syslenz の snapshot ツールで現在のシステム状態を取得し、diagnostics ツールで自動診断を実行して、結果を解釈してください。Critical または Warning の Finding があれば、対応策を提案してください。"
-                        }
-                    }]
-                }))
+                JsonRpcResponse::ok(
+                    id,
+                    json!({
+                        "description": "スナップショット取得 → 診断実行 → 結果解釈",
+                        "messages": [{
+                            "role": "user",
+                            "content": {
+                                "type": "text",
+                                "text": "syslenz の snapshot ツールで現在のシステム状態を取得し、diagnostics ツールで自動診断を実行して、結果を解釈してください。Critical または Warning の Finding があれば、対応策を提案してください。"
+                            }
+                        }]
+                    }),
+                )
             } else {
                 JsonRpcResponse::err(id, -32601, &format!("unknown prompt: {name}"), None)
             }
@@ -822,10 +840,7 @@ fn handle_jsonrpc(req: JsonRpcRequest, state: &AppState) -> JsonRpcResponse {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "web")]
-fn replace_alert_section_in_toml(
-    existing: &str,
-    rules: &[crate::alert::AlertRule],
-) -> String {
+fn replace_alert_section_in_toml(existing: &str, rules: &[crate::alert::AlertRule]) -> String {
     // Remove existing [[alert]] blocks
     let mut result = String::new();
     let mut skip = false;
