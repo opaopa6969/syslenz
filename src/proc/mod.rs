@@ -1011,6 +1011,114 @@ mod tests {
         let _ = dma::parse();
         let _ = timer_list::parse();
     }
+
+    // T19: format_bytes unit boundaries (off-by-one regression guard)
+    // The function uses `>=` comparisons; the byte just below each threshold
+    // must stay in the lower unit, and the threshold value must promote.
+    #[test]
+    fn format_bytes_just_below_kib() {
+        assert_eq!(format_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_bytes_just_below_mib() {
+        // 1048575 / 1024 = 1023.999...; {:.1} rounds to "1024.0 KiB".
+        // This documents the rounding behavior at the boundary.
+        assert_eq!(format_bytes(1024 * 1024 - 1), "1024.0 KiB");
+    }
+
+    #[test]
+    fn format_bytes_just_below_gib() {
+        // 1073741823 / 1048576 = 1023.999...; {:.1} rounds to "1024.0 MiB".
+        assert_eq!(format_bytes(1024 * 1024 * 1024 - 1), "1024.0 MiB");
+    }
+
+    // T20: format_duration unit switch points
+    // Exact thresholds: 60s -> minutes, 3600s -> hours, 86400s -> days.
+    // A regression in the modulo chain would surface here.
+    #[test]
+    fn format_duration_exactly_60_seconds() {
+        assert_eq!(format_duration(60.0), "1m 0s");
+    }
+
+    #[test]
+    fn format_duration_exactly_3600_seconds() {
+        assert_eq!(format_duration(3600.0), "1h 0m 0s");
+    }
+
+    #[test]
+    fn format_duration_exactly_86400_seconds() {
+        assert_eq!(format_duration(86400.0), "1d 0h 0m 0s");
+    }
+
+    // T21: sanitize_for_display with truncated / pathological escapes
+    // These must not panic and must not loop forever. CSI without final
+    // byte, OSC without terminator, and a very long parameter list are
+    // the regression-prone edges of the state machine.
+    #[test]
+    fn sanitize_csi_without_final_byte_terminates() {
+        // CSI opened but no final byte in @..~ — rest of string dropped.
+        assert_eq!(sanitize_for_display("ok\u{1b}[123"), "ok");
+    }
+
+    #[test]
+    fn sanitize_osc_without_terminator_terminates() {
+        // OSC opened, no BEL or ST — rest of string dropped.
+        assert_eq!(sanitize_for_display("ok\u{1b}]0;title"), "ok");
+    }
+
+    #[test]
+    fn sanitize_csi_long_param_list_terminates() {
+        // Many params but still ends with a valid final byte.
+        assert_eq!(
+            sanitize_for_display("\u{1b}[1;2;3;4;5;6;7;8;9;10mtext"),
+            "text"
+        );
+    }
+
+    // T22: systemtime_iso8601 UNIX_EPOCH round-trip
+    // The boundary value (0 seconds, 0 nanos) must survive serialize+deserialize.
+    // Regression here would mean the serializer mishandles the epoch origin.
+    #[test]
+    fn systemtime_unix_epoch_roundtrip() {
+        let snap = Snapshot {
+            timestamp: SystemTime::UNIX_EPOCH,
+            entries: BTreeMap::new(),
+            alerts: Vec::new(),
+        };
+        let json = serde_json::to_string(&snap).unwrap();
+        let restored: Snapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap.timestamp, restored.timestamp);
+    }
+
+    // T23: diff_snapshots Duration threshold
+    // diff uses 0.1s as the Duration change threshold (vs 0.001 for Float).
+    // A change just below 0.1s must be ignored; one just above must be reported.
+    #[test]
+    fn diff_ignores_duration_change_below_threshold() {
+        let snap1 = make_test_snapshot(vec![("uptime", "uptime", FieldValue::Duration(100.00))]);
+        let snap2 = make_test_snapshot(vec![("uptime", "uptime", FieldValue::Duration(100.09))]);
+        let diffs = diff_snapshots(&snap1, &snap2);
+        let uptime_diffs: Vec<_> = diffs.iter().filter(|d| d.source == "uptime").collect();
+        assert!(
+            uptime_diffs.is_empty(),
+            "Expected no diffs for Duration delta < 0.1s, got {}",
+            uptime_diffs.len()
+        );
+    }
+
+    #[test]
+    fn diff_reports_duration_change_above_threshold() {
+        let snap1 = make_test_snapshot(vec![("uptime", "uptime", FieldValue::Duration(100.00))]);
+        let snap2 = make_test_snapshot(vec![("uptime", "uptime", FieldValue::Duration(100.11))]);
+        let diffs = diff_snapshots(&snap1, &snap2);
+        let uptime_diffs: Vec<_> = diffs.iter().filter(|d| d.source == "uptime").collect();
+        assert_eq!(
+            uptime_diffs.len(),
+            1,
+            "Expected exactly 1 diff for Duration delta > 0.1s"
+        );
+    }
 }
 
 // =============================================================================
