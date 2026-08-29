@@ -981,10 +981,49 @@ fn copy_to_clipboard(text: &str) -> bool {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}...", &s[..max])
-    } else {
-        s.to_string()
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &s[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_ascii() {
+        assert_eq!(truncate("hello world", 5), "hello...");
+        assert_eq!(truncate("hi", 40), "hi");
+    }
+
+    #[test]
+    fn truncate_multibyte_ja() {
+        // 3 bytes/char: 40 bytes = 13 chars + 1 byte (mid-char).
+        let s = "あ".repeat(20); // 60 bytes, 20 chars
+        let t = truncate(&s, 40);
+        assert!(t.ends_with("..."));
+        let body = &t[..t.len() - 3];
+        assert_eq!(body.chars().count(), 13);
+        assert!(body.chars().all(|c| c == 'あ'));
+    }
+
+    #[test]
+    fn truncate_exact_char_boundary() {
+        // 3 bytes/char * 10 = 30 bytes exactly at boundary, no truncation needed.
+        let s = "い".repeat(10);
+        assert_eq!(truncate(&s, 30), s);
+        assert_eq!(truncate(&s, 29), "い".repeat(9) + "...");
+    }
+
+    #[test]
+    fn truncate_empty_and_short_max() {
+        assert_eq!(truncate("", 40), "");
+        assert_eq!(truncate("あ", 0), "...");
     }
 }
 
