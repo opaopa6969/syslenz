@@ -66,9 +66,7 @@ impl PinFile {
                 return;
             }
         }
-        let file = PinFile {
-            pin: pins.to_vec(),
-        };
+        let file = PinFile { pin: pins.to_vec() };
         match toml::to_string_pretty(&file) {
             Ok(toml_str) => {
                 let header = "# Written by syslenz; safe to edit by hand.\n";
@@ -120,19 +118,15 @@ impl PinSet {
     }
 
     pub fn is_pinned_source(&self, source: &str, host: &str) -> bool {
-        self.pins.iter().any(|p| {
-            p.source == source
-                && p.field.is_none()
-                && p.host == host
-        })
+        self.pins
+            .iter()
+            .any(|p| p.source == source && p.field.is_none() && p.host == host)
     }
 
     pub fn is_pinned_field(&self, source: &str, field: &str, host: &str) -> bool {
-        self.pins.iter().any(|p| {
-            p.source == source
-                && p.field.as_deref() == Some(field)
-                && p.host == host
-        })
+        self.pins
+            .iter()
+            .any(|p| p.source == source && p.field.as_deref() == Some(field) && p.host == host)
     }
 
     pub fn is_empty(&self) -> bool {

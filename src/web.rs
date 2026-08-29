@@ -203,10 +203,7 @@ fn truncate_snapshot_tables(snap: &mut crate::proc::Snapshot, max_rows: usize) {
                 if rows.len() > max_rows {
                     let truncated_count = rows.len() - max_rows;
                     let mut kept = rows.drain(..max_rows).collect::<Vec<_>>();
-                    kept.push(vec![format!(
-                        "[truncated: {} rows]",
-                        truncated_count
-                    )]);
+                    kept.push(vec![format!("[truncated: {} rows]", truncated_count)]);
                     *rows = kept;
                 }
             }
@@ -3046,7 +3043,13 @@ mod tests {
     fn make_snapshot_with_table(rows: usize) -> crate::proc::Snapshot {
         use std::collections::BTreeMap;
         let table_rows: Vec<Vec<String>> = (0..rows)
-            .map(|i| vec![format!("pid_{}", i), format!("proc_{}", i), format!("{}", i)])
+            .map(|i| {
+                vec![
+                    format!("pid_{}", i),
+                    format!("proc_{}", i),
+                    format!("{}", i),
+                ]
+            })
             .collect();
         let entry = ProcEntry {
             source: "processes".to_string(),

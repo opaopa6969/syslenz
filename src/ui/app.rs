@@ -776,9 +776,7 @@ impl App {
         let host = self.current_host_key();
         if let Some(fields) = self.current_entry_fields() {
             if let Some(field) = fields.get(self.selected_field) {
-                return self
-                    .pins
-                    .is_pinned_field(source, &field.name, &host);
+                return self.pins.is_pinned_field(source, &field.name, &host);
             }
         }
         self.pins.is_pinned_source(source, &host)

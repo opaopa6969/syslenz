@@ -2131,7 +2131,12 @@ mod benches {
     }
 
     /// Build a minimal snapshot for check_load regression tests.
-    fn load_snapshot(load_1min: f64, cpu_count: i64, cpu_source: &str, cpu_field: &str) -> Snapshot {
+    fn load_snapshot(
+        load_1min: f64,
+        cpu_count: i64,
+        cpu_source: &str,
+        cpu_field: &str,
+    ) -> Snapshot {
         let mut entries = BTreeMap::new();
         entries.insert(
             "loadavg".into(),
@@ -2165,7 +2170,10 @@ mod benches {
         let mut findings = Vec::new();
         check_load(&mut findings, &snap, Locale::En);
         let critical = findings.iter().find(|f| f.severity == Severity::Critical);
-        assert!(critical.is_some(), "expected Critical finding for high load");
+        assert!(
+            critical.is_some(),
+            "expected Critical finding for high load"
+        );
         // Title should report 8 CPUs, not 1 (regression for #37).
         assert!(
             critical.unwrap().title.contains("8 CPU"),
@@ -2181,7 +2189,10 @@ mod benches {
         let mut findings = Vec::new();
         check_load(&mut findings, &snap, Locale::En);
         let critical = findings.iter().find(|f| f.severity == Severity::Critical);
-        assert!(critical.is_some(), "expected Critical via interrupts fallback");
+        assert!(
+            critical.is_some(),
+            "expected Critical via interrupts fallback"
+        );
         assert!(
             critical.unwrap().title.contains("8 CPU"),
             "title should mention 8 CPUs from interrupts"
@@ -2194,7 +2205,10 @@ mod benches {
         let mut findings = Vec::new();
         check_load(&mut findings, &snap, Locale::En);
         let critical = findings.iter().find(|f| f.severity == Severity::Critical);
-        assert!(critical.is_some(), "expected Critical via schedstat fallback");
+        assert!(
+            critical.is_some(),
+            "expected Critical via schedstat fallback"
+        );
         assert!(
             critical.unwrap().title.contains("8 CPU"),
             "title should mention 8 CPUs from schedstat"
