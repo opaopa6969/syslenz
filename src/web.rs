@@ -321,8 +321,17 @@ async fn view_handler(
     // Build a minimal App to use the ViewData builders
     let source_keys: Vec<String> = snapshot.entries.keys().cloned().collect();
 
+    // Reject path-traversal in pid early: it is interpolated into /proc paths.
+    let safe_pid = params.pid.and_then(|p| {
+        if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) {
+            Some(p)
+        } else {
+            None
+        }
+    });
+
     // G20-10: If source/field are specified, auto-select detail view
-    let view = if params.pid.is_some() {
+    let view = if safe_pid.is_some() {
         View::ProcessDetail
     } else if params.source.is_some() {
         View::Detail
@@ -368,7 +377,7 @@ async fn view_handler(
         locale,
         selected_source,
         selected_field,
-        params.pid,
+        safe_pid,
     );
 
     let view_data = app.build_view_data();

@@ -390,7 +390,14 @@ fn call_tool(
             let mut app = app;
             app.locale = locale;
 
-            let view = if args.get("pid").and_then(|v| v.as_str()).is_some() {
+            // Validate pid before it is interpolated into /proc paths.
+            let safe_pid: Option<String> = args
+                .get("pid")
+                .and_then(|v| v.as_str())
+                .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                .map(|p| p.to_string());
+
+            let view = if safe_pid.is_some() {
                 crate::ui::app::View::ProcessDetail
             } else if args.get("source").and_then(|v| v.as_str()).is_some() {
                 crate::ui::app::View::Detail
@@ -418,8 +425,8 @@ fn call_tool(
                     }
                 }
             }
-            if let Some(p) = args.get("pid").and_then(|v| v.as_str()) {
-                app.detailed_pid = Some(p.to_string());
+            if let Some(p) = safe_pid {
+                app.detailed_pid = Some(p);
             }
             app.view = view;
 

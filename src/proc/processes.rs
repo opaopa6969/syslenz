@@ -106,7 +106,14 @@ pub fn parse() -> anyhow::Result<ProcEntry> {
 }
 
 /// Parse detailed information for a single process from /proc/[pid]/*.
+///
+/// `pid` must be a non-empty string of ASCII digits only. Any other input
+/// (including path traversal sequences like `../`) is rejected before it is
+/// interpolated into a filesystem path, preventing reads outside `/proc/[pid]`.
 pub fn parse_detail(pid: &str, locale: Locale) -> anyhow::Result<ProcEntry> {
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+        anyhow::bail!("invalid pid: {pid:?} (expected ASCII digits only)");
+    }
     let ja = matches!(locale, Locale::Ja);
     let base = format!("/proc/{}", pid);
     let mut fields: Vec<Field> = Vec::new();
@@ -729,5 +736,55 @@ fn format_bytes(bytes: u64) -> String {
         "-".to_string()
     } else {
         format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_detail_rejects_path_traversal() {
+        let locale = crate::i18n::Locale::En;
+        for malicious in [
+            "../etc/passwd",
+            "1/../../../etc/passwd",
+            "1/../1",
+            "..%2f..%2fetc%2fpasswd",
+            "./1",
+            "self/cwd",
+            "1; cat /etc/passwd",
+            " 1",
+            "-1",
+            "+1",
+            "",
+        ] {
+            let res = parse_detail(malicious, locale);
+            assert!(
+                res.is_err(),
+                "expected rejection of malicious pid {malicious:?}, got {:?}",
+                res.ok()
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_detail_accepts_numeric_pid() {
+        // Use our own PID — guaranteed to exist and be readable.
+        let pid = std::process::id().to_string();
+        let res = parse_detail(&pid, crate::i18n::Locale::En);
+        assert!(
+            res.is_ok(),
+            "numeric pid {pid} should be accepted: {:?}",
+            res.err()
+        );
+        let entry = res.unwrap();
+        assert_eq!(entry.source, format!("/proc/{}", pid));
+        // cmdline should be present for a running process
+        assert!(
+            entry.fields.iter().any(|f| f.name == "cmdline"),
+            "cmdline field should be parsed for own pid"
+        );
     }
 }
