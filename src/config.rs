@@ -113,9 +113,21 @@ impl Default for WebConfig {
     fn default() -> Self {
         Self {
             port: 3000,
-            capture_interval_secs: 1,
-            max_history_count: 60,
-            max_history_bytes: 64 * 1024 * 1024,
+            // 既定を 1 秒にしていたら、常駐監視として割に合わない量のメモリを使った。
+            //
+            // 実測 (2026-08-30, HVU): 接続が 7 万本に増えた日に snapshot が 5MB になり、
+            // 毎秒それを確保・解放したことで **290MB/分** で膨らみ、6.4GB で OOM に殺された。
+            // 平常時(snapshot 0.7MB)でも **82MB/分** 増え続けていた。
+            // 間隔を 30 秒にすると確保の回数が 1/30 になり、実測で 19MB で平坦になった。
+            //
+            // 常駐監視として 30 秒粒度で足りる。**1 秒が要るのは調べているときだけ**なので、
+            // そのときだけ設定で下げる。既定は安全側に置く。
+            capture_interval_secs: 30,
+            // 30 秒 x 240 = 2 時間ぶん。件数を減らしすぎるとグラフが読めない
+            // (テストが「1200 秒しかない」と捕まえた)。バイト上限が先に効くので
+            // 件数を増やしても青天井にはならない。
+            max_history_count: 240,
+            max_history_bytes: 16 * 1024 * 1024,
             truncate_large_tables: true,
             truncate_table_rows: 20,
         }
@@ -154,11 +166,38 @@ mod tests {
     fn web_config_default_port() {
         let cfg = WebConfig::default();
         assert_eq!(cfg.port, 3000);
-        assert_eq!(cfg.capture_interval_secs, 1);
-        assert_eq!(cfg.max_history_count, 60);
-        assert_eq!(cfg.max_history_bytes, 64 * 1024 * 1024);
         assert!(cfg.truncate_large_tables);
         assert_eq!(cfg.truncate_table_rows, 20);
+    }
+
+    /// 既定値は**常駐監視として割に合う量**であること。
+    ///
+    /// 以前は 1 秒間隔・履歴 64MB が既定で、設定ファイルを置いていない環境
+    /// (実際 HVU がそうだった)では毎秒 snapshot を確保・解放し続けていた。
+    /// 平常時でも 82MB/分、接続が 7 万本に増えた日は 290MB/分 で膨らみ、
+    /// 6.4GB で OOM に殺されて箱ごと巻き添えにした。
+    ///
+    /// **1 秒が要るのは調べているときだけ**なので、そのときだけ設定で下げる。
+    #[test]
+    fn web_config_defaults_are_cheap_enough_to_leave_running() {
+        let cfg = WebConfig::default();
+        assert!(
+            cfg.capture_interval_secs >= 10,
+            "既定の捕捉間隔が短すぎる({}s)。常駐監視は 10 秒以上に",
+            cfg.capture_interval_secs
+        );
+        assert!(
+            cfg.max_history_bytes <= 32 * 1024 * 1024,
+            "既定の履歴が大きすぎる({}MB)",
+            cfg.max_history_bytes / 1024 / 1024
+        );
+        // 1 時間ぶん以上は残す(短すぎるとグラフが読めない)
+        let covered_secs = cfg.max_history_count as u64 * cfg.capture_interval_secs;
+        assert!(
+            covered_secs >= 3600,
+            "履歴が {} 秒ぶんしかない。1 時間は残したい",
+            covered_secs
+        );
     }
 
     #[test]
