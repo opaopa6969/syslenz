@@ -881,6 +881,7 @@ Type=simple
 ExecStart={exe} --prometheus --serve
 Restart=always
 RestartSec=5
+MemoryMax=1G
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=syslenz

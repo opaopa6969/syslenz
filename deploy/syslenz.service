@@ -8,8 +8,10 @@ Environment=PORT=3009
 EnvironmentFile=-/home/opa/volta-secrets/syslenz.env
 ExecStart=/home/opa/syslenz/run.sh
 WorkingDirectory=/home/opa/syslenz
-Restart=on-failure
+Restart=always
 RestartSec=5
+# Keep a runaway collector from exhausting the host; systemd restarts it.
+MemoryMax=1G
 
 [Install]
 WantedBy=default.target
