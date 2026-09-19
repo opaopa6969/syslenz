@@ -433,6 +433,7 @@ fn main() -> Result<()> {
 
     let alert_rules = cfg.alert;
     let diagnostic_runbooks = cfg.diagnostic_runbook;
+    let selection_action = cfg.selection.action;
     // Build list of extra remote hosts (beyond the primary one used to construct the App).
     // The primary is determined by run(): first ssh_host, then docker_container, then connect_addr.
     // All remaining hosts go into extra_hosts.
@@ -473,6 +474,7 @@ fn main() -> Result<()> {
         start_tutorial,
         alert_rules,
         diagnostic_runbooks,
+        selection_action,
         extra_hosts,
     );
 
@@ -497,6 +499,7 @@ fn run(
     start_tutorial: bool,
     alert_rules: Vec<alert::AlertRule>,
     diagnostic_runbooks: Vec<config::RunbookConfig>,
+    selection_action: Option<String>,
     extra_hosts: Vec<(String, String)>,
 ) -> Result<()> {
     let mut app = if let Some(ref host) = ssh_host {
@@ -518,6 +521,7 @@ fn run(
     app.locale = locale;
     app.alert_rules = alert_rules;
     app.diagnostic_runbooks = diagnostic_runbooks;
+    app.selection_action = selection_action;
     if start_tutorial {
         app.start_tutorial();
     } else if start_classic {
@@ -720,6 +724,9 @@ fn run(
                     }
                     KeyCode::Char('P') => {
                         app.toggle_pin_filter();
+                    }
+                    KeyCode::Char('!') => {
+                        app.run_selection_action();
                     }
                     KeyCode::Char('c') => {
                         // Copy current field value to clipboard

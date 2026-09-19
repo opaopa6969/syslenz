@@ -257,17 +257,41 @@ pub fn execute_actions(rules: &[AlertRule], events: &[AlertEvent], prev_firing: 
                 .replace("{field}", &event.field)
                 .replace("{value}", &event.current_value)
                 .replace("{severity}", &event.severity);
-
-            // Spawn detached so TUI doesn't block
-            let _ = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&cmd)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
+            spawn_detached(&cmd);
         }
     }
+}
+
+/// Run a shell command detached (fire-and-forget) so the caller never blocks.
+fn spawn_detached(cmd: &str) {
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// Selection action (docs/features/planned/pin-recall-and-selection-emit.md, Feature 3):
+/// run the user-configured `[selection] action` command for the currently focused
+/// item. Supports `{host}` `{source}` `{field}` `{value}` `{unit}` placeholders.
+/// Reuses the same detached-spawn executor as alert `action`.
+pub fn execute_selection_action(
+    action_template: &str,
+    host: &str,
+    source: &str,
+    field: &str,
+    value: &str,
+    unit: &str,
+) {
+    let cmd = action_template
+        .replace("{host}", host)
+        .replace("{source}", source)
+        .replace("{field}", field)
+        .replace("{value}", value)
+        .replace("{unit}", unit);
+    spawn_detached(&cmd);
 }
 
 /// G20-8: Send a notification to a single endpoint.
@@ -459,6 +483,21 @@ mod tests {
         execute_actions(&rules, &events, &[0]);
         // With empty prev_firing, action should fire (spawns `echo test` harmlessly)
         execute_actions(&rules, &events, &[]);
+    }
+
+    // Feature 3 (pin-recall-and-selection-emit.md): selection action placeholder expansion
+    #[test]
+    fn execute_selection_action_runs_without_panic() {
+        // Spawns `echo ...` harmlessly; this just ensures no panic (same policy as
+        // execute_actions_skips_prev_firing — command execution itself isn't observed).
+        execute_selection_action(
+            "echo {host} {source} {field} {value} {unit}",
+            "tcp:127.0.0.1:9100",
+            "meminfo",
+            "MemAvailable",
+            "8217034752",
+            "bytes",
+        );
     }
 
     // G20-8: send_notifications skips already-firing alerts

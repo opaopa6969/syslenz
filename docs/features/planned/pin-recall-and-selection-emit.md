@@ -1,6 +1,8 @@
 # Pin/Recall and Selection Emit
 
-- **Status**: Phase 1 (pins) and Phase 2 (`--log`, local snapshots only) implemented
+- **Status**: Phase 1 (pins), Phase 2 (`--log`, local snapshots only), and Phase 3
+  (selection action, single `[selection] action` only — no multi-action picker yet)
+  implemented
 - **Origin**: design discussion 2026-06-12 — "syslenz is a viewer; should it save/recall selected items as logs, or hand selections to a separate process?"
 
 ## Summary
@@ -116,9 +118,11 @@ serialization helpers instead.
 
 ## Feature 3 — Selection action: hand the selected item to another process
 
+**Status: implemented (single action only).**
+
 **UX**
 
-A keybinding (proposal: `!`) on the focused item runs a user-configured command
+The `!` keybinding on the focused item runs a user-configured command
 with the same placeholder template syntax as alert `action`:
 
 ```toml
@@ -129,9 +133,15 @@ action = "tmux split-window 'watch -n1 \"grep {field} /proc/{source}\"'"
 ```
 
 - Reuses the detached-spawn executor from `alert::execute_actions` (BL-071) —
-  the TUI never blocks.
-- Multiple actions: `[[selection.actions]]` with a `name` each; if more than
-  one is configured, the keypress opens a small picker.
+  the TUI never blocks. Implemented as `alert::execute_selection_action` +
+  `App::run_selection_action`.
+- If focus is on a whole source (no field selected), `{field}`, `{value}` and
+  `{unit}` expand to empty strings.
+- If `[selection] action` is unset, `!` shows a status-bar hint instead of
+  doing nothing silently.
+- **Not yet implemented**: `[[selection.actions]]` with multiple named
+  actions and a picker UI — only the single `action` string is supported.
+  Tracked as follow-up work, same as `--log --connect`.
 - This is the composition escape hatch: anything "not simple" (databases,
   notebooks, custom analyzers) lives behind this boundary as a separate
   process.
