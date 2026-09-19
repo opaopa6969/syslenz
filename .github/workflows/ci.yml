@@ -10,10 +10,10 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     strategy:
-        # x11widget is included here (not a separate job) because it needs no
-        # system X11 dev packages: x11rb is a pure-Rust XCB protocol client
-        # (verified: `cargo build --features x11widget` on ubuntu-latest has
-        # no libxcb runtime link, per `ldd`).
+      matrix:
+        # x11widget needs no system X11 dev packages: x11rb is a pure-Rust
+        # XCB protocol client (verified: `cargo build --features x11widget`
+        # on ubuntu-latest shows no libxcb runtime link, per `ldd`).
         features: ["", "web", "otel", "x11widget"]
     steps:
       - uses: actions/checkout@v4
