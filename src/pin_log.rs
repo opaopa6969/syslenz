@@ -9,7 +9,9 @@ use std::io::Write;
 use std::path::Path;
 
 /// Append one JSON line per pinned item found in `snapshot` to `path`,
-/// creating the file if needed. Pins whose source/field is absent from the
+/// creating the file if needed. The snapshot must be local; pins with a
+/// nonempty host are skipped because remote logging is not supported yet.
+/// Pins whose source/field is absent from the
 /// snapshot are skipped (the process being watched may not be running yet —
 /// same tolerance as the TUI's greyed-out pin display). Returns the number
 /// of lines written.
@@ -24,6 +26,9 @@ pub fn append_pin_values(path: &Path, pins: &[Pin], snapshot: &Snapshot) -> Resu
     let mut written = 0usize;
 
     for pin in pins {
+        if !pin.host.is_empty() {
+            continue;
+        }
         let Some(entry) = snapshot.entries.get(&pin.source) else {
             continue;
         };
@@ -92,6 +97,56 @@ mod tests {
             timestamp: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
             entries,
             alerts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn skips_remote_pins_even_when_local_source_matches() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("pins.jsonl");
+        for field in [None, Some("MemAvailable".to_string())] {
+            let pins = vec![Pin {
+                source: "meminfo".to_string(),
+                field,
+                host: "tcp:remote:9100".to_string(),
+            }];
+            assert_eq!(
+                append_pin_values(&path, &pins, &make_snapshot()).unwrap(),
+                0
+            );
+        }
+        assert!(std::fs::read_to_string(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mixed_hosts_only_append_local_values() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("pins.jsonl");
+        let pins = vec![
+            Pin {
+                source: "meminfo".to_string(),
+                field: None,
+                host: "ssh:remote".to_string(),
+            },
+            Pin {
+                source: "meminfo".to_string(),
+                field: Some("MemAvailable".to_string()),
+                host: String::new(),
+            },
+        ];
+        for _ in 0..2 {
+            assert_eq!(
+                append_pin_values(&path, &pins, &make_snapshot()).unwrap(),
+                1
+            );
+        }
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents.lines().count(), 2);
+        for line in contents.lines() {
+            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(parsed["host"], "");
+            assert_eq!(parsed["field"], "MemAvailable");
+            assert_eq!(parsed["value"]["Bytes"], 8_217_034_752_u64);
         }
     }
 
