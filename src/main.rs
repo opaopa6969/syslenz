@@ -1198,7 +1198,7 @@ fn print_help() {
         ),
         (
             "--web [bind_addr]",
-            "Web UI server (default 0.0.0.0:3000, feature: web)",
+            "Web UI server (default 127.0.0.1:3000, feature: web)",
         ),
         (
             "--otel [endpoint] [--otel-level core|full]",

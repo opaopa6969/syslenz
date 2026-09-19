@@ -286,7 +286,7 @@ CLI flags override config values. See [`docs/en/config.md`](docs/en/config.md) f
 | `--docker container` | Docker container monitoring |
 | `--serve [addr]` | TCP server mode (default: `127.0.0.1:9100`) |
 | `--connect host:port` | Connect to a TCP server |
-| `--web [addr:port]` | Web UI (default: `0.0.0.0:3000`; a port alone keeps the all-interface bind) |
+| `--web [addr:port]` | Web UI (default: `127.0.0.1:3000`; use `0.0.0.0:PORT` explicitly for network access) |
 | `--export file.json` | Export snapshot as JSON |
 | `--import file.json` | Replay mode from snapshot |
 | `--prometheus [port]` | Prometheus `/metrics` endpoint |

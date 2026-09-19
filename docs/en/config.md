@@ -144,8 +144,8 @@ curl http://localhost:3000/healthz
 ```
 
 **Notes:**
-- Automatic Web UI startup uses `0.0.0.0` and `web.port`
-- Standalone `--web [addr:port]` accepts an explicit bind address; a port-only value keeps the `0.0.0.0` behavior
+- Automatic Web UI startup uses `127.0.0.1` and `web.port`
+- Standalone `--web [addr:port]` accepts an explicit bind address; a port-only value uses `127.0.0.1`
 
 ### `[ssh]`
 

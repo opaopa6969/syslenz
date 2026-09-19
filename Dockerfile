@@ -1,7 +1,7 @@
 # Multi-stage build for syslenz
 #
 # Docker Hub:  docker pull opaopa6969/syslenz
-# Web UI:      docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz --web 3000
+# Web UI:      docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz --web 0.0.0.0:3000
 # TUI server:  docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
 
 ARG FEATURES=web
@@ -43,4 +43,4 @@ COPY --from=builder /syslenz /syslenz
 EXPOSE 3000 9100
 
 ENTRYPOINT ["/syslenz"]
-CMD ["--web", "3000"]
+CMD ["--web", "0.0.0.0:3000"]
