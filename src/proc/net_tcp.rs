@@ -81,6 +81,15 @@ fn parse_addr(hex_addr: &str) -> String {
         let c = (ip >> 16) & 0xFF;
         let d = (ip >> 24) & 0xFF;
         format!("{}.{}.{}.{}:{}", a, b, c, d, port)
+    } else if ip_hex.len() == 32 && ip_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        // /proc/net/tcp6 prints four native-endian 32-bit words.
+        let mut octets = [0u8; 16];
+        for i in 0..4 {
+            let word = u32::from_str_radix(&ip_hex[i * 8..i * 8 + 8], 16)
+                .expect("validated eight ASCII hex digits");
+            octets[i * 4..i * 4 + 4].copy_from_slice(&word.to_ne_bytes());
+        }
+        format!("[{}]:{}", std::net::Ipv6Addr::from(octets), port)
     } else {
         format!("[{}]:{}", ip_hex, port)
     }
@@ -100,5 +109,64 @@ fn decode_tcp_state(hex: &str) -> String {
         "0A" => "LISTEN".into(),
         "0B" => "CLOSING".into(),
         _ => hex.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ipv6_addresses_are_readable() {
+        #[cfg(target_endian = "little")]
+        let cases = [
+            ("00000000000000000000000001000000:1F90", "[::1]:8080"),
+            ("00000000000000000000000000000000:0000", "[::]:0"),
+            ("B80D0120000000000000000001000000:01BB", "[2001:db8::1]:443"),
+            (
+                "0000000000000000FFFF0000010200C0:FFFF",
+                "[::ffff:192.0.2.1]:65535",
+            ),
+        ];
+        #[cfg(target_endian = "big")]
+        let cases = [
+            ("00000000000000000000000000000001:1F90", "[::1]:8080"),
+            ("00000000000000000000000000000000:0000", "[::]:0"),
+            ("20010DB8000000000000000000000001:01BB", "[2001:db8::1]:443"),
+            (
+                "00000000000000000000FFFFC0000201:FFFF",
+                "[::ffff:192.0.2.1]:65535",
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(parse_addr(input), expected);
+        }
+    }
+
+    #[test]
+    fn ipv4_display_is_unchanged() {
+        assert_eq!(parse_addr("0100007F:1F90"), "127.0.0.1:8080");
+        assert_eq!(parse_addr("00000000:0000"), "0.0.0.0:0");
+    }
+
+    #[test]
+    fn malformed_ipv6_keeps_legacy_fallback() {
+        for ip in ["G".repeat(32), "aあ".repeat(8), "0".repeat(31)] {
+            assert_eq!(parse_addr(&format!("{ip}:0050")), format!("[{ip}]:80"));
+        }
+        assert_eq!(parse_addr("missing-port"), "missing-port");
+    }
+
+    #[test]
+    fn tcp6_rows_keep_metadata_and_count() {
+        let content = "header\n 0: 00000000000000000000000000000000:01BB 00000000000000000000000000000000:0000 0A 0:0 00:0 0 1000\n";
+        let mut rows = Vec::new();
+        parse_proto_content("tcp6", content, &mut rows);
+        assert_eq!(
+            rows,
+            vec![vec!["tcp6", "[::]:443", "[::]:0", "LISTEN", "1000"]]
+        );
+        let entry = build_entry(rows).unwrap();
+        assert!(matches!(entry.fields[0].value, FieldValue::Integer(1)));
     }
 }
