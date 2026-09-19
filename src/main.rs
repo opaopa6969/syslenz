@@ -66,6 +66,8 @@ mod prometheus;
 mod remote;
 mod serve;
 mod sys;
+#[cfg(test)]
+mod test_support;
 mod ui;
 #[cfg(feature = "web")]
 mod web;

@@ -380,17 +380,8 @@ url = "https://wiki.example.com/memory"
         // Set XDG_CONFIG_HOME to a known value and verify the path is composed correctly.
         // We use a temp dir to avoid any side effects.
         let tmp = tempfile::TempDir::new().unwrap();
-        let xdg_path = tmp.path().to_str().unwrap().to_string();
-
-        // Temporarily override env var using a separate scope to avoid test interference.
-        // SAFETY: single-threaded test; no other threads read this env var concurrently.
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", &xdg_path);
-        }
+        let _xdg = crate::test_support::EnvVarGuard::set("XDG_CONFIG_HOME", tmp.path());
         let path = Config::config_path().unwrap();
-        unsafe {
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
 
         assert!(path.starts_with(tmp.path()));
         assert!(path.ends_with("syslenz/config.toml"));

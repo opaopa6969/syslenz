@@ -2246,22 +2246,15 @@ mod tests {
     #[test]
     fn pinfile_load_nonexistent_is_empty() {
         let tmp = tempfile::TempDir::new().unwrap();
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
-        }
+        let _xdg = crate::test_support::EnvVarGuard::set("XDG_CONFIG_HOME", tmp.path());
         let pins = PinFile::load();
-        unsafe {
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
         assert!(pins.is_empty());
     }
 
     #[test]
     fn pinfile_save_and_load_roundtrip() {
         let tmp = tempfile::TempDir::new().unwrap();
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
-        }
+        let _xdg = crate::test_support::EnvVarGuard::set("XDG_CONFIG_HOME", tmp.path());
         let pins = vec![
             Pin {
                 source: "meminfo".to_string(),
@@ -2276,9 +2269,6 @@ mod tests {
         ];
         PinFile::save(&pins);
         let loaded = PinFile::load();
-        unsafe {
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].source, "meminfo");
         assert_eq!(loaded[0].field, Some("MemAvailable".to_string()));
@@ -2292,13 +2282,8 @@ mod tests {
         let path = tmp.path().join("syslenz").join("pins.toml");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "not valid toml {{{").unwrap();
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
-        }
+        let _xdg = crate::test_support::EnvVarGuard::set("XDG_CONFIG_HOME", tmp.path());
         let pins = PinFile::load();
-        unsafe {
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
         assert!(pins.is_empty());
     }
 
@@ -2349,9 +2334,7 @@ mod tests {
     #[test]
     fn app_save_pins_writes_file() {
         let tmp = tempfile::TempDir::new().unwrap();
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", tmp.path().to_str().unwrap());
-        }
+        let _xdg = crate::test_support::EnvVarGuard::set("XDG_CONFIG_HOME", tmp.path());
         let mut app = App::new().unwrap();
         app.pins = PinSet::new(vec![Pin {
             source: "loadavg".to_string(),
@@ -2360,9 +2343,6 @@ mod tests {
         }]);
         app.save_pins();
         let loaded = PinFile::load();
-        unsafe {
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].source, "loadavg");
     }
