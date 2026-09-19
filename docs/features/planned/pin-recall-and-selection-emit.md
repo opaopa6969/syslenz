@@ -85,7 +85,6 @@ syncing pins between machines.
 ```
 syslenz --log /var/log/syslenz/pins.jsonl            # log pins every snapshot
 syslenz --log pins.jsonl --interval 5                # custom cadence
-syslenz --connect host:9100 --log pins.jsonl         # works in remote mode too
 ```
 
 One JSON object per line, one line per pinned item per snapshot:
@@ -104,6 +103,9 @@ One JSON object per line, one line per pinned item per snapshot:
   `--export-series` precedent — no TUI is started. `--connect` (remote host)
   support is **not yet implemented**; `--log` currently logs pins found in
   local snapshots only. Tracked as follow-up work.
+- ローカル専用の `--log` は `host` が空のピンだけを出力する。
+  `host` が非空のピンは、同名の source/field がローカルにあってもスキップする。
+  リモート専用ピンしかない場合は値を出力せず、既存の未一致警告と待機を継続する。
 - Downstream examples to include in docs: `jq` one-liners, feeding gnuplot,
   `tail -f | grep`.
 
