@@ -1,6 +1,6 @@
 # Pin/Recall and Selection Emit
 
-- **Status**: Phase 1 implemented (issue #7)
+- **Status**: Phase 1 (pins) and Phase 2 (`--log`, local snapshots only) implemented
 - **Origin**: design discussion 2026-06-12 — "syslenz is a viewer; should it save/recall selected items as logs, or hand selections to a separate process?"
 
 ## Summary
@@ -98,9 +98,12 @@ One JSON object per line, one line per pinned item per snapshot:
 
 - Append-only; flush per snapshot batch. No rotation, no size caps, no
   compaction — that is logrotate's job (document this explicitly).
-- If no pins exist, `--log` logs nothing and prints a one-line hint.
-- Works headless (no TUI) when combined with a future `--headless`/existing
-  serve-style mode, but the initial scope is "TUI running, file fills up".
+- If no pins exist, `--log` logs nothing (after printing a one-line hint) and
+  exits immediately rather than looping.
+- Implemented as its own headless CLI mode (`src/pin_log.rs`), following the
+  `--export-series` precedent — no TUI is started. `--connect` (remote host)
+  support is **not yet implemented**; `--log` currently logs pins found in
+  local snapshots only. Tracked as follow-up work.
 - Downstream examples to include in docs: `jq` one-liners, feeding gnuplot,
   `tail -f | grep`.
 
