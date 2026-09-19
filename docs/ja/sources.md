@@ -284,8 +284,8 @@ syslenz は `/proc`、`/sys`、システム設定ファイル、コマンド出�
 
 | | |
 |---|---|
-| **読み取り元** | `/proc/net/tcp` |
-| **主要フィールド** | カラム付きテーブル: local_addr, remote_addr, state, tx_queue, rx_queue, uid, inode |
+| **読み取り元** | `/proc/net/tcp`, `/proc/net/tcp6` |
+| **主要フィールド** | connection_count (Integer)、connections: proto, local_addr, remote_addr, state, uid のテーブル。IPv4は `127.0.0.1:8080`、IPv6は `[::1]:8080` 形式で表示。 |
 | **活用場面** | TCP接続の分析。SYN_SENT、CLOSE_WAIT、TIME_WAITの蓄積を確認。 |
 
 ### net/udp

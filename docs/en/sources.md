@@ -284,8 +284,8 @@ syslenz reads from 60+ data sources organized across `/proc`, `/sys`, system con
 
 | | |
 |---|---|
-| **Reads** | `/proc/net/tcp` |
-| **Key fields** | Table with columns: local_addr, remote_addr, state, tx_queue, rx_queue, uid, inode |
+| **Reads** | `/proc/net/tcp`, `/proc/net/tcp6` |
+| **Key fields** | connection_count (Integer), connections table: proto, local_addr, remote_addr, state, uid. IPv4 endpoints use `127.0.0.1:8080`; IPv6 endpoints use `[::1]:8080`. |
 | **When to use** | TCP connection analysis. Check for SYN_SENT, CLOSE_WAIT, TIME_WAIT accumulation. |
 
 ### net/udp
