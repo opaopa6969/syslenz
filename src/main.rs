@@ -59,6 +59,7 @@ mod mcp;
 mod metric_kind;
 mod net;
 mod otel;
+mod pin_log;
 mod pins;
 mod plugin;
 mod proc;
@@ -196,6 +197,21 @@ fn main() -> Result<()> {
             }
         }
         return Ok(());
+    }
+
+    // --log <path> [--interval <secs>] — append-only JSONL logging of pinned
+    // items (Feature 2 of docs/features/planned/pin-recall-and-selection-emit.md)
+    if let Some(pos) = args.iter().position(|a| a == "--log") {
+        let path = args
+            .get(pos + 1)
+            .expect("--log requires a file path argument");
+        let interval_secs: u64 = args
+            .iter()
+            .position(|a| a == "--interval")
+            .and_then(|p| args.get(p + 1))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5);
+        return run_pin_log(path, interval_secs);
     }
 
     // --query [source[.field]] [--json] — CLI query mode (no TUI)
@@ -1030,6 +1046,35 @@ mod tests {
     }
 }
 
+/// CLI --log mode: capture snapshots on a fixed cadence and append pinned
+/// items to a JSONL file until interrupted. Local snapshots only; logging a
+/// remote (--connect) host is left for a follow-up.
+fn run_pin_log(path: &str, interval_secs: u64) -> Result<()> {
+    let pinned = pins::PinFile::load();
+    if pinned.is_empty() {
+        eprintln!(
+            "No pins configured — pin a source/field in the TUI first (writes ~/.config/syslenz/pins.toml), then re-run --log."
+        );
+        return Ok(());
+    }
+
+    eprintln!(
+        "Logging {} pinned item(s) to {} every {}s (Ctrl-C to stop)",
+        pinned.len(),
+        path,
+        interval_secs
+    );
+    let out_path = Path::new(path);
+    loop {
+        let snapshot = proc::Snapshot::capture()?;
+        let written = pin_log::append_pin_values(out_path, &pinned, &snapshot)?;
+        if written == 0 {
+            eprintln!("warning: no pinned item matched the current snapshot");
+        }
+        std::thread::sleep(Duration::from_secs(interval_secs));
+    }
+}
+
 /// CLI --query mode: returns exit code (0 = success, 1 = not found).
 fn run_query(query: Option<&str>, json_mode: bool) -> i32 {
     let snapshot = match proc::Snapshot::capture() {
@@ -1131,6 +1176,10 @@ fn print_help() {
         (
             "--import <file.json>",
             "Import a snapshot or series into the TUI",
+        ),
+        (
+            "--log <file.jsonl> [--interval <secs>]",
+            "Append pinned items to a JSONL file (default 5s)",
         ),
         (
             "--serve [bind_addr]",
