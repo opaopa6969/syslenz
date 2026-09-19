@@ -225,7 +225,7 @@ fn main() -> Result<()> {
             .and_then(|pos| args.get(pos + 1))
             .filter(|s| !s.starts_with("--"))
             .map(|s| s.as_str())
-            .unwrap_or("0.0.0.0:9100");
+            .unwrap_or("127.0.0.1:9100");
         return serve::run_server(bind);
     }
 
@@ -237,7 +237,7 @@ fn main() -> Result<()> {
             .and_then(|pos| args.get(pos + 1))
             .filter(|s| !s.starts_with("--"))
             .map(|s| s.as_str())
-            .unwrap_or("0.0.0.0:9101");
+            .unwrap_or("127.0.0.1:9101");
         return prometheus::run_prometheus_server(bind);
     }
 
@@ -1132,11 +1132,11 @@ fn print_help() {
         ),
         (
             "--serve [bind_addr]",
-            "TCP server mode (default 0.0.0.0:9100)",
+            "TCP server mode (default 127.0.0.1:9100)",
         ),
         (
             "--prometheus [bind_addr]",
-            "Prometheus metrics HTTP server (default 0.0.0.0:9101)",
+            "Prometheus metrics HTTP server (default 127.0.0.1:9101)",
         ),
         (
             "--web [bind_addr]",

@@ -4,7 +4,7 @@
 //! with JSON snapshots. Designed for running inside Docker containers
 //! where SSH is not available.
 //!
-//! Usage: `syslenz --serve [bind_addr]` (default: `0.0.0.0:9100`)
+//! Usage: `syslenz --serve [bind_addr]` (default: `127.0.0.1:9100`)
 
 use crate::proc::Snapshot;
 use crate::prometheus;

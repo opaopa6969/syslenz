@@ -93,7 +93,7 @@ cargo install --path .
 cargo install --path . --features "otel,web"
 
 # Docker — TCP サーバーモード (認証なし。信頼できるネットワークのみで使用)
-docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve 0.0.0.0:9100
 syslenz --connect localhost:9100
 
 # Docker — Web UI
@@ -108,7 +108,7 @@ docker compose --profile grafana up -d
 # https://github.com/opaopa6969/syslenz/releases を参照
 ```
 
-> **セキュリティ注意**: `--serve` は認証なしの TCP サーバーを起動します。共有ホストやインターネット公開環境では `127.0.0.1:9100` にバインドするかファイアウォールで保護してください:
+> **セキュリティ注意**: `--serve` は認証なしの TCP サーバーを起動し、デフォルトでは `127.0.0.1:9100`（ループバックのみ）にバインドします。Docker やリモートの `--connect` 向けに外部公開する場合は、外部から接続できるバインドアドレスを明示し、ファイアウォールでアクセスを制限してください。
 > ```bash
 > syslenz --serve 127.0.0.1:9100   # ループバックのみ
 > ```
@@ -248,7 +248,7 @@ CLI フラグは設定ファイルの値を上書きします。完全なリフ�
 | `--lang ja` | 日本語 UI |
 | `--ssh user@host` | SSH 経由リモート監視（複数指定可） |
 | `--docker container` | Docker コンテナ監視 |
-| `--serve [addr]` | TCP サーバーモード（デフォルト: `0.0.0.0:9100`） |
+| `--serve [addr]` | TCP サーバーモード（デフォルト: `127.0.0.1:9100`） |
 | `--connect host:port` | TCP サーバーに接続 |
 | `--web [addr:port]` | Web UI（デフォルト: `0.0.0.0:3000`、ポートのみの指定は全インターフェースにバインド） |
 | `--export file.json` | スナップショットを JSON エクスポート |

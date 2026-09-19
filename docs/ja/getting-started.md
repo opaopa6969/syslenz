@@ -100,7 +100,7 @@ docker run --rm -it --pid=host --privileged opaopa6969/syslenz
 docker run --rm --pid=host --privileged opaopa6969/syslenz --export /dev/stdout > snapshot.json
 
 # TCP サーバーモード — ポート 9100 でリッスン（認証なし。信頼できるネットワークのみ）
-docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve 0.0.0.0:9100
 
 # Web UI
 docker compose up -d
@@ -215,7 +215,7 @@ syslenz には組み込みの多段階ヘルプシステムがあります:
 `--serve` は `SNAPSHOT` リクエストに JSON で応答する軽量 TCP サーバーを起動します:
 
 ```bash
-# 全インターフェースでサーバーを起動（デフォルトポート 9100）
+# ループバックのみでサーバーを起動（デフォルト: 127.0.0.1:9100）
 syslenz --serve
 
 # ループバックに限定 — 共有ホストで推奨
@@ -225,7 +225,7 @@ syslenz --serve 127.0.0.1:9100
 syslenz --connect localhost:9100
 ```
 
-> **セキュリティ**: `--serve` には認証がありません。共有やインターネット公開ホストでは `127.0.0.1` にバインドするかファイアウォールで制限してください。SDK（`syslenz4j`、`syslenz4py`、`syslenz4node`）はこのエンドポイントに接続します。
+> **セキュリティ**: `--serve` は認証なしで、デフォルトでは `127.0.0.1:9100`（ループバックのみ）にバインドし、SDK（`syslenz4j`、`syslenz4py`、`syslenz4node`）の接続先となります。外部公開する場合は、外部から接続できるバインドアドレスを明示し、ファイアウォールでアクセスを制限してください。
 
 ---
 
@@ -264,7 +264,7 @@ syslenz --web 3000
 | `--ssh` | `<user@host>` | SSH 経由リモートホスト監視（複数指定可） |
 | `--docker` | `<container>` | Docker コンテナ監視 |
 | `--connect` | `<host:port>` | syslenz TCP サーバーに接続 |
-| `--serve` | `[bind_addr]` | TCP サーバー起動（デフォルト: `0.0.0.0:9100`） |
+| `--serve` | `[bind_addr]` | TCP サーバー起動（デフォルト: `127.0.0.1:9100`） |
 | `--web` | `[addr:port]` | Web UI 起動（デフォルト: `0.0.0.0:3000`、`web` 必要） |
 | `--otel` | `[endpoint]` | OTLP エクスポート（デフォルト: `http://localhost:4317`、`otel` 必要） |
 | `--prometheus` | `[port]` | Prometheus `/metrics` エンドポイント（デフォルト: 9101、`otel` 必要） |

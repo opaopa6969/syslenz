@@ -100,7 +100,7 @@ docker run --rm -it --pid=host --privileged opaopa6969/syslenz
 docker run --rm --pid=host --privileged opaopa6969/syslenz --export /dev/stdout > snapshot.json
 
 # TCP server mode — listen on port 9100 (no auth; use on trusted networks only)
-docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve 0.0.0.0:9100
 
 # Web UI
 docker compose up -d
@@ -215,7 +215,7 @@ When help is active, a panel appears at the bottom of the screen with contextual
 `--serve` starts a lightweight TCP server that responds to `SNAPSHOT` requests with JSON:
 
 ```bash
-# Start server on all interfaces (default port 9100)
+# Start server on loopback only (default: 127.0.0.1:9100)
 syslenz --serve
 
 # Restrict to loopback — recommended for shared hosts
@@ -225,7 +225,7 @@ syslenz --serve 127.0.0.1:9100
 syslenz --connect localhost:9100
 ```
 
-> **Security**: `--serve` has no authentication. On shared or internet-facing hosts, bind to `127.0.0.1` or use a firewall rule to restrict access. SDKs (`syslenz4j`, `syslenz4py`, `syslenz4node`) connect to this endpoint.
+> **Security**: `--serve` has no authentication and binds to `127.0.0.1:9100` (loopback only) by default; SDKs (`syslenz4j`, `syslenz4py`, `syslenz4node`) connect to this endpoint. To expose it beyond localhost, specify an external bind address explicitly and restrict access with a firewall.
 
 ---
 
@@ -264,7 +264,7 @@ Open `http://localhost:3000/settings` to edit alert rules in the browser. Change
 | `--ssh` | `<user@host>` | Monitor a remote host via SSH (repeatable) |
 | `--docker` | `<container>` | Monitor a Docker container via exec |
 | `--connect` | `<host:port>` | Connect to a syslenz TCP server |
-| `--serve` | `[bind_addr]` | Start TCP server (default: `0.0.0.0:9100`) |
+| `--serve` | `[bind_addr]` | Start TCP server (default: `127.0.0.1:9100`) |
 | `--web` | `[addr:port]` | Start Web UI (default: `0.0.0.0:3000`, requires `web`) |
 | `--otel` | `[endpoint]` | OTLP export (default: `http://localhost:4317`, requires `otel`) |
 | `--prometheus` | `[port]` | Prometheus `/metrics` endpoint (default: 9101, requires `otel`) |

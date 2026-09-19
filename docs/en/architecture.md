@@ -243,7 +243,7 @@ The HTTP server has no authentication in the current release. It is safe to use 
 
 ## TCP Server Layer
 
-`--serve [bind_addr]` (default `0.0.0.0:9100`) starts a lightweight TCP server in `src/serve.rs`.
+`--serve [bind_addr]` (default `127.0.0.1:9100`) starts a lightweight TCP server in `src/serve.rs`.
 
 Protocol: one command per connection, plain text.
 
@@ -254,7 +254,7 @@ Protocol: one command per connection, plain text.
 
 SDKs (`syslenz4j`, `syslenz4py`, `syslenz4node`) connect to this endpoint.
 
-**Security**: no authentication. Bind to `127.0.0.1:9100` on shared or internet-facing hosts.
+**Security**: no authentication; binds to `127.0.0.1:9100` (loopback only) by default. To expose it beyond localhost, specify an external bind address explicitly and restrict access with a firewall.
 
 ---
 
