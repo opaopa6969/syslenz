@@ -20,7 +20,7 @@ services:
       - "3000:3000"
     pid: "host"
     read_only: true
-    command: ["--web", "3000"]
+    command: ["--web", "0.0.0.0:3000"]
 
   # TCP server mode for TUI --connect
   syslenz-serve:

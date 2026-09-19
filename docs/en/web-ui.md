@@ -62,7 +62,7 @@ syslenz --web 127.0.0.1:8080
 syslenz --web 8080 --lang ja
 ```
 
-By default, the server binds to `0.0.0.0`. A port-only argument preserves that behavior; use `addr:port` to restrict the listening interface. The server prints its listening address:
+By default, the server binds to `127.0.0.1`. A port-only argument also uses loopback; pass an explicit address such as `0.0.0.0:8080` only when network access is intended. The server prints its listening address:
 
 ```
 syslenz web UI listening on http://127.0.0.1:8080

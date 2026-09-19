@@ -11,6 +11,7 @@ Versions are published to [crates.io](https://crates.io/crates/syslenz) and [Doc
 
 ### Security
 - **`--serve` / `--prometheus` now default to `127.0.0.1`** — both are unauthenticated servers; binding all interfaces (`0.0.0.0`) by default risked unintended exposure on shared or internet-facing hosts. Explicit `--serve 0.0.0.0:9100` / `--prometheus 0.0.0.0:9101` still works for Docker or remote `--connect` use.
+- **Web UI now defaults to `127.0.0.1`** — both standalone `--web` and the server started alongside the TUI stay on loopback unless an address is explicitly supplied. Docker continues to bind `0.0.0.0:3000` in its container command so published ports keep working.
 
 ### Fixed
 - **`--serve` no longer serializes clients** — the TCP snapshot server (`--serve`) handled one connection at a time in its accept loop, so a client that connected without sending a command (or an unusually slow `--connect` peer) stalled every other client's `SNAPSHOT`/`METRICS` request until it disconnected. Each connection now runs on its own thread; `Snapshot::capture()` is already stateless per request, so no synchronization was needed.

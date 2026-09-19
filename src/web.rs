@@ -162,7 +162,7 @@ pub fn run_web_server(bind: &str, locale: Locale) -> anyhow::Result<()> {
 #[cfg(feature = "web")]
 fn normalize_web_bind(bind: &str) -> String {
     match bind.parse::<u16>() {
-        Ok(port) => format!("0.0.0.0:{}", port),
+        Ok(port) => format!("127.0.0.1:{}", port),
         Err(_) => bind.to_owned(),
     }
 }
@@ -3027,13 +3027,14 @@ mod tests {
     use std::time::SystemTime;
 
     #[test]
-    fn web_bind_port_preserves_legacy_all_interfaces_default() {
-        assert_eq!(normalize_web_bind("3000"), "0.0.0.0:3000");
+    fn web_bind_port_defaults_to_loopback() {
+        assert_eq!(normalize_web_bind("3000"), "127.0.0.1:3000");
     }
 
     #[test]
     fn web_bind_explicit_address_is_preserved() {
         assert_eq!(normalize_web_bind("127.0.0.1:3000"), "127.0.0.1:3000");
+        assert_eq!(normalize_web_bind("0.0.0.0:3000"), "0.0.0.0:3000");
         assert_eq!(normalize_web_bind("[::1]:3000"), "[::1]:3000");
     }
 
