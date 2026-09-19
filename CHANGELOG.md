@@ -9,6 +9,9 @@ Versions are published to [crates.io](https://crates.io/crates/syslenz) and [Doc
 
 ## [Unreleased]
 
+### Security
+- **`--serve` / `--prometheus` now default to `127.0.0.1`** — both are unauthenticated servers; binding all interfaces (`0.0.0.0`) by default risked unintended exposure on shared or internet-facing hosts. Explicit `--serve 0.0.0.0:9100` / `--prometheus 0.0.0.0:9101` still works for Docker or remote `--connect` use.
+
 ### Fixed
 - **TUI corruption from untrusted strings** — process names/cmdlines from /proc, plugin output, and remote snapshots can carry ANSI escape sequences or control bytes that ratatui writes to the terminal verbatim, garbling the display. All snapshots are now sanitized at the ingestion boundaries (local capture, ssh/docker/tcp parse): ANSI sequences are stripped, remaining control characters become spaces.
 

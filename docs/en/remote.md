@@ -108,7 +108,7 @@ For environments where SSH is not available (e.g., minimal containers, Kubernete
 syslenz --serve [bind_addr]
 ```
 
-Default bind address: `0.0.0.0:9100`
+Default bind address: `127.0.0.1:9100`
 
 The server listens for TCP connections. When a client sends `SNAPSHOT\n`, the server captures a snapshot, serializes it as JSON, and sends it back. One request per connection (simple protocol).
 

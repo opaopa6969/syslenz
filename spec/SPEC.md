@@ -568,7 +568,7 @@ vmstat, pressure, file-nr, version
 
 ### 5.9 Prometheus エクスポート
 
-`--prometheus [addr]` (デフォルト `0.0.0.0:9101`) で `/metrics` エンドポイントを提供。
+`--prometheus [addr]` (デフォルト `127.0.0.1:9101`) で `/metrics` エンドポイントを提供。
 
 メトリクス命名規則:
 
@@ -637,7 +637,7 @@ Web UI (`--web` モード、axum) が提供するエンドポイント:
 
 ### 6.2 TCP プロトコル
 
-`--serve [addr]` (デフォルト `0.0.0.0:9100`) で起動するシンプルな TCP サーバー。
+`--serve [addr]` (デフォルト `127.0.0.1:9100`) で起動するシンプルな TCP サーバー。
 
 ```
 クライアント → サーバー: "SNAPSHOT\n"
@@ -667,7 +667,7 @@ Web UI (`--web` モード、axum) が提供するエンドポイント:
 | `--lang` | `en\|ja` | 言語指定 |
 | `--ssh` | `user@host` | SSH リモート監視 (複数可) |
 | `--docker` | `container` | Docker コンテナ監視 (複数可) |
-| `--serve` | `[addr]` | TCP サーバー (デフォルト: `0.0.0.0:9100`) |
+| `--serve` | `[addr]` | TCP サーバー (デフォルト: `127.0.0.1:9100`) |
 | `--connect` | `host:port` | TCP サーバーに接続 (複数可) |
 | `--web` | `[port]` | Web UI (デフォルト: 3000) |
 | `--export` | `file.json` | スナップショット JSON エクスポート |
@@ -676,7 +676,7 @@ Web UI (`--web` モード、axum) が提供するエンドポイント:
 | `--import` | `file.json` | スナップショット再生 |
 | `--query` | `[source[.field]]` | CLI クエリ (TUI なし) |
 | `--json` | なし | --query の出力を JSON 形式に |
-| `--prometheus` | `[addr]` | Prometheus エンドポイント (デフォルト: `0.0.0.0:9101`) |
+| `--prometheus` | `[addr]` | Prometheus エンドポイント (デフォルト: `127.0.0.1:9101`) |
 | `--otel` | `[endpoint]` | OTel OTLP エクスポート |
 | `--otel-level` | `core\|full` | OTel エクスポートレベル |
 | `--interval` | `secs` | --otel / --export-series の間隔 |
@@ -976,10 +976,10 @@ DGE v2.3.2 変更点 (v2.3.1 からの差分):
 
 #### 現状の制約
 
-**`--serve` バインドは現状 `0.0.0.0` で無認証。**
+**`--serve` / `--prometheus` は無認証で、デフォルトでは `127.0.0.1`（ループバックのみ）にバインドする。外部公開する場合はバインドアドレスを明示し、ファイアウォールでアクセスを制限する。**
 
-- `--serve` (TCP, デフォルト: `0.0.0.0:9100`) — 認証なし
-- `--prometheus` (HTTP, デフォルト: `0.0.0.0:9101`) — 認証なし
+- `--serve` (TCP, デフォルト: `127.0.0.1:9100`) — 認証なし
+- `--prometheus` (HTTP, デフォルト: `127.0.0.1:9101`) — 認証なし
 - `--web` (HTTP, デフォルト: `0.0.0.0:3000`) — 認証なし
 - Settings GUI (`/settings`) — 認証なし
 
@@ -1144,7 +1144,7 @@ docker pull opaopa6969/syslenz
 docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz --web 3000
 
 # TCP サーバーモードで起動
-docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve 0.0.0.0:9100
 
 # Prometheus エンドポイントで起動
 docker run --rm -p 9101:9101 --pid=host opaopa6969/syslenz --prometheus 0.0.0.0:9101
@@ -1935,7 +1935,7 @@ syslenz は以下の脅威を認識している:
 
 ### H.3 TCP プロトコルの認証
 
-`--serve` は平文・無認証の TCP プロトコルを使用する。
+`--serve` は平文・無認証の TCP プロトコルを使用し、デフォルトでは `127.0.0.1:9100`（ループバックのみ）にバインドする。外部公開する場合はバインドアドレスを明示し、ファイアウォールでアクセスを制限する。
 
 **推奨設定**:
 
@@ -1981,7 +1981,7 @@ syslenz --export /tmp/snap.json && jq '.entries.meminfo.fields[] | select(.name=
 
 ```bash
 # コンテナ内で --serve を起動
-docker run --rm --pid=host -p 9100:9100 opaopa6969/syslenz --serve
+docker run --rm --pid=host -p 9100:9100 opaopa6969/syslenz --serve 0.0.0.0:9100
 
 # ホストから接続
 syslenz --connect localhost:9100

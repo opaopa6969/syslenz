@@ -114,7 +114,7 @@ docker run --rm -p 3000:3000 --pid=host opaopa6969/syslenz
 # Open http://localhost:3000
 
 # Docker — TCP server mode (no auth; use only on trusted networks)
-docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve
+docker run --rm -p 9100:9100 --pid=host opaopa6969/syslenz --serve 0.0.0.0:9100
 syslenz --connect localhost:9100
 
 # Docker Compose — Web UI
@@ -129,7 +129,7 @@ docker compose --profile grafana up -d
 # See https://github.com/opaopa6969/syslenz/releases
 ```
 
-> **Security note**: `--serve` starts an unauthenticated TCP server. Bind to `127.0.0.1:9100` or use firewall rules when running on a shared or internet-facing host:
+> **Security note**: `--serve` starts an unauthenticated TCP server and binds to `127.0.0.1:9100` (loopback only) by default. To expose it beyond localhost (e.g. for Docker or remote `--connect`), specify an external bind address explicitly and restrict access with a firewall.
 > ```bash
 > syslenz --serve 127.0.0.1:9100   # loopback only
 > ```
@@ -284,7 +284,7 @@ CLI flags override config values. See [`docs/en/config.md`](docs/en/config.md) f
 | `--lang ja` | Japanese UI |
 | `--ssh user@host` | Remote monitoring via SSH (repeatable) |
 | `--docker container` | Docker container monitoring |
-| `--serve [addr]` | TCP server mode (default: `0.0.0.0:9100`) |
+| `--serve [addr]` | TCP server mode (default: `127.0.0.1:9100`) |
 | `--connect host:port` | Connect to a TCP server |
 | `--web [addr:port]` | Web UI (default: `0.0.0.0:3000`; a port alone keeps the all-interface bind) |
 | `--export file.json` | Export snapshot as JSON |
