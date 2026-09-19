@@ -223,12 +223,11 @@ pub fn run_widget() -> anyhow::Result<()> {
                 x11rb::protocol::Event::Expose(_) => {
                     // Will redraw below
                 }
-                x11rb::protocol::Event::KeyPress(ev) => {
-                    // 'q' key (keycode 24 on most layouts)
-                    if ev.detail == 24 {
-                        return Ok(());
-                    }
+                // 'q' key (keycode 24 on most layouts)
+                x11rb::protocol::Event::KeyPress(ev) if ev.detail == 24 => {
+                    return Ok(());
                 }
+                x11rb::protocol::Event::KeyPress(_) => {}
                 _ => {}
             }
         }
