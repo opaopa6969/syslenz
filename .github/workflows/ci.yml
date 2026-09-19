@@ -11,15 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # x11widget needs no system X11 dev packages: x11rb is a pure-Rust
-        # XCB protocol client (verified: `cargo build --features x11widget`
-        # on ubuntu-latest shows no libxcb runtime link, per `ldd`).
         features: ["", "web", "otel", "x11widget"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # x11rb links against -lxcb at build time even though it has no other
+      # native deps; ubuntu-latest runners don't ship libxcb1-dev by default.
+      - name: Install libxcb (x11widget only)
+        if: matrix.features == 'x11widget'
+        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev
       - name: Format check
         run: cargo fmt --check
       - name: Clippy
