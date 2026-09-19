@@ -437,6 +437,7 @@ fn build_minimal_app(
         help_visible_height: 0,
         diff_target_index: None,
         alert_rules: Vec::new(),
+        selection_action: None,
         active_alerts: Vec::new(),
         diagnostic_runbooks: Vec::new(),
         hosts: vec![host0],

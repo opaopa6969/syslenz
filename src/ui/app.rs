@@ -158,6 +158,8 @@ pub struct App {
     pub diff_target_index: Option<usize>,
     /// Alert rules loaded from config
     pub alert_rules: Vec<AlertRule>,
+    /// Selection action command template loaded from `[selection] action` config (Feature 3)
+    pub selection_action: Option<String>,
     /// Currently active (firing) alerts
     pub active_alerts: Vec<AlertEvent>,
     /// Diagnostic runbook URL mappings from config
@@ -255,6 +257,7 @@ impl App {
             help_visible_height: 0,
             diff_target_index: None,
             alert_rules: Vec::new(),
+            selection_action: None,
             active_alerts: Vec::new(),
             diagnostic_runbooks: Vec::new(),
             hosts: vec![host0],
@@ -330,6 +333,7 @@ impl App {
             help_visible_height: 0,
             diff_target_index: None,
             alert_rules: Vec::new(),
+            selection_action: None,
             active_alerts: Vec::new(),
             diagnostic_runbooks: Vec::new(),
             hosts: vec![host0],
@@ -408,6 +412,7 @@ impl App {
             help_visible_height: 0,
             diff_target_index: None,
             alert_rules: Vec::new(),
+            selection_action: None,
             active_alerts: Vec::new(),
             diagnostic_runbooks: Vec::new(),
             hosts: vec![host0],
@@ -765,6 +770,41 @@ impl App {
 
     pub fn save_pins(&self) {
         self.pins.save();
+    }
+
+    /// Run the configured `[selection] action` command for the focused item
+    /// (docs/features/planned/pin-recall-and-selection-emit.md, Feature 3).
+    pub fn run_selection_action(&mut self) {
+        let action_template = match self.selection_action.clone() {
+            Some(a) => a,
+            None => {
+                self.status_message = Some(if self.locale == crate::i18n::Locale::Ja {
+                    "selection.action が設定されていません".to_string()
+                } else {
+                    "No selection action configured".to_string()
+                });
+                return;
+            }
+        };
+        let source = self.current_source_name().to_string();
+        let host = self.current_host_key();
+        let (field, value, unit) = self
+            .current_entry_fields()
+            .and_then(|fields| fields.get(self.selected_field))
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    f.value.display(),
+                    f.unit.clone().unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
+        alert::execute_selection_action(&action_template, &host, &source, &field, &value, &unit);
+        self.status_message = Some(if self.locale == crate::i18n::Locale::Ja {
+            format!("アクション実行: {}", source)
+        } else {
+            format!("Action run: {}", source)
+        });
     }
 
     pub fn current_host_key(&self) -> String {
@@ -2345,5 +2385,24 @@ mod tests {
         let loaded = PinFile::load();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].source, "loadavg");
+    }
+
+    // Feature 3 (pin-recall-and-selection-emit.md): selection action
+    #[test]
+    fn run_selection_action_without_config_sets_hint() {
+        let mut app = App::new().unwrap();
+        app.selection_action = None;
+        app.run_selection_action();
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn run_selection_action_with_config_reports_source() {
+        let mut app = App::new().unwrap();
+        app.selection_action = Some("true".to_string());
+        let source = app.current_source_name().to_string();
+        app.run_selection_action();
+        let msg = app.status_message.unwrap();
+        assert!(msg.contains(&source));
     }
 }

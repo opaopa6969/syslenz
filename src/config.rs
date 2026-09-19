@@ -21,6 +21,17 @@ pub struct Config {
     pub alert: Vec<AlertRule>,
     #[serde(default)]
     pub diagnostic_runbook: Vec<RunbookConfig>,
+    #[serde(default)]
+    pub selection: SelectionConfig,
+}
+
+/// Selection action (docs/features/planned/pin-recall-and-selection-emit.md, Feature 3):
+/// hand the focused item to an external command via `{host} {source} {field} {value} {unit}`
+/// placeholders. Reuses the same detached-spawn executor as alert `action`.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct SelectionConfig {
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -337,6 +348,25 @@ url = "https://wiki.example.com/memory"
         assert_eq!(cfg.diagnostic_runbook.len(), 1);
         assert_eq!(cfg.diagnostic_runbook[0].pattern, "MemAvailable");
         assert!(cfg.diagnostic_runbook[0].url.contains("memory"));
+    }
+
+    #[test]
+    fn parse_selection_action() {
+        let toml = r#"
+[selection]
+action = "notify-send '{source} {field} {value}{unit}'"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            cfg.selection.action.as_deref(),
+            Some("notify-send '{source} {field} {value}{unit}'")
+        );
+    }
+
+    #[test]
+    fn selection_action_defaults_to_none() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(cfg.selection.action.is_none());
     }
 
     #[test]
