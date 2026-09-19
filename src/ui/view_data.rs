@@ -1035,6 +1035,9 @@ impl App {
                 ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
                 ("e".into(), i18n::t(l, T::EXPORT).to_string()),
                 ("c".into(), "コピー".into()),
+                ("p".into(), "ピン切替".into()),
+                ("P".into(), "ピン限定表示".into()),
+                ("!".into(), "選択アクション実行".into()),
             ]
         } else {
             vec![
@@ -1047,6 +1050,9 @@ impl App {
                 ("L".into(), i18n::t(l, T::WELCOME_LANG).to_string()),
                 ("e".into(), i18n::t(l, T::EXPORT).to_string()),
                 ("c".into(), "Copy".into()),
+                ("p".into(), "Toggle pin".into()),
+                ("P".into(), "Show pinned only".into()),
+                ("!".into(), "Run selection action".into()),
             ]
         };
 
@@ -1476,6 +1482,27 @@ mod view_data_tests {
             !data.advanced_keybindings.is_empty(),
             "advanced keybindings should be non-empty"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn welcome_advanced_keybindings_include_pin_workflow_in_both_locales() {
+        for locale in [Locale::En, Locale::Ja] {
+            let mut app = App::new().unwrap();
+            app.locale = locale;
+            let data = app.test_build_welcome_data();
+            let keys: Vec<&str> = data
+                .advanced_keybindings
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect();
+            for expected in ["p", "P", "!"] {
+                assert!(
+                    keys.contains(&expected),
+                    "{expected} should be discoverable in {locale:?} Welcome help"
+                );
+            }
+        }
     }
 
     // P-A2: help_level Off → only basic keybindings should be shown

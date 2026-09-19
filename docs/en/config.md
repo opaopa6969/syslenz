@@ -19,6 +19,7 @@ lang: en
   - [otel](#otel)
   - [web](#web)
   - [ssh](#ssh)
+  - [selection](#selection)
   - [alert](#alert-v110)
 - [Complete Example](#complete-example)
 - [Minimal Example](#minimal-example)
@@ -166,6 +167,22 @@ hosts = [
 **Notes:**
 - This field is reserved for future multi-host monitoring support. Currently, use `--ssh` CLI flag for single-host monitoring.
 
+### `[selection]`
+
+Configure the single external command run by `!` for the focused source or
+field. The action supports `{host}`, `{source}`, `{field}`, `{value}`, and
+`{unit}` placeholders:
+
+```toml
+[selection]
+action = "printf '%s\\t%s\\t%s\\n' '{source}' '{field}' '{value}' >> /tmp/syslenz-selection.tsv"
+```
+
+The command is spawned detached through the system shell. Treat values from
+remote or plugin sources as untrusted input and avoid interpolating them into
+privileged commands. If focus is on a whole source, `{field}`, `{value}`, and
+`{unit}` are empty. Only one action is currently supported.
+
 ### `[[alert]]` (v1.1.0)
 
 As of v1.1.0, you can define custom alert rules using TOML array-of-tables syntax. Each `[[alert]]` entry specifies a data source, a field name, a comparison operator, and a threshold value. When the condition is met, syslenz highlights the alert in multiple places:
@@ -263,6 +280,9 @@ hosts = [
     "admin@prod-web-02",
     "root@prod-db-01",
 ]
+
+[selection]
+action = "printf '%s\\t%s\\n' '{source}' '{field}' >> /tmp/syslenz-selection.tsv"
 ```
 
 ## Minimal Example

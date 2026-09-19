@@ -19,6 +19,7 @@ lang: ja
   - [otel](#otel)
   - [web](#web)
   - [ssh](#ssh)
+  - [selection](#selection)
 - [完全な例](#完全な例)
 - [最小限の例](#最小限の例)
 
@@ -160,6 +161,22 @@ hosts = [
 **注意:**
 - このフィールドは将来のマルチホスト監視サポート用に予約されています。現在は `--ssh` CLIフラグで単一ホストを監視してください。
 
+### `[selection]`
+
+フォーカス中のソースまたはフィールドで `!` を押したときに実行する単一の外部
+コマンドを設定します。`{host}`、`{source}`、`{field}`、`{value}`、`{unit}` の
+placeholderを使用できます:
+
+```toml
+[selection]
+action = "printf '%s\\t%s\\t%s\\n' '{source}' '{field}' '{value}' >> /tmp/syslenz-selection.tsv"
+```
+
+コマンドはシステムshell経由でdetached実行されます。リモートやプラグイン由来の値は
+信頼できない入力として扱い、権限の強いコマンドへ展開しないでください。ソース全体に
+フォーカスしている場合、`{field}`、`{value}`、`{unit}` は空です。現在設定できる
+アクションは1つだけです。
+
 ## 完全な例
 
 ```toml
@@ -207,6 +224,9 @@ hosts = [
     "admin@prod-web-02",
     "root@prod-db-01",
 ]
+
+[selection]
+action = "printf '%s\\t%s\\n' '{source}' '{field}' >> /tmp/syslenz-selection.tsv"
 ```
 
 ## 最小限の例

@@ -23,6 +23,7 @@ lang: en
 - [Diff View](#diff-view)
   - [Time-Travel Diff (v1.1.0)](#time-travel-diff-v110)
 - [Graph View](#graph-view)
+- [Pins, Logging, and Selection Actions](#pins-logging-and-selection-actions)
 - [Export and Copy](#export-and-copy)
 
 ## Overview
@@ -159,6 +160,28 @@ The graph updates in real time when auto-refresh is enabled. It works with any n
 - CPU utilization: select `cpu_user` in `stat` and graph it
 - Network throughput: select `rx_bytes` on an interface in `net/dev`
 - Load tracking: select `load1` in `loadavg`
+
+## Pins, Logging, and Selection Actions
+
+Press `p` to pin the focused source or field. Pins are marked with `*`, persist
+in `$XDG_CONFIG_HOME/syslenz/pins.toml` (or `~/.config/syslenz/pins.toml`), and
+are restored on the next launch. Press `P` to show only pinned sources; press it
+again to restore the full source list.
+
+Pinned local values can be emitted as append-only JSON Lines without starting
+the TUI:
+
+```bash
+syslenz --log pins.jsonl --interval 5
+```
+
+The logger runs until interrupted, does not rotate or truncate the file, and
+currently skips pins belonging to SSH, Docker, or TCP hosts. Use a tool such as
+`logrotate` when retention is required.
+
+Press `!` to hand the focused item to the single command configured in
+`[selection] action`. The command runs detached so the TUI remains responsive.
+See [Configuration](config.md#selection) for placeholders and an example.
 
 ## Export and Copy
 
