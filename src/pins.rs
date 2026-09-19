@@ -264,10 +264,7 @@ source = "loadavg"
     #[test]
     fn pinfile_save_and_load_roundtrip() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let xdg_path = tmp.path().to_str().unwrap().to_string();
-        unsafe {
-            std::env::set_var("XDG_CONFIG_HOME", &xdg_path);
-        }
+        let _xdg = crate::test_support::EnvVarGuard::set("XDG_CONFIG_HOME", tmp.path());
         let pins = vec![
             Pin {
                 source: "meminfo".to_string(),
@@ -282,9 +279,6 @@ source = "loadavg"
         ];
         PinFile::save(&pins);
         let loaded = PinFile::load();
-        unsafe {
-            std::env::remove_var("XDG_CONFIG_HOME");
-        }
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].source, "meminfo");
         assert_eq!(loaded[0].field, Some("MemAvailable".to_string()));
