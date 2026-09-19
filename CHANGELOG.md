@@ -13,6 +13,7 @@ Versions are published to [crates.io](https://crates.io/crates/syslenz) and [Doc
 - **`--serve` / `--prometheus` now default to `127.0.0.1`** — both are unauthenticated servers; binding all interfaces (`0.0.0.0`) by default risked unintended exposure on shared or internet-facing hosts. Explicit `--serve 0.0.0.0:9100` / `--prometheus 0.0.0.0:9101` still works for Docker or remote `--connect` use.
 
 ### Fixed
+- **`--serve` no longer serializes clients** — the TCP snapshot server (`--serve`) handled one connection at a time in its accept loop, so a client that connected without sending a command (or an unusually slow `--connect` peer) stalled every other client's `SNAPSHOT`/`METRICS` request until it disconnected. Each connection now runs on its own thread; `Snapshot::capture()` is already stateless per request, so no synchronization was needed.
 - **TUI corruption from untrusted strings** — process names/cmdlines from /proc, plugin output, and remote snapshots can carry ANSI escape sequences or control bytes that ratatui writes to the terminal verbatim, garbling the display. All snapshots are now sanitized at the ingestion boundaries (local capture, ssh/docker/tcp parse): ANSI sequences are stripped, remaining control characters become spaces.
 
 ### Added
