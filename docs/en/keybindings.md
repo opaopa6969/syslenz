@@ -42,6 +42,9 @@ These keys work in all views.
 | `r` | Manual refresh (capture new snapshot) |
 | `e` | Export current snapshot to JSON file |
 | `c` | Copy selected value to clipboard |
+| `p` | Toggle a pin on the focused source or field |
+| `P` | Toggle the pinned-only source filter |
+| `!` | Run the configured selection action for the focused item |
 
 ## Dashboard Keys
 
