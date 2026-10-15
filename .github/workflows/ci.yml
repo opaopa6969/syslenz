@@ -8,7 +8,7 @@ on:
 jobs:
   # Linux: full test suite
   linux:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, syslenz-ci]
     strategy:
       matrix:
         features: ["", "web", "otel", "web,otel", "x11widget"]
@@ -21,7 +21,7 @@ jobs:
       # native deps; ubuntu-latest runners don't ship libxcb1-dev by default.
       - name: Install libxcb (x11widget only)
         if: matrix.features == 'x11widget'
-        run: sudo apt-get update && sudo apt-get install -y libxcb1-dev
+        run: dpkg -s libxcb1-dev >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y libxcb1-dev)
       - name: Format check
         run: cargo fmt --check
       - name: Clippy
@@ -42,7 +42,7 @@ jobs:
   # License/advisory/ban/source audit via cargo-deny.
   # deny.toml is present; action pinned to v2 to avoid the v1 manifest parse error.
   deny:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, syslenz-ci]
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -75,7 +75,7 @@ jobs:
 
   # Java SDK
   java-sdk:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, syslenz-ci]
     strategy:
       matrix:
         java: ['17', '21']
